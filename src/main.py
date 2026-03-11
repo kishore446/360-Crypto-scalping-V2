@@ -14,11 +14,15 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import re
 import signal
+import subprocess
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import numpy as np
+import psutil
 
 from config import (
     ALL_CHANNELS,
@@ -30,7 +34,7 @@ from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCALP_CHANNEL_ID,
 )
-from src.ai_engine import detect_whale_trade, detect_volume_delta_spike, get_ai_insight
+from src.ai_engine import get_ai_insight
 from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel
@@ -47,11 +51,14 @@ from src.confidence import (
     score_spread,
     score_trend,
 )
+from src.detector import SMCDetector
 from src.historical_data import HistoricalDataStore
 from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi, sma
+from src.logger import get_recent_logs
 from src.pair_manager import PairManager
+from src.predictive_ai import PredictiveEngine
+from src.regime import MarketRegimeDetector
 from src.signal_router import SignalRouter
-from src.smc import detect_fvg, detect_liquidity_sweeps, detect_mss
 from src.telegram_bot import TelegramBot
 from src.telemetry import TelemetryCollector
 from src.trade_monitor import TradeMonitor
@@ -59,6 +66,13 @@ from src.utils import get_logger
 from src.websocket_manager import WebSocketManager
 
 log = get_logger("main")
+
+# Maximum characters to include in a Telegram /view_logs response
+# (stays safely below Telegram's ~4096-char message limit)
+_TELEGRAM_LOG_MAX_CHARS: int = 3_500
+
+# Repo root for subprocess git commands
+_REPO_ROOT: Path = Path(__file__).parent.parent
 
 
 class CryptoSignalEngine:
@@ -87,6 +101,13 @@ class CryptoSignalEngine:
         # Channel strategies
         self._channels = [ScalpChannel(), SwingChannel(), RangeChannel(), TapeChannel()]
 
+        # SMC detector and market regime classifier
+        self._smc_detector = SMCDetector()
+        self._regime_detector = MarketRegimeDetector()
+
+        # Predictive AI engine
+        self.predictive = PredictiveEngine()
+
         # WebSocket managers
         self._ws_spot: Optional[WebSocketManager] = None
         self._ws_futures: Optional[WebSocketManager] = None
@@ -98,6 +119,7 @@ class CryptoSignalEngine:
         self._force_scan: bool = False
         self._signal_history: List[Signal] = []  # capped at 500 entries
         self._boot_time: float = 0.0
+        self._free_channel_limit: int = 2  # max free signals published per day
 
     def _remove_and_archive(self, signal_id: str) -> None:
         """Remove a signal from active tracking and archive it in history."""
@@ -155,14 +177,17 @@ class CryptoSignalEngine:
         # 2. Seed historical data
         await self.data_store.seed_all(self.pair_mgr)
 
-        # 3. Start WebSockets
+        # 3. Load predictive model
+        await self.predictive.load_model()
+
+        # 4. Start WebSockets
         await self._start_websockets()
 
-        # 3.5 Pre-flight checks
+        # 4.5 Pre-flight checks
         if not await self._preflight_check():
             log.warning("Pre-flight checks had warnings — engine will start but may be degraded")
 
-        # 4. Launch async tasks
+        # 5. Launch async tasks
         self._tasks = [
             asyncio.create_task(self.router.start()),
             asyncio.create_task(self.monitor.start()),
@@ -325,37 +350,16 @@ class CryptoSignalEngine:
                 ind["momentum_last"] = float(mom[-1]) if not np.isnan(mom[-1]) else None
             indicators[tf_key] = ind
 
-        # SMC detection on 5m (scalp) and 4h (swing)
-        smc_data: dict = {"sweeps": [], "mss": None, "fvg": []}
-        for tf_key in ("5m", "4h", "15m", "1m"):
-            cd = candles.get(tf_key)
-            if cd is None or len(cd["close"]) < 51:
-                continue
-            sweeps = detect_liquidity_sweeps(cd["high"], cd["low"], cd["close"])
-            if sweeps:
-                smc_data["sweeps"] = sweeps
-                # Check MSS on lower TF
-                ltf = {"4h": "1h", "1h": "15m", "15m": "5m", "5m": "1m"}.get(tf_key, "1m")
-                ltf_cd = candles.get(ltf)
-                if ltf_cd and len(ltf_cd["close"]) > 1:
-                    mss_sig = detect_mss(sweeps[0], ltf_cd["close"])
-                    smc_data["mss"] = mss_sig
-                fvg_zones = detect_fvg(cd["high"], cd["low"], cd["close"])
-                smc_data["fvg"] = fvg_zones
-                break  # use first TF with a sweep
-
-        # Whale / tape data
+        # SMC detection via dedicated detector
         ticks = self.data_store.ticks.get(symbol, [])
-        whale_alert = None
-        if ticks:
-            latest_tick = ticks[-1]
-            whale_alert = detect_whale_trade(latest_tick["price"], latest_tick["qty"])
-            smc_data["whale_alert"] = whale_alert
-            smc_data["recent_ticks"] = ticks[-100:]
-            buy_v = sum(t["qty"] * t["price"] for t in ticks[-100:] if not t.get("isBuyerMaker"))
-            sell_v = sum(t["qty"] * t["price"] for t in ticks[-100:] if t.get("isBuyerMaker"))
-            avg_delta = (buy_v + sell_v) / 2.0 if (buy_v + sell_v) > 0 else 0
-            smc_data["volume_delta_spike"] = detect_volume_delta_spike(buy_v - sell_v, avg_delta)
+        smc_result = self._smc_detector.detect(symbol, candles, ticks)
+        smc_data = smc_result.as_dict()
+
+        # Market regime classification (primary timeframe: 5m with 1m fallback)
+        regime_ind = indicators.get("5m", indicators.get("1m", {}))
+        regime_candles = candles.get("5m", candles.get("1m"))
+        regime_result = self._regime_detector.classify(regime_ind, regime_candles)
+        log.debug("%s regime: %s", symbol, regime_result.regime.value)
 
         # AI insight (lightweight, no blocking)
         ai = {"label": "Neutral", "summary": "", "score": 0.0}
@@ -369,6 +373,8 @@ class CryptoSignalEngine:
 
         # Evaluate each channel
         for chan in self._channels:
+            if chan.config.name in self._paused_channels:
+                continue
             try:
                 sig = chan.evaluate(
                     symbol=symbol,
@@ -385,6 +391,15 @@ class CryptoSignalEngine:
 
             if sig is None:
                 continue
+
+            # Predictive AI: adjust TP/SL and confidence
+            try:
+                ind_for_predict = indicators.get("5m", indicators.get("1m", {}))
+                prediction = await self.predictive.predict(symbol, candles, ind_for_predict)
+                self.predictive.adjust_tp_sl(sig, prediction)
+                self.predictive.update_confidence(sig, prediction)
+            except Exception as exc:
+                log.debug("Predictive AI error for %s: %s", symbol, exc)
 
             # Confidence scoring
             has_sweep = bool(smc_data["sweeps"])
@@ -426,6 +441,16 @@ class CryptoSignalEngine:
 
             sig.confidence = result.total
 
+            # Apply channel confidence override if set
+            min_conf = self._confidence_overrides.get(
+                chan.config.name, chan.config.min_confidence
+            )
+            if sig.confidence < min_conf:
+                continue
+
+            # Attach regime info
+            sig.market_phase = regime_result.regime.value
+
             try:
                 self._signal_queue.put_nowait(sig)
             except asyncio.QueueFull:
@@ -458,7 +483,15 @@ class CryptoSignalEngine:
             await self.telegram.send_message(chat_id, self.telemetry.dashboard_text())
 
         elif cmd == "/update_pairs":
-            await self.pair_mgr.refresh_pairs()
+            # Optional: /update_pairs spot/futures <count>
+            market: Optional[str] = parts[1].lower() if len(parts) >= 2 else None
+            count: Optional[int] = None
+            if len(parts) >= 3:
+                try:
+                    count = int(parts[2])
+                except ValueError:
+                    pass
+            await self.pair_mgr.refresh_pairs(market=market, count=count)
             await self.telegram.send_message(
                 chat_id, f"✅ Pairs refreshed: {len(self.pair_mgr.pairs)} active"
             )
@@ -467,15 +500,17 @@ class CryptoSignalEngine:
             await self.telegram.send_message(chat_id, "✅ You are subscribed to admin alerts.")
 
         elif cmd == "/view_pairs":
-            sorted_pairs = sorted(
-                self.pair_mgr.pairs.values(),
-                key=lambda p: p.volume_24h_usd,
-                reverse=True,
-            )
+            # Optional: /view_pairs spot   or   /view_pairs futures
+            market_filter: Optional[str] = parts[1].lower() if len(parts) >= 2 else None
+            all_pairs = list(self.pair_mgr.pairs.values())
+            if market_filter in ("spot", "futures"):
+                all_pairs = [p for p in all_pairs if p.market == market_filter]
+            sorted_pairs = sorted(all_pairs, key=lambda p: p.volume_24h_usd, reverse=True)
             top = sorted_pairs[:10]
-            lines = [f"📊 Pairs: {len(self.pair_mgr.pairs)} active\n\nTop 10 by volume:"]
+            label = market_filter.capitalize() if market_filter else "All"
+            lines = [f"📊 {label} Pairs: {len(all_pairs)} active\n\nTop 10 by volume:"]
             for i, p in enumerate(top, 1):
-                lines.append(f"{i}. {p.symbol} — ${p.volume_24h_usd:,.0f}")
+                lines.append(f"{i}. {p.symbol} ({p.market}) — ${p.volume_24h_usd:,.0f}")
             await self.telegram.send_message(chat_id, "\n".join(lines))
 
         elif cmd == "/force_scan":
@@ -534,6 +569,98 @@ class CryptoSignalEngine:
             ]
             await self.telegram.send_message(chat_id, "\n".join(lines))
 
+        elif cmd == "/memory_usage":
+            proc = psutil.Process()
+            mem_info = proc.memory_info()
+            cpu_pct = proc.cpu_percent(interval=0.1)
+            children = proc.children(recursive=True)
+            child_rss = sum(c.memory_info().rss for c in children if c.is_running())
+            lines = [
+                "🧠 Memory & CPU Usage",
+                f"RSS: {mem_info.rss / 1024 / 1024:.1f} MB",
+                f"VMS: {mem_info.vms / 1024 / 1024:.1f} MB",
+                f"CPU: {cpu_pct:.1f}%",
+                f"Child processes RSS: {child_rss / 1024 / 1024:.1f} MB",
+            ]
+            await self.telegram.send_message(chat_id, "\n".join(lines))
+
+        elif cmd == "/set_free_channel_limit":
+            if len(parts) < 2:
+                await self.telegram.send_message(
+                    chat_id, "Usage: /set\\_free\\_channel\\_limit <n>"
+                )
+            else:
+                try:
+                    limit = int(parts[1])
+                    self._free_channel_limit = max(0, limit)
+                    self.router.set_free_limit(self._free_channel_limit)
+                    await self.telegram.send_message(
+                        chat_id,
+                        f"✅ Free channel daily signal limit set to {self._free_channel_limit}",
+                    )
+                except ValueError:
+                    await self.telegram.send_message(chat_id, "❌ Value must be an integer.")
+
+        elif cmd == "/force_update_ai":
+            try:
+                # Invalidate the AI/sentiment cache by forcing a fresh fetch for known pairs
+                count = 0
+                for sym in list(self.pair_mgr.symbols)[:5]:
+                    try:
+                        await asyncio.wait_for(get_ai_insight(sym), timeout=3)
+                        count += 1
+                    except Exception:
+                        pass
+                await self.telegram.send_message(
+                    chat_id, f"✅ AI/sentiment cache refreshed for {count} symbols."
+                )
+            except Exception as exc:
+                await self.telegram.send_message(chat_id, f"❌ AI refresh error: {exc}")
+
+        elif cmd == "/view_active_signals":
+            sigs = list(self.router.active_signals.values())
+            if not sigs:
+                await self.telegram.send_message(chat_id, "No active signals.")
+            else:
+                lines = [f"📡 Active Signals ({len(sigs)}):"]
+                for s in sigs:
+                    lines.append(
+                        f"• [{s.signal_id}] {s.symbol} {s.direction.value} | "
+                        f"Entry {s.entry:.4f} | SL {s.stop_loss:.4f} | "
+                        f"Conf {s.confidence:.0f}% | {s.status}"
+                    )
+                await self.telegram.send_message(chat_id, "\n".join(lines))
+
+        elif cmd == "/view_logs":
+            n_lines = 50
+            if len(parts) >= 2:
+                try:
+                    n_lines = int(parts[1])
+                except ValueError:
+                    pass
+            n_lines = min(max(n_lines, 1), 200)
+            logs = get_recent_logs(n_lines)
+            if not logs:
+                await self.telegram.send_message(chat_id, "No log file found.")
+            else:
+                excerpt = logs[-_TELEGRAM_LOG_MAX_CHARS:]
+                await self.telegram.send_message(chat_id, f"```\n{excerpt}\n```")
+
+        elif cmd == "/update_code":
+            await self.telegram.send_message(chat_id, "⏳ Running git pull …")
+            try:
+                result = subprocess.run(
+                    ["git", "pull"],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=str(_REPO_ROOT),
+                )
+                output = (result.stdout + result.stderr).strip() or "No output."
+                await self.telegram.send_message(chat_id, f"✅ git pull result:\n```\n{output}\n```")
+            except subprocess.TimeoutExpired:
+                await self.telegram.send_message(chat_id, "❌ git pull timed out.")
+            except Exception as exc:
+                await self.telegram.send_message(chat_id, f"❌ git pull error: {exc}")
+
         elif cmd == "/restart_engine":
             await self.telegram.send_message(chat_id, "🔄 Restarting engine …")
             await self.shutdown()
@@ -541,10 +668,32 @@ class CryptoSignalEngine:
             await self.telegram.send_message(chat_id, "✅ Engine restarted.")
 
         elif cmd == "/rollback_code":
-            await self.telegram.send_message(
-                chat_id,
-                "⚠️ Code rollback not supported in live environment. Deploy via CI/CD.",
-            )
+            if len(parts) < 2:
+                await self.telegram.send_message(
+                    chat_id, "Usage: /rollback\\_code <commit>"
+                )
+            else:
+                commit = parts[1]
+                # Restrict to safe commit references: hex SHAs, branch names, tags
+                # (alphanumeric, hyphens only – no path traversal characters)
+                if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-]{0,79}$', commit):
+                    await self.telegram.send_message(chat_id, "❌ Invalid commit reference.")
+                else:
+                    await self.telegram.send_message(chat_id, f"⏳ Running git checkout {commit} …")
+                    try:
+                        result = subprocess.run(
+                            ["git", "checkout", commit],
+                            capture_output=True, text=True, timeout=30,
+                            cwd=str(_REPO_ROOT),
+                        )
+                        output = (result.stdout + result.stderr).strip() or "Done."
+                        await self.telegram.send_message(
+                            chat_id, f"✅ Rollback result:\n```\n{output}\n```"
+                        )
+                    except subprocess.TimeoutExpired:
+                        await self.telegram.send_message(chat_id, "❌ git checkout timed out.")
+                    except Exception as exc:
+                        await self.telegram.send_message(chat_id, f"❌ Rollback error: {exc}")
 
         # --- User commands ---
 
@@ -639,16 +788,22 @@ class CryptoSignalEngine:
                 "Available commands:\n"
                 "*Admin:*\n"
                 "/view\\_dashboard\n"
-                "/update\\_pairs\n"
+                "/update\\_pairs [spot/futures] [n]\n"
                 "/subscribe\\_alerts\n"
-                "/view\\_pairs\n"
+                "/view\\_pairs [spot/futures]\n"
                 "/force\\_scan\n"
                 "/pause\\_channel <name>\n"
                 "/resume\\_channel <name>\n"
                 "/set\\_confidence\\_threshold <channel> <value>\n"
+                "/set\\_free\\_channel\\_limit <n>\n"
+                "/force\\_update\\_ai\n"
+                "/view\\_active\\_signals\n"
+                "/view\\_logs [lines]\n"
                 "/engine\\_status\n"
+                "/memory\\_usage\n"
+                "/update\\_code\n"
                 "/restart\\_engine\n"
-                "/rollback\\_code\n\n"
+                "/rollback\\_code <commit>\n\n"
                 "*User:*\n"
                 "/signals\n"
                 "/free\\_signals\n"

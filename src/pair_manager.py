@@ -147,13 +147,35 @@ class PairManager:
             log.error("fetch_top_futures_pairs error: %s", exc)
         return pairs
 
-    async def refresh_pairs(self) -> None:
-        """Refresh the active pair universe (spot + futures)."""
-        log.info("Refreshing pair universe …")
-        spot, futures = await asyncio.gather(
-            self.fetch_top_spot_pairs(),
-            self.fetch_top_futures_pairs(),
-        )
+    async def refresh_pairs(
+        self,
+        market: Optional[str] = None,
+        count: Optional[int] = None,
+    ) -> None:
+        """Refresh the active pair universe.
+
+        Parameters
+        ----------
+        market:
+            ``"spot"``, ``"futures"``, or ``None`` (both).
+        count:
+            Override for the number of top pairs to fetch.  Falls back to
+            ``TOP_PAIRS_COUNT`` when ``None``.
+        """
+        log.info("Refreshing pair universe (market=%s, count=%s) …", market, count)
+        limit = count if count is not None else TOP_PAIRS_COUNT
+
+        if market == "spot":
+            spot = await self.fetch_top_spot_pairs(limit)
+            futures: List[PairInfo] = []
+        elif market == "futures":
+            spot = []
+            futures = await self.fetch_top_futures_pairs(limit)
+        else:
+            spot, futures = await asyncio.gather(
+                self.fetch_top_spot_pairs(limit),
+                self.fetch_top_futures_pairs(limit),
+            )
         new_count = 0
         for p in spot + futures:
             if p.symbol not in self.pairs:

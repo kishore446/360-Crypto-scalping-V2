@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import psutil
 
@@ -25,6 +25,7 @@ class TelemetrySnapshot:
     scan_latency_ms: float = 0.0
     api_calls_last_min: int = 0
     pairs_monitored: int = 0
+    redis_connected: bool = False
 
 
 class TelemetryCollector:
@@ -40,6 +41,7 @@ class TelemetryCollector:
         self._active_signals: int = 0
         self._pairs_monitored: int = 0
         self._scan_latency_ms: float = 0.0
+        self._redis_client: Optional[Any] = None
 
     def record_api_call(self) -> None:
         self._api_call_count += 1
@@ -57,6 +59,10 @@ class TelemetryCollector:
     def set_scan_latency(self, ms: float) -> None:
         self._scan_latency_ms = ms
 
+    def set_redis_client(self, client: Any) -> None:
+        """Register the RedisClient instance for health reporting."""
+        self._redis_client = client
+
     async def start(self) -> None:
         self._running = True
         log.info("Telemetry collector started (interval=%.0fs)", TELEMETRY_INTERVAL)
@@ -65,7 +71,7 @@ class TelemetryCollector:
                 self._collect()
                 log.info(
                     "CPU=%.1f%% | MEM=%.0fMB | WS=%d(ok=%s) | Signals=%d | "
-                    "Pairs=%d | ScanLat=%.0fms | API/min=%d",
+                    "Pairs=%d | ScanLat=%.0fms | API/min=%d | Redis=%s",
                     self.latest.cpu_pct,
                     self.latest.mem_mb,
                     self.latest.ws_connections,
@@ -74,6 +80,7 @@ class TelemetryCollector:
                     self.latest.pairs_monitored,
                     self.latest.scan_latency_ms,
                     self.latest.api_calls_last_min,
+                    self.latest.redis_connected,
                 )
             except Exception as exc:
                 log.debug("Telemetry error: %s", exc)
@@ -90,6 +97,7 @@ class TelemetryCollector:
         self._last_reset = now
 
         proc = psutil.Process()
+        redis_ok = bool(self._redis_client and self._redis_client.available)
         self.latest = TelemetrySnapshot(
             cpu_pct=proc.cpu_percent(interval=0),
             mem_mb=proc.memory_info().rss / (1024 * 1024),
@@ -99,6 +107,7 @@ class TelemetryCollector:
             scan_latency_ms=self._scan_latency_ms,
             api_calls_last_min=api_rate,
             pairs_monitored=self._pairs_monitored,
+            redis_connected=redis_ok,
         )
 
     def dashboard_text(self) -> str:
@@ -110,5 +119,6 @@ class TelemetryCollector:
             f"Active signals: {s.active_signals}\n"
             f"Pairs monitored: {s.pairs_monitored}\n"
             f"Scan latency: {s.scan_latency_ms:.0f} ms\n"
-            f"API calls/min: {s.api_calls_last_min}"
+            f"API calls/min: {s.api_calls_last_min}\n"
+            f"Redis: {'✅ connected' if s.redis_connected else '⚠️ in-memory'}"
         )

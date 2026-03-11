@@ -13,8 +13,10 @@ The router:
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections import defaultdict
-from typing import Callable, Coroutine, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from config import ALL_CHANNELS, CHANNEL_TELEGRAM_MAP, TELEGRAM_FREE_CHANNEL_ID
 from src.channels.base import Signal
@@ -25,12 +27,26 @@ from src.utils import get_logger
 log = get_logger("signal_router")
 
 
+def _signal_from_dict(data: dict) -> Optional[Signal]:
+    """Reconstruct a Signal from a Redis-deserialized dict."""
+    try:
+        d = data.copy()
+        if isinstance(d.get("direction"), str):
+            d["direction"] = Direction(d["direction"])
+        if isinstance(d.get("timestamp"), str):
+            d["timestamp"] = datetime.fromisoformat(d["timestamp"])
+        return Signal(**d)
+    except Exception as exc:
+        log.warning("Failed to reconstruct Signal from dict: %s", exc)
+        return None
+
+
 class SignalRouter:
     """Consumes signals from a queue, scores, filters, and dispatches."""
 
     def __init__(
         self,
-        queue: asyncio.Queue,
+        queue: Any,
         send_telegram: Callable[[str, str], Coroutine],
         format_signal: Callable[[Signal], str],
     ) -> None:
@@ -43,6 +59,8 @@ class SignalRouter:
         self._running = False
         self._free_limit: int = 2  # max daily free signals
         self._risk_mgr = RiskManager()
+        # Detect whether queue.get() supports a timeout keyword argument
+        self._queue_has_timeout = "timeout" in inspect.signature(queue.get).parameters
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -53,14 +71,27 @@ class SignalRouter:
         log.info("Signal router started")
         while self._running:
             try:
-                signal: Signal = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-                await self._process(signal)
+                if self._queue_has_timeout:
+                    signal = await self._queue.get(timeout=1.0)
+                    if signal is None:
+                        continue
+                else:
+                    signal = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 log.error("Router error: %s", exc)
+                continue
+
+            # Reconstruct Signal from dict (Redis deserialization path)
+            if isinstance(signal, dict):
+                signal = _signal_from_dict(signal)
+                if signal is None:
+                    continue
+
+            await self._process(signal)
 
     async def stop(self) -> None:
         self._running = False

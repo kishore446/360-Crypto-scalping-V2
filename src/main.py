@@ -67,6 +67,9 @@ from src.telemetry import TelemetryCollector
 from src.trade_monitor import TradeMonitor
 from src.utils import get_logger
 from src.websocket_manager import WebSocketManager
+from src.redis_client import RedisClient
+from src.signal_queue import SignalQueue
+from src.state_cache import StateCache
 
 log = get_logger("main")
 
@@ -87,7 +90,9 @@ class CryptoSignalEngine:
         self.telegram = TelegramBot()
         self.telemetry = TelemetryCollector()
 
-        self._signal_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+        self._redis_client = RedisClient()
+        self._signal_queue = SignalQueue(self._redis_client)
+        self._state_cache = StateCache(self._redis_client)
         self.router = SignalRouter(
             queue=self._signal_queue,
             send_telegram=self.telegram.send_message,
@@ -185,6 +190,10 @@ class CryptoSignalEngine:
         log.info("=== 360-Crypto-Eye-Scalping Engine BOOTING ===")
         self._boot_time = time.monotonic()
 
+        # 0. Connect to Redis (graceful fallback if unavailable)
+        await self._redis_client.connect()
+        self.telemetry.set_redis_client(self._redis_client)
+
         # 1. Fetch pairs
         await self.pair_mgr.refresh_pairs()
 
@@ -231,6 +240,7 @@ class CryptoSignalEngine:
         await self._exchange_mgr.close()
         if self._spot_client:
             await self._spot_client.close()
+        await self._redis_client.close()
         await self.telegram.stop()
         log.info("Shutdown complete.")
 

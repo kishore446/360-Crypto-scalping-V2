@@ -80,7 +80,7 @@ class CryptoSignalEngine:
             data_store=self.data_store,
             send_telegram=self.telegram.send_message,
             get_active_signals=lambda: self.router.active_signals,
-            remove_signal=self.router.remove_signal,
+            remove_signal=self._remove_and_archive,
             update_signal=self.router.update_signal,
         )
 
@@ -98,6 +98,14 @@ class CryptoSignalEngine:
         self._force_scan: bool = False
         self._signal_history: List[Signal] = []  # capped at 500 entries
         self._boot_time: float = 0.0
+
+    def _remove_and_archive(self, signal_id: str) -> None:
+        """Remove a signal from active tracking and archive it in history."""
+        sig = self.router.active_signals.get(signal_id)
+        if sig is not None:
+            self._signal_history.append(sig)
+            self._signal_history = self._signal_history[-500:]
+        self.router.remove_signal(signal_id)
 
     # ------------------------------------------------------------------
     # Pre-flight checks
@@ -549,7 +557,7 @@ class CryptoSignalEngine:
                 for s in sigs:
                     lines.append(
                         f"• {s.symbol} {s.direction.value} | "
-                        f"Entry {s.entry:.4f} | Conf {s.confidence:.0%} | {s.status}"
+                        f"Entry {s.entry:.4f} | Conf {s.confidence:.0f}% | {s.status}"
                     )
                 await self.telegram.send_message(chat_id, "\n".join(lines))
 
@@ -565,7 +573,7 @@ class CryptoSignalEngine:
                 for s in sigs:
                     lines.append(
                         f"• {s.symbol} {s.direction.value} | "
-                        f"Entry {s.entry:.4f} | Conf {s.confidence:.0%}"
+                        f"Entry {s.entry:.4f} | Conf {s.confidence:.0f}%"
                     )
                 await self.telegram.send_message(chat_id, "\n".join(lines))
 
@@ -589,7 +597,7 @@ class CryptoSignalEngine:
                         f"SL: {sig.stop_loss:.4f}",
                         f"TP1: {sig.tp1:.4f} | TP2: {sig.tp2:.4f}"
                         + (f" | TP3: {sig.tp3:.4f}" if sig.tp3 else ""),
-                        f"Confidence: {sig.confidence:.0%}",
+                        f"Confidence: {sig.confidence:.0f}%",
                         f"Status: {sig.status}",
                         f"PnL: {sig.pnl_pct:+.2f}%",
                         f"AI: {sig.ai_sentiment_label}",

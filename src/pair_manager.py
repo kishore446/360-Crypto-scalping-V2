@@ -138,7 +138,7 @@ class PairManager:
         self,
         market: Optional[str] = None,
         count: Optional[int] = None,
-    ) -> None:
+    ) -> List[str]:
         """Refresh the active pair universe.
 
         Parameters
@@ -148,6 +148,11 @@ class PairManager:
         count:
             Override for the number of top pairs to fetch.  Falls back to
             ``TOP_PAIRS_COUNT`` when ``None``.
+
+        Returns
+        -------
+        List[str]
+            Symbols that were newly added to the universe during this refresh.
         """
         log.info("Refreshing pair universe (market=%s, count=%s) …", market, count)
         limit = count if count is not None else TOP_PAIRS_COUNT
@@ -164,9 +169,11 @@ class PairManager:
                 self.fetch_top_futures_pairs(limit),
             )
         new_count = 0
+        new_symbols: List[str] = []
         for p in spot + futures:
             if p.symbol not in self.pairs:
                 new_count += 1
+                new_symbols.append(p.symbol)
                 self.pairs[p.symbol] = p
             else:
                 self.pairs[p.symbol].volume_24h_usd = p.volume_24h_usd
@@ -174,6 +181,7 @@ class PairManager:
             "Pair refresh done – total %d pairs (%d new)",
             len(self.pairs), new_count,
         )
+        return new_symbols
 
     async def run_periodic_refresh(self) -> None:
         """Infinite loop that refreshes pairs every N hours."""

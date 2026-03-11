@@ -26,6 +26,7 @@ class TelemetrySnapshot:
     api_calls_last_min: int = 0
     pairs_monitored: int = 0
     redis_connected: bool = False
+    queue_size: int = 0
 
 
 class TelemetryCollector:
@@ -41,6 +42,7 @@ class TelemetryCollector:
         self._active_signals: int = 0
         self._pairs_monitored: int = 0
         self._scan_latency_ms: float = 0.0
+        self._queue_size: int = 0
         self._redis_client: Optional[Any] = None
 
     def record_api_call(self) -> None:
@@ -58,6 +60,9 @@ class TelemetryCollector:
 
     def set_scan_latency(self, ms: float) -> None:
         self._scan_latency_ms = ms
+
+    def set_queue_size(self, size: int) -> None:
+        self._queue_size = size
 
     def set_redis_client(self, client: Any) -> None:
         """Register the RedisClient instance for health reporting."""
@@ -108,6 +113,7 @@ class TelemetryCollector:
             api_calls_last_min=api_rate,
             pairs_monitored=self._pairs_monitored,
             redis_connected=redis_ok,
+            queue_size=self._queue_size,
         )
 
     def dashboard_text(self) -> str:
@@ -119,6 +125,7 @@ class TelemetryCollector:
             f"Active signals: {s.active_signals}\n"
             f"Pairs monitored: {s.pairs_monitored}\n"
             f"Scan latency: {s.scan_latency_ms:.0f} ms\n"
+            f"Queue size: {s.queue_size}\n"
             f"API calls/min: {s.api_calls_last_min}\n"
             f"Redis: {'✅ connected' if s.redis_connected else '⚠️ in-memory'}"
         )

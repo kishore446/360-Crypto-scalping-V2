@@ -123,13 +123,10 @@ class SignalRouter:
             )
             return
 
-        # Risk assessment (performed before registration so the current signal
-        # is not counted against its own concurrent-signal limits)
-        # indicators and volume_24h_usd are not available at router level;
-        # the router uses defaults ({} and 0) – actual risk values are set
-        # by the scanner before the signal is enqueued.
+        # Risk assessment: use the signal's own volume/spread fields so the risk
+        # classifier has accurate data (set by the scanner before enqueuing).
         risk = self._risk_mgr.calculate_risk(
-            signal, {}, volume_24h_usd=0, active_signals=self.active_signals
+            signal, {}, volume_24h_usd=signal.volume_24h_usd, active_signals=self.active_signals
         )
         if not risk.allowed:
             log.warning(

@@ -36,6 +36,9 @@ class Signal:
     status: str = "ACTIVE"  # ACTIVE, TP1_HIT, TP2_HIT, TP3_HIT, SL_HIT, CANCELLED
     current_price: float = 0.0
     pnl_pct: float = 0.0
+    # Scanner-enriched market context (set before enqueuing)
+    spread_pct: float = 0.0
+    volume_24h_usd: float = 0.0
 
     @property
     def r_multiple(self) -> float:

@@ -27,6 +27,8 @@ from config import (
     CHANNEL_RANGE,
     CHANNEL_TAPE,
     SEED_TIMEFRAMES,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_SCALP_CHANNEL_ID,
 )
 from src.ai_engine import detect_whale_trade, detect_volume_delta_spike, get_ai_insight
 from src.channels.base import Signal
@@ -98,6 +100,40 @@ class CryptoSignalEngine:
         self._boot_time: float = 0.0
 
     # ------------------------------------------------------------------
+    # Pre-flight checks
+    # ------------------------------------------------------------------
+
+    async def _preflight_check(self) -> bool:
+        """Run pre-flight checks and return True if all critical checks pass."""
+        ok = True
+
+        if not TELEGRAM_BOT_TOKEN:
+            log.warning("Pre-flight: TELEGRAM_BOT_TOKEN is not set")
+            ok = False
+
+        if not TELEGRAM_SCALP_CHANNEL_ID:
+            log.warning("Pre-flight: No Telegram channel IDs configured")
+
+        if not self.pair_mgr.pairs:
+            log.warning("Pre-flight: pair_mgr has no pairs loaded")
+            ok = False
+
+        if not self.data_store.has_data():
+            log.warning("Pre-flight: data_store has no seeded data")
+            ok = False
+
+        ws_healthy = (
+            (self._ws_spot.is_healthy if self._ws_spot else False)
+            and (self._ws_futures.is_healthy if self._ws_futures else False)
+        )
+        if not ws_healthy:
+            log.warning("Pre-flight: WebSocket managers are not all healthy")
+
+        if ok:
+            log.info("Pre-flight checks passed")
+        return ok
+
+    # ------------------------------------------------------------------
     # Boot sequence
     # ------------------------------------------------------------------
 
@@ -113,6 +149,10 @@ class CryptoSignalEngine:
 
         # 3. Start WebSockets
         await self._start_websockets()
+
+        # 3.5 Pre-flight checks
+        if not await self._preflight_check():
+            log.warning("Pre-flight checks had warnings — engine will start but may be degraded")
 
         # 4. Launch async tasks
         self._tasks = [

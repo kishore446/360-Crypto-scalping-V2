@@ -7,3 +7,11 @@ psutil>=5.9.0,<6.0.0
 pytest>=7.4.0,<9.0.0
 pytest-asyncio>=0.23.0,<1.0.0
 loguru>=0.7.0,<1.0.0
+redis>=5.0.0,<6.0.0
+
+# Optional (spec-listed but not currently used):
+# ccxt==3.0.93
+# pandas_ta==0.5.49b0
+# python-telegram-bot==20.3
+# torch==2.1.0
+# transformers==4.34.0

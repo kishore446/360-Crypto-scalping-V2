@@ -13,7 +13,7 @@ Factors:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from config import NEW_PAIR_MIN_CONFIDENCE
 
@@ -99,9 +99,21 @@ def score_data_sufficiency(candle_count: int, minimum: int = 500) -> float:
     return round((candle_count / minimum) * 10.0, 2)
 
 
-def score_multi_exchange(verified: bool) -> float:
-    """Multi-exchange verification bonus (max 5)."""
-    return 5.0 if verified else 0.0
+def score_multi_exchange(verified: Optional[bool] = None) -> float:
+    """Multi-exchange verification bonus (max 10).
+
+    Parameters
+    ----------
+    verified:
+        ``True``  – second exchange confirms the signal → 10.0.
+        ``False`` – second exchange contradicts the signal → 0.0.
+        ``None``  – no second exchange configured (neutral) → 5.0.
+    """
+    if verified is True:
+        return 10.0
+    if verified is False:
+        return 0.0
+    return 5.0  # None → neutral
 
 
 def compute_confidence(inp: ConfidenceInput) -> ConfidenceResult:

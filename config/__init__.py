@@ -83,6 +83,7 @@ class ChannelConfig:
     adx_max: float
     spread_max: float
     min_confidence: float
+    min_volume: float = 1_000_000.0  # minimum 24h USD volume
 
 
 CHANNEL_SCALP = ChannelConfig(
@@ -96,6 +97,7 @@ CHANNEL_SCALP = ChannelConfig(
     adx_max=100,
     spread_max=0.02,
     min_confidence=70,
+    min_volume=5_000_000.0,
 )
 
 CHANNEL_SWING = ChannelConfig(
@@ -109,6 +111,7 @@ CHANNEL_SWING = ChannelConfig(
     adx_max=40,
     spread_max=0.02,
     min_confidence=75,
+    min_volume=10_000_000.0,
 )
 
 CHANNEL_RANGE = ChannelConfig(
@@ -122,6 +125,7 @@ CHANNEL_RANGE = ChannelConfig(
     adx_max=20,
     spread_max=0.02,
     min_confidence=70,
+    min_volume=1_000_000.0,
 )
 
 CHANNEL_TAPE = ChannelConfig(
@@ -135,6 +139,7 @@ CHANNEL_TAPE = ChannelConfig(
     adx_max=100,
     spread_max=0.02,
     min_confidence=75,
+    min_volume=10_000_000.0,
 )
 
 ALL_CHANNELS: List[ChannelConfig] = [

@@ -45,7 +45,7 @@ class WSConnection:
 class WebSocketManager:
     """Manages multiple Binance WebSocket connections with resilience."""
 
-    def __init__(self, on_message: MessageHandler, market: str = "spot") -> None:
+    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None) -> None:
         self._on_message = on_message
         self._market = market
         self._base_url = BINANCE_WS_BASE if market == "spot" else BINANCE_FUTURES_WS_BASE
@@ -58,6 +58,7 @@ class WebSocketManager:
         self._rest_fallback_active: bool = False
         self._critical_pairs: Set[str] = set()
         self._fallback_task: Optional[asyncio.Task] = None
+        self._admin_alert = admin_alert_callback
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -157,6 +158,12 @@ class WebSocketManager:
             return
         self._rest_fallback_active = True
         self._fallback_task = asyncio.create_task(self._rest_fallback_loop())
+        if self._admin_alert:
+            asyncio.create_task(
+                self._admin_alert(
+                    f"⚠️ REST fallback activated for {self._market} critical pairs."
+                )
+            )
 
     def _stop_rest_fallback(self) -> None:
         """Deactivate REST fallback once WS reconnects."""
@@ -185,6 +192,12 @@ class WebSocketManager:
                 # Activate REST fallback for critical pairs during reconnect
                 if any(s in self._critical_pairs for s in conn.streams):
                     self._start_rest_fallback()
+                if self._admin_alert:
+                    asyncio.create_task(
+                        self._admin_alert(
+                            f"⚠️ WebSocket connection lost ({self._market}). Reconnecting…"
+                        )
+                    )
                 delay = min(
                     WS_RECONNECT_BASE_DELAY * (2 ** conn.reconnect_attempts),
                     WS_RECONNECT_MAX_DELAY,

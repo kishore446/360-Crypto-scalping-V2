@@ -13,6 +13,7 @@ import uuid
 
 from config import CHANNEL_TAPE
 from src.channels.base import BaseChannel, Signal
+from src.filters import check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -38,7 +39,10 @@ class TapeChannel(BaseChannel):
         if whale is None and not delta_spike:
             return None
 
-        if spread_pct > self.config.spread_max:
+        if not check_spread(spread_pct, self.config.spread_max):
+            return None
+
+        if not check_volume(volume_24h_usd, self.config.min_volume):
             return None
 
         m1 = candles.get("1m")

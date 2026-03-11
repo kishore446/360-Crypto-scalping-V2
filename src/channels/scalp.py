@@ -14,6 +14,7 @@ import numpy as np
 
 from config import CHANNEL_SCALP
 from src.channels.base import BaseChannel, Signal
+from src.filters import check_adx, check_ema_alignment, check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -38,11 +39,13 @@ class ScalpChannel(BaseChannel):
 
         # --- Filters ---
         ind = indicators.get("5m", {})
-        adx_val = ind.get("adx_last")
-        if adx_val is None or adx_val < self.config.adx_min:
+        if not check_adx(ind.get("adx_last"), self.config.adx_min):
             return None
 
-        if spread_pct > self.config.spread_max:
+        if not check_spread(spread_pct, self.config.spread_max):
+            return None
+
+        if not check_volume(volume_24h_usd, self.config.min_volume):
             return None
 
         # EMA alignment check (fast > slow for LONG, opposite for SHORT)
@@ -64,9 +67,7 @@ class ScalpChannel(BaseChannel):
 
         direction = sweep.direction
         # EMA alignment must agree
-        if direction == Direction.LONG and ema_fast <= ema_slow:
-            return None
-        if direction == Direction.SHORT and ema_fast >= ema_slow:
+        if not check_ema_alignment(ema_fast, ema_slow, direction.value):
             return None
 
         close = float(m5["close"][-1])

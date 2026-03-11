@@ -8,16 +8,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
-import aiohttp
 import numpy as np
 
 from config import (
     BATCH_REQUEST_DELAY,
-    BINANCE_FUTURES_REST_BASE,
-    BINANCE_REST_BASE,
     SEED_TICK_LIMIT,
     SEED_TIMEFRAMES,
 )
+from src.binance import BinanceClient
 from src.pair_manager import PairManager
 from src.utils import get_logger
 
@@ -32,12 +30,7 @@ class HistoricalDataStore:
         self.candles: Dict[str, Dict[str, Dict[str, np.ndarray]]] = {}
         # ticks[symbol] = [{"price": float, "qty": float, "isBuyerMaker": bool, "time": int}, …]
         self.ticks: Dict[str, List[Dict[str, Any]]] = {}
-        self._session: Optional[aiohttp.ClientSession] = None
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
+        self._client = BinanceClient("spot")
 
     # ------------------------------------------------------------------
     # OHLCV fetch
@@ -47,22 +40,20 @@ class HistoricalDataStore:
         self, symbol: str, interval: str, limit: int, market: str = "spot",
     ) -> Dict[str, np.ndarray]:
         """Fetch OHLCV candles for one symbol/interval."""
-        session = await self._ensure_session()
-        if market == "futures":
-            url = f"{BINANCE_FUTURES_REST_BASE}/fapi/v1/klines"
+        if market == "spot":
+            client = self._client
+            close_after = False
         else:
-            url = f"{BINANCE_REST_BASE}/api/v3/klines"
-        params = {"symbol": symbol, "interval": interval, "limit": limit}
-
+            client = BinanceClient(market)
+            close_after = True
         try:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    log.warning("Candle fetch %s %s returned %s", symbol, interval, resp.status)
-                    return {}
-                raw = await resp.json()
+            raw = await client.fetch_klines(symbol, interval, limit)
         except Exception as exc:
             log.error("Candle fetch error %s %s: %s", symbol, interval, exc)
             return {}
+        finally:
+            if close_after:
+                await client.close()
 
         if not raw:
             return {}
@@ -82,21 +73,34 @@ class HistoricalDataStore:
     async def fetch_recent_trades(
         self, symbol: str, limit: int = SEED_TICK_LIMIT, market: str = "spot",
     ) -> List[Dict[str, Any]]:
-        session = await self._ensure_session()
-        if market == "futures":
-            url = f"{BINANCE_FUTURES_REST_BASE}/fapi/v1/trades"
+        if market == "spot":
+            client = self._client
+            close_after = False
         else:
-            url = f"{BINANCE_REST_BASE}/api/v3/trades"
-        params = {"symbol": symbol, "limit": min(limit, 1000)}
-
+            client = BinanceClient(market)
+            close_after = True
+        capped_limit = min(limit, 1000)
         try:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    log.warning("Trade fetch %s returned %s", symbol, resp.status)
-                    return []
-                raw = await resp.json()
+            if market == "futures":
+                raw = await client._get(
+                    "/fapi/v1/trades",
+                    params={"symbol": symbol, "limit": capped_limit},
+                    weight=1,
+                )
+            else:
+                raw = await client._get(
+                    "/api/v3/trades",
+                    params={"symbol": symbol, "limit": capped_limit},
+                    weight=1,
+                )
         except Exception as exc:
             log.error("Trade fetch error %s: %s", symbol, exc)
+            return []
+        finally:
+            if close_after:
+                await client.close()
+
+        if not raw:
             return []
 
         return [
@@ -175,5 +179,4 @@ class HistoricalDataStore:
             self.ticks[symbol] = self.ticks[symbol][-SEED_TICK_LIMIT:]
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
+        await self._client.close()

@@ -18,6 +18,7 @@ from typing import Callable, Coroutine, Dict, List, Optional
 
 from config import ALL_CHANNELS, CHANNEL_TELEGRAM_MAP, TELEGRAM_FREE_CHANNEL_ID
 from src.channels.base import Signal
+from src.risk import RiskManager
 from src.smc import Direction
 from src.utils import get_logger
 
@@ -41,6 +42,7 @@ class SignalRouter:
         self._position_lock: Dict[str, Direction] = {}  # symbol → direction
         self._running = False
         self._free_limit: int = 2  # max daily free signals
+        self._risk_mgr = RiskManager()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -89,6 +91,22 @@ class SignalRouter:
                 signal.confidence, chan_cfg.min_confidence,
             )
             return
+
+        # Risk assessment (performed before registration so the current signal
+        # is not counted against its own concurrent-signal limits)
+        # indicators and volume_24h_usd are not available at router level;
+        # the router uses defaults ({} and 0) – actual risk values are set
+        # by the scanner before the signal is enqueued.
+        risk = self._risk_mgr.calculate_risk(
+            signal, {}, volume_24h_usd=0, active_signals=self.active_signals
+        )
+        if not risk.allowed:
+            log.warning(
+                "Signal %s %s blocked by risk manager: %s",
+                signal.symbol, signal.direction.value, risk.reason,
+            )
+            return
+        signal.risk_label = risk.risk_label
 
         # Register
         self._active_signals[signal.signal_id] = signal

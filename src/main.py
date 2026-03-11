@@ -14,12 +14,13 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import psutil
@@ -35,6 +36,7 @@ from config import (
     TELEGRAM_SCALP_CHANNEL_ID,
 )
 from src.ai_engine import get_ai_insight
+from src.binance import BinanceClient
 from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel
@@ -52,6 +54,7 @@ from src.confidence import (
     score_trend,
 )
 from src.detector import SMCDetector
+from src.exchange import ExchangeManager
 from src.historical_data import HistoricalDataStore
 from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi, sma
 from src.logger import get_recent_logs
@@ -108,6 +111,16 @@ class CryptoSignalEngine:
         # Predictive AI engine
         self.predictive = PredictiveEngine()
 
+        # Multi-exchange verification
+        self._exchange_mgr = ExchangeManager(
+            second_exchange_url=os.getenv("SECOND_EXCHANGE_URL")
+        )
+
+        # BinanceClient for real order book spread (shared, lazily opened)
+        self._spot_client: Optional[BinanceClient] = None
+        # Cache: symbol → (spread_pct, timestamp)
+        self._order_book_cache: Dict[str, Tuple[float, float]] = {}
+
         # WebSocket managers
         self._ws_spot: Optional[WebSocketManager] = None
         self._ws_futures: Optional[WebSocketManager] = None
@@ -120,6 +133,7 @@ class CryptoSignalEngine:
         self._signal_history: List[Signal] = []  # capped at 500 entries
         self._boot_time: float = 0.0
         self._free_channel_limit: int = 2  # max free signals published per day
+        self._alert_subscribers: Set[str] = set()  # admin IDs subscribed to alerts
 
     def _remove_and_archive(self, signal_id: str) -> None:
         """Remove a signal from active tracking and archive it in history."""
@@ -214,6 +228,9 @@ class CryptoSignalEngine:
             await self._ws_futures.stop()
         await self.data_store.close()
         await self.pair_mgr.close()
+        await self._exchange_mgr.close()
+        if self._spot_client:
+            await self._spot_client.close()
         await self.telegram.stop()
         log.info("Shutdown complete.")
 
@@ -237,8 +254,16 @@ class CryptoSignalEngine:
             futures_streams.append(f"{s}@kline_5m")
             futures_streams.append(f"{s}@trade")
 
-        self._ws_spot = WebSocketManager(self._on_ws_message, market="spot")
-        self._ws_futures = WebSocketManager(self._on_ws_message, market="futures")
+        self._ws_spot = WebSocketManager(
+            self._on_ws_message,
+            market="spot",
+            admin_alert_callback=self.telegram.send_admin_alert,
+        )
+        self._ws_futures = WebSocketManager(
+            self._on_ws_message,
+            market="futures",
+            admin_alert_callback=self.telegram.send_admin_alert,
+        )
 
         if spot_streams:
             await self._ws_spot.start(spot_streams)
@@ -369,7 +394,27 @@ class CryptoSignalEngine:
         except Exception:
             pass
 
-        spread_pct = 0.01  # placeholder – real spread from order book
+        # Real order book spread with 5-second TTL cache
+        spread_pct = 0.01  # fallback
+        _SPREAD_CACHE_TTL = 5.0
+        now = time.monotonic()
+        cached = self._order_book_cache.get(symbol)
+        if cached and (now - cached[1]) < _SPREAD_CACHE_TTL:
+            spread_pct = cached[0]
+        else:
+            try:
+                if self._spot_client is None:
+                    self._spot_client = BinanceClient("spot")
+                book = await self._spot_client.fetch_order_book(symbol, limit=5)
+                if book and book.get("bids") and book.get("asks"):
+                    best_bid = float(book["bids"][0][0])
+                    best_ask = float(book["asks"][0][0])
+                    mid = (best_bid + best_ask) / 2.0
+                    if mid > 0:
+                        spread_pct = (best_ask - best_bid) / mid * 100.0
+                self._order_book_cache[symbol] = (spread_pct, now)
+            except Exception:
+                pass  # keep fallback
 
         # Evaluate each channel
         for chan in self._channels:
@@ -424,6 +469,20 @@ class CryptoSignalEngine:
                 for cd in candles.values()
             )
 
+            # Cross-exchange verification
+            cross_verified: Optional[bool] = None
+            try:
+                cross_verified = await asyncio.wait_for(
+                    self._exchange_mgr.verify_signal_cross_exchange(
+                        symbol, sig.direction.value, sig.entry
+                    ),
+                    timeout=3,
+                )
+            except asyncio.TimeoutError:
+                log.debug("Cross-exchange verification timed out for %s", symbol)
+            except Exception as exc:
+                log.debug("Cross-exchange verification error for %s: %s", symbol, exc)
+
             cinp = ConfidenceInput(
                 smc_score=score_smc(has_sweep, has_mss, has_fvg),
                 trend_score=score_trend(ema_aligned, adx_ok, mom_positive),
@@ -431,7 +490,7 @@ class CryptoSignalEngine:
                 liquidity_score=score_liquidity(volume_24h),
                 spread_score=score_spread(spread_pct),
                 data_sufficiency=score_data_sufficiency(candle_total),
-                multi_exchange=score_multi_exchange(False),
+                multi_exchange=score_multi_exchange(verified=cross_verified),
                 has_enough_history=self.pair_mgr.has_enough_history(symbol),
                 opposing_position_open=False,
             )
@@ -450,6 +509,17 @@ class CryptoSignalEngine:
 
             # Attach regime info
             sig.market_phase = regime_result.regime.value
+
+            # Populate liquidity info from SMC data
+            liq_parts = []
+            if smc_result.sweeps:
+                sweep = smc_result.sweeps[0]
+                liq_parts.append(f"Sweep {sweep.direction.value} at {sweep.sweep_level:.4f}")
+            if smc_result.fvg:
+                fvg = smc_result.fvg[0]
+                liq_parts.append(f"FVG {fvg.gap_high:.4f}-{fvg.gap_low:.4f}")
+            if liq_parts:
+                sig.liquidity_info = " | ".join(liq_parts)
 
             try:
                 self._signal_queue.put_nowait(sig)
@@ -497,6 +567,7 @@ class CryptoSignalEngine:
             )
 
         elif cmd == "/subscribe_alerts":
+            self._alert_subscribers.add(chat_id)
             await self.telegram.send_message(chat_id, "✅ You are subscribed to admin alerts.")
 
         elif cmd == "/view_pairs":

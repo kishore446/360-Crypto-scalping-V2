@@ -12,6 +12,7 @@ import uuid
 
 from config import CHANNEL_SWING
 from src.channels.base import BaseChannel, Signal
+from src.filters import check_adx, check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -40,10 +41,11 @@ class SwingChannel(BaseChannel):
         # --- Filters ---
         ind_h4 = indicators.get("4h", {})
         ind_h1 = indicators.get("1h", {})
-        adx_val = ind_h4.get("adx_last")
-        if adx_val is None or not (self.config.adx_min <= adx_val <= self.config.adx_max):
+        if not check_adx(ind_h4.get("adx_last"), self.config.adx_min, self.config.adx_max):
             return None
-        if spread_pct > self.config.spread_max:
+        if not check_spread(spread_pct, self.config.spread_max):
+            return None
+        if not check_volume(volume_24h_usd, self.config.min_volume):
             return None
 
         # EMA200 filter

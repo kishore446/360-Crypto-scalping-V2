@@ -11,15 +11,12 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-import aiohttp
-
 from config import (
     BATCH_REQUEST_DELAY,
-    BINANCE_FUTURES_REST_BASE,
-    BINANCE_REST_BASE,
     PAIR_FETCH_INTERVAL_HOURS,
     TOP_PAIRS_COUNT,
 )
+from src.binance import BinanceClient
 from src.utils import get_logger
 
 log = get_logger("pair_manager")
@@ -41,7 +38,8 @@ class PairManager:
 
     def __init__(self) -> None:
         self.pairs: Dict[str, PairInfo] = {}
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._spot_client = BinanceClient("spot")
+        self._futures_client = BinanceClient("futures")
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -76,22 +74,14 @@ class PairManager:
     # Fetch from Binance
     # ------------------------------------------------------------------
 
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
-
     async def fetch_top_spot_pairs(self, limit: int = TOP_PAIRS_COUNT) -> List[PairInfo]:
         """Fetch top *limit* USDT spot pairs by 24h volume."""
-        session = await self._ensure_session()
         pairs: List[PairInfo] = []
         try:
-            url = f"{BINANCE_REST_BASE}/api/v3/ticker/24hr"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    log.warning("Spot ticker fetch returned %s", resp.status)
-                    return pairs
-                data = await resp.json()
+            data = await self._spot_client._get("/api/v3/ticker/24hr", weight=40)
+            if data is None:
+                log.warning("Spot ticker fetch returned no data")
+                return pairs
 
             usdt_pairs = [
                 t for t in data
@@ -116,15 +106,12 @@ class PairManager:
 
     async def fetch_top_futures_pairs(self, limit: int = TOP_PAIRS_COUNT) -> List[PairInfo]:
         """Fetch top *limit* USDT-M futures pairs by 24h volume."""
-        session = await self._ensure_session()
         pairs: List[PairInfo] = []
         try:
-            url = f"{BINANCE_FUTURES_REST_BASE}/fapi/v1/ticker/24hr"
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    log.warning("Futures ticker fetch returned %s", resp.status)
-                    return pairs
-                data = await resp.json()
+            data = await self._futures_client._get("/fapi/v1/ticker/24hr", weight=40)
+            if data is None:
+                log.warning("Futures ticker fetch returned no data")
+                return pairs
 
             usdt_pairs = [
                 t for t in data
@@ -195,5 +182,5 @@ class PairManager:
             await asyncio.sleep(PAIR_FETCH_INTERVAL_HOURS * 3600)
 
     async def close(self) -> None:
-        if self._session and not self._session.closed:
-            await self._session.close()
+        await self._spot_client.close()
+        await self._futures_client.close()

@@ -12,6 +12,7 @@ import uuid
 
 from config import CHANNEL_RANGE
 from src.channels.base import BaseChannel, Signal
+from src.filters import check_adx, check_rsi, check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -37,10 +38,11 @@ class RangeChannel(BaseChannel):
         ind = indicators.get("15m", {})
 
         # --- Range filter: ADX must be low ---
-        adx_val = ind.get("adx_last")
-        if adx_val is None or adx_val >= self.config.adx_max:
+        if not check_adx(ind.get("adx_last"), self.config.adx_min, self.config.adx_max):
             return None
-        if spread_pct > self.config.spread_max:
+        if not check_spread(spread_pct, self.config.spread_max):
+            return None
+        if not check_volume(volume_24h_usd, self.config.min_volume):
             return None
 
         # --- Bollinger Band rejection ---
@@ -55,13 +57,17 @@ class RangeChannel(BaseChannel):
         # RSI mean-reversion
         rsi_val = ind.get("rsi_last")
 
-        # Determine direction from BB touch + RSI
+        # Determine direction from BB touch
         direction: Optional[Direction] = None
-        if close <= bb_lower * 1.002 and (rsi_val is None or rsi_val < 35):
+        if close <= bb_lower * 1.002:
             direction = Direction.LONG
-        elif close >= bb_upper * 0.998 and (rsi_val is None or rsi_val > 65):
+        elif close >= bb_upper * 0.998:
             direction = Direction.SHORT
         else:
+            return None
+
+        # RSI must not be in an extreme zone conflicting with direction
+        if not check_rsi(rsi_val, 70.0, 30.0, direction.value):
             return None
 
         atr_val = ind.get("atr_last", close * 0.002)

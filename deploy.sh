@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # 360-Crypto-Eye-Scalping – deployment script for VPS / Termux
+#
+# NOTE: For a fresh VPS installation (nukes old processes, installs
+#       prerequisites, clones the repo and sets up a systemd service),
+#       use clean_deploy.sh instead:
+#
+#   wget -O clean_deploy.sh https://raw.githubusercontent.com/kishore446/360-Crypto-scalping-V2/main/clean_deploy.sh \
+#     && chmod +x clean_deploy.sh && sudo bash clean_deploy.sh
+#
 set -euo pipefail
 
 echo "=== 360-Crypto-Eye-Scalping Deployment ==="
@@ -60,7 +68,8 @@ if [ "$ENV" = "vps" ] && command -v systemctl &>/dev/null; then
         sudo tee "$SERVICE_FILE" > /dev/null << UNIT
 [Unit]
 Description=360 Crypto Eye Scalping Engine
-After=network.target
+After=network.target redis-server.service
+Wants=redis-server.service
 
 [Service]
 Type=simple

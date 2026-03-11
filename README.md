@@ -76,6 +76,41 @@ Binance WS ──► WebSocketManager (multi-conn, heartbeat, auto-reconnect)
 - **Filters**: Order book imbalance, whale detection, AI sentiment
 - **Risk**: SL 0.1–0.3% AI-adaptive, Trailing AI-adaptive
 
+## Quick VPS Deployment
+
+One-line fresh VPS deployment (Ubuntu 20.04 / 22.04 / 24.04).  
+This **nukes any old engine processes**, installs prerequisites, clones the repo, and sets up a systemd service automatically:
+
+```bash
+# One-line fresh VPS deployment:
+wget -O clean_deploy.sh https://raw.githubusercontent.com/kishore446/360-Crypto-scalping-V2/main/clean_deploy.sh && chmod +x clean_deploy.sh && sudo bash clean_deploy.sh
+```
+
+After the script completes, edit your credentials:
+
+```bash
+nano ~/360-Crypto-scalping-V2/.env
+systemctl restart 360-crypto-engine
+```
+
+### Service Management
+
+```bash
+# View live logs
+journalctl -u 360-crypto-engine -f
+
+# Restart the engine
+systemctl restart 360-crypto-engine
+
+# Stop the engine
+systemctl stop 360-crypto-engine
+
+# Check service status
+systemctl status 360-crypto-engine
+```
+
+---
+
 ## Quick Start
 
 ```bash

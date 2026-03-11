@@ -117,10 +117,26 @@ class PredictiveEngine:
     def update_confidence(self, signal: Any, prediction: PredictionResult) -> None:
         """Add *prediction.confidence_adjustment* to the signal confidence.
 
+        When the prediction has a directional conviction (UP or DOWN), the
+        adjustment sign is determined by whether the prediction aligns with the
+        signal direction:
+          - UP aligns with LONG, DOWN aligns with SHORT → positive boost
+          - opposing direction → negative (reduces confidence)
+          - NEUTRAL prediction → apply confidence_adjustment as-is
+
         The result is clamped to the 0-100 range.
         """
+        adj = prediction.confidence_adjustment
+        pred_dir = prediction.predicted_direction
+        if pred_dir in ("UP", "DOWN"):
+            signal_dir = getattr(getattr(signal, "direction", None), "value", "")
+            aligned = (pred_dir == "UP" and signal_dir == "LONG") or (
+                pred_dir == "DOWN" and signal_dir == "SHORT"
+            )
+            adj = abs(adj) if aligned else -abs(adj)
+
         old = signal.confidence
-        signal.confidence = max(0.0, min(100.0, old + prediction.confidence_adjustment))
+        signal.confidence = max(0.0, min(100.0, old + adj))
         if signal.confidence != old:
             log.debug(
                 "%s confidence %.1f → %.1f (adj %+.1f)",
@@ -139,9 +155,9 @@ class PredictiveEngine:
         indicators: Dict[str, Any],
     ) -> PredictionResult:
         """Simple momentum / EMA heuristic used as a placeholder model."""
-        momentum: float = float(indicators.get("momentum", 0.0))
-        ema_fast: float = float(indicators.get("ema_fast", 0.0))
-        ema_slow: float = float(indicators.get("ema_slow", 0.0))
+        momentum: float = float(indicators.get("momentum_last", 0.0))
+        ema_fast: float = float(indicators.get("ema9_last", 0.0))
+        ema_slow: float = float(indicators.get("ema21_last", 0.0))
         close: float = float(indicators.get("close", 0.0)) or float(
             candles.get("close", 0.0)
         )
@@ -159,11 +175,11 @@ class PredictiveEngine:
         else:
             direction = "NEUTRAL"
 
-        # Confidence adjustment proportional to signal strength
+        # Confidence adjustment proportional to signal strength.
+        # Both UP and DOWN represent directional conviction; the sign is applied
+        # by update_confidence() based on alignment with the signal direction.
         strength = min(abs(ema_diff_pct) + abs(momentum) * 0.5, 10.0)
-        confidence_adj = strength if direction == "UP" else (
-            -strength if direction == "DOWN" else 0.0
-        )
+        confidence_adj = strength if direction in ("UP", "DOWN") else 0.0
 
         # TP/SL multiplier: widen targets when conviction is high
         tp_mult = 1.0 + (strength / 100.0)   # e.g. 1.0 – 1.10

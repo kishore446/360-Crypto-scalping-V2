@@ -31,7 +31,9 @@ from config import (
     CHANNEL_SWING,
     CHANNEL_RANGE,
     CHANNEL_TAPE,
+    PAIR_FETCH_INTERVAL_HOURS,
     SEED_TIMEFRAMES,
+    TELEGRAM_ADMIN_CHAT_ID,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCALP_CHANNEL_ID,
 )
@@ -178,6 +180,24 @@ class CryptoSignalEngine:
         if not ws_healthy:
             log.warning("Pre-flight: WebSocket managers are not all healthy")
 
+        # Non-fatal: check Redis connectivity
+        if not self._redis_client.available:
+            log.warning("Pre-flight: Redis not available – using in-memory fallback")
+
+        # Non-fatal: basic Binance REST ping
+        try:
+            _ping_client = BinanceClient("spot")
+            ping_resp = await asyncio.wait_for(
+                _ping_client._get("/api/v3/ping", weight=1), timeout=5
+            )
+            await _ping_client.close()
+            if ping_resp is None:
+                log.warning("Pre-flight: Binance REST ping returned no data")
+            else:
+                log.info("Pre-flight: Binance REST ping OK")
+        except Exception as exc:
+            log.warning("Pre-flight: Binance REST ping failed: %s", exc)
+
         if ok:
             log.info("Pre-flight checks passed")
         return ok
@@ -193,6 +213,9 @@ class CryptoSignalEngine:
         # 0. Connect to Redis (graceful fallback if unavailable)
         await self._redis_client.connect()
         self.telemetry.set_redis_client(self._redis_client)
+
+        # Wire API call tracking so every Binance REST call increments telemetry
+        BinanceClient.on_api_call = self.telemetry.record_api_call
 
         # 1. Fetch pairs
         await self.pair_mgr.refresh_pairs()
@@ -215,7 +238,7 @@ class CryptoSignalEngine:
             asyncio.create_task(self.router.start()),
             asyncio.create_task(self.monitor.start()),
             asyncio.create_task(self.telemetry.start()),
-            asyncio.create_task(self.pair_mgr.run_periodic_refresh()),
+            asyncio.create_task(self._pair_refresh_loop()),
             asyncio.create_task(self._scan_loop()),
             asyncio.create_task(self.telegram.poll_commands(self._handle_command)),
             asyncio.create_task(self._free_channel_loop()),
@@ -280,6 +303,14 @@ class CryptoSignalEngine:
         if futures_streams:
             await self._ws_futures.start(futures_streams)
 
+        # Set critical pairs for REST fallback during WS outages
+        top_spot = self.pair_mgr.spot_symbols[:10]
+        top_futures = self.pair_mgr.futures_symbols[:10]
+        if self._ws_spot and top_spot:
+            self._ws_spot.set_critical_pairs(top_spot)
+        if self._ws_futures and top_futures:
+            self._ws_futures.set_critical_pairs(top_futures)
+
     async def _on_ws_message(self, data: dict) -> None:
         """Handle a raw WebSocket message (kline or trade)."""
         event = data.get("e")
@@ -328,6 +359,7 @@ class CryptoSignalEngine:
             self.telemetry.set_scan_latency(elapsed_ms)
             self.telemetry.set_pairs_monitored(len(self.pair_mgr.pairs))
             self.telemetry.set_active_signals(len(self.router.active_signals))
+            self.telemetry.set_queue_size(self._signal_queue.qsize())
             ws_conns = (
                 (self._ws_spot.stream_count if self._ws_spot else 0)
                 + (self._ws_futures.stream_count if self._ws_futures else 0)
@@ -531,11 +563,14 @@ class CryptoSignalEngine:
             if liq_parts:
                 sig.liquidity_info = " | ".join(liq_parts)
 
+            # Attach market context for risk manager
+            sig.spread_pct = spread_pct
+            sig.volume_24h_usd = volume_24h
+
             try:
                 self._signal_queue.put_nowait(sig)
             except asyncio.QueueFull:
                 log.warning("Signal queue full – dropping %s", sig.signal_id)
-
     # ------------------------------------------------------------------
     # Free-channel daily publication
     # ------------------------------------------------------------------
@@ -549,6 +584,28 @@ class CryptoSignalEngine:
             except Exception as exc:
                 log.error("Free channel publish error: %s", exc)
 
+    async def _pair_refresh_loop(self) -> None:
+        """Periodically refresh pairs and seed any newly discovered symbols."""
+        while True:
+            await asyncio.sleep(PAIR_FETCH_INTERVAL_HOURS * 3600)
+            try:
+                new_symbols = await self.pair_mgr.refresh_pairs()
+                for sym in new_symbols:
+                    info = self.pair_mgr.pairs.get(sym)
+                    if info is None:
+                        continue
+                    try:
+                        await self.data_store.seed_symbol(sym, info.market)
+                        for tf_name, data in self.data_store.candles.get(sym, {}).items():
+                            self.pair_mgr.record_candles(sym, tf_name, len(data.get("close", [])))
+                        log.info("Seeded new pair %s (%s)", sym, info.market)
+                    except Exception as exc:
+                        log.error("Failed to seed new pair %s: %s", sym, exc)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                log.error("Pair refresh loop error: %s", exc)
+
     # ------------------------------------------------------------------
     # Admin command handler
     # ------------------------------------------------------------------
@@ -556,8 +613,22 @@ class CryptoSignalEngine:
     async def _handle_command(self, text: str, chat_id: str) -> None:
         parts = text.strip().split()
         cmd = parts[0].lower()
+        is_admin = bool(TELEGRAM_ADMIN_CHAT_ID and chat_id == TELEGRAM_ADMIN_CHAT_ID)
 
-        # --- Admin commands ---
+        # --- Admin-only commands ---
+
+        if cmd in (
+            "/view_dashboard", "/update_pairs", "/subscribe_alerts",
+            "/view_pairs", "/force_scan", "/pause_channel", "/resume_channel",
+            "/set_confidence_threshold", "/engine_status", "/memory_usage",
+            "/set_free_channel_limit", "/force_update_ai", "/view_active_signals",
+            "/view_logs", "/update_code", "/restart_engine", "/rollback_code",
+        ) and not is_admin:
+            await self.telegram.send_message(
+                chat_id,
+                "⛔ This command is restricted to administrators.",
+            )
+            return
 
         if cmd == "/view_dashboard":
             await self.telegram.send_message(chat_id, self.telemetry.dashboard_text())
@@ -757,7 +828,7 @@ class CryptoSignalEngine:
                 commit = parts[1]
                 # Restrict to safe commit references: hex SHAs, branch names, tags
                 # (alphanumeric, hyphens only – no path traversal characters)
-                if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-]{0,79}$', commit):
+                if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]{0,79}$', commit):
                     await self.telegram.send_message(chat_id, "❌ Invalid commit reference.")
                 else:
                     await self.telegram.send_message(chat_id, f"⏳ Running git checkout {commit} …")

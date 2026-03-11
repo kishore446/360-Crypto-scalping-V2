@@ -21,6 +21,15 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 
+# Python version check (3.11+ required)
+PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+if python3 -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
+    echo "Python $PYTHON_VERSION ✅"
+else
+    echo "⚠️ Python 3.11+ required, found $PYTHON_VERSION"
+    exit 1
+fi
+
 # Install dependencies
 echo "Installing dependencies …"
 pip install --upgrade pip

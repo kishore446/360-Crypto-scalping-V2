@@ -47,7 +47,7 @@ class TestPredictiveEngine:
         result = await engine.predict(
             "BTCUSDT",
             {"close": 32000.0},
-            {"momentum": 0.5, "ema_fast": 32100.0, "ema_slow": 32000.0, "close": 32000.0},
+            {"momentum_last": 0.5, "ema9_last": 32100.0, "ema21_last": 32000.0, "close": 32000.0},
         )
         assert result.predicted_direction in ("UP", "DOWN", "NEUTRAL")
         assert result.model_name == "placeholder-momentum-v0"
@@ -60,7 +60,7 @@ class TestPredictiveEngine:
         result = await engine.predict(
             "BTCUSDT",
             {"close": 32000.0},
-            {"momentum": 2.0, "ema_fast": 32200.0, "ema_slow": 32000.0, "close": 32000.0},
+            {"momentum_last": 2.0, "ema9_last": 32200.0, "ema21_last": 32000.0, "close": 32000.0},
         )
         assert result.predicted_direction == "UP"
         assert result.confidence_adjustment > 0
@@ -73,10 +73,11 @@ class TestPredictiveEngine:
         result = await engine.predict(
             "BTCUSDT",
             {"close": 32000.0},
-            {"momentum": -2.0, "ema_fast": 31800.0, "ema_slow": 32000.0, "close": 32000.0},
+            {"momentum_last": -2.0, "ema9_last": 31800.0, "ema21_last": 32000.0, "close": 32000.0},
         )
         assert result.predicted_direction == "DOWN"
-        assert result.confidence_adjustment < 0
+        # DOWN conviction is now a positive magnitude; sign applied by update_confidence
+        assert result.confidence_adjustment > 0
 
 
 class TestAdjustTPSL:
@@ -176,3 +177,40 @@ class TestUpdateConfidence:
         pred = PredictionResult(confidence_adjustment=0.0)
         engine.update_confidence(sig, pred)
         assert sig.confidence == 85.0
+
+    def test_down_prediction_aligned_with_short_boosts_confidence(self):
+        """DOWN prediction aligned with SHORT signal should increase confidence."""
+        from src.smc import Direction
+        engine = PredictiveEngine()
+        sig = self._make_signal(confidence=85.0)
+        sig.direction = Direction.SHORT
+        pred = PredictionResult(
+            predicted_direction="DOWN",
+            confidence_adjustment=5.0,
+        )
+        engine.update_confidence(sig, pred)
+        assert sig.confidence == 90.0  # aligned → positive boost
+
+    def test_down_prediction_opposing_long_reduces_confidence(self):
+        """DOWN prediction opposing LONG signal should decrease confidence."""
+        engine = PredictiveEngine()
+        sig = self._make_signal(confidence=85.0)  # LONG signal
+        pred = PredictionResult(
+            predicted_direction="DOWN",
+            confidence_adjustment=5.0,
+        )
+        engine.update_confidence(sig, pred)
+        assert sig.confidence == 80.0  # opposing → negative
+
+    def test_up_prediction_opposing_short_reduces_confidence(self):
+        """UP prediction opposing SHORT signal should decrease confidence."""
+        from src.smc import Direction
+        engine = PredictiveEngine()
+        sig = self._make_signal(confidence=85.0)
+        sig.direction = Direction.SHORT
+        pred = PredictionResult(
+            predicted_direction="UP",
+            confidence_adjustment=5.0,
+        )
+        engine.update_confidence(sig, pred)
+        assert sig.confidence == 80.0  # opposing → negative

@@ -126,7 +126,11 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     async def poll_commands(self, handler) -> None:
-        """Long-poll for admin commands (``/update_pairs``, ``/view_dashboard``, etc.)."""
+        """Long-poll for commands from any chat that starts with ``/``.
+
+        Admin-only commands are gated inside the *handler* by comparing
+        ``chat_id`` against ``TELEGRAM_ADMIN_CHAT_ID``.
+        """
         self._running = True
         while self._running:
             try:
@@ -146,7 +150,7 @@ class TelegramBot:
                     msg = update.get("message", {})
                     text = msg.get("text", "")
                     chat_id = str(msg.get("chat", {}).get("id", ""))
-                    if chat_id == TELEGRAM_ADMIN_CHAT_ID and text.startswith("/"):
+                    if text.startswith("/"):
                         await handler(text, chat_id)
             except asyncio.CancelledError:
                 break

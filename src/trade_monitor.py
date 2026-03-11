@@ -144,13 +144,26 @@ class TradeMonitor:
         if not channel_id:
             return
 
+        chan_emojis = {
+            "360_SCALP": "⚡",
+            "360_SWING": "🏛️",
+            "360_RANGE": "⚖️",
+            "360_THE_TAPE": "🐋",
+        }
+        chan_emoji = chan_emojis.get(sig.channel, "📡")
         dir_emoji = "🚀" if sig.direction == Direction.LONG else "⬇️"
-        text = (
-            f"{event}\n"
-            f"📌 {sig.channel} | {sig.symbol} {sig.direction.value} {dir_emoji}\n"
-            f"💰 Entry: {fmt_price(sig.entry)} → Current: {fmt_price(sig.current_price)}\n"
-            f"📊 PnL: {sig.pnl_pct:+.2f}%\n"
-            f"🛡️ SL: {fmt_price(sig.stop_loss)}\n"
-            f"⏰ {fmt_ts()}"
-        )
+
+        lines = [
+            f"{event}",
+            f"{chan_emoji} *{sig.channel}* | {sig.symbol} *{sig.direction.value}* {dir_emoji}",
+            f"💰 Entry: `{fmt_price(sig.entry)}` → Current: `{fmt_price(sig.current_price)}`",
+            f"📊 PnL: *{sig.pnl_pct:+.2f}%*",
+            f"🛡️ SL: `{fmt_price(sig.stop_loss)}`",
+            f"🤖 Confidence: *{sig.confidence:.0f}%*",
+        ]
+        if sig.trailing_active and sig.trailing_desc:
+            lines.append(f"💹 Trailing Active ({sig.trailing_desc})")
+        lines.append(f"⏰ {fmt_ts()}")
+
+        text = "\n".join(lines)
         await self._send(channel_id, text)

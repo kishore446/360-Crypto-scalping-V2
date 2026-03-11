@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
 
@@ -35,6 +35,10 @@ class BinanceClient:
     market:
         ``"spot"`` or ``"futures"``.  Determines which base URL is used.
     """
+
+    # Class-level callback invoked after each successful REST call.
+    # Wire this to ``TelemetryCollector.record_api_call`` from ``main.py``.
+    on_api_call: Optional[Callable[[], None]] = None
 
     def __init__(self, market: str = "spot") -> None:
         self.market = market
@@ -103,7 +107,10 @@ class BinanceClient:
                     url, params=params, timeout=aiohttp.ClientTimeout(total=15)
                 ) as resp:
                     if resp.status == 200:
-                        return await resp.json()
+                        data = await resp.json()
+                        if BinanceClient.on_api_call is not None:
+                            BinanceClient.on_api_call()
+                        return data
                     if resp.status in (429, 418):
                         retry_after = int(resp.headers.get("Retry-After", 5))
                         wait = max(retry_after, _BACKOFF_BASE ** attempt)

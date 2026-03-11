@@ -2,7 +2,11 @@
 
 Supports up to ``WS_MAX_STREAMS_PER_CONN`` streams per connection,
 exponential-backoff reconnect, auto-resubscribe, REST fallback,
-queue buffering, and admin Telegram alerts.
+and admin Telegram alerts.
+
+Message buffering during reconnection gaps is handled by the upstream
+:class:`src.signal_queue.SignalQueue` layer (Redis + asyncio.Queue fallback),
+not at the WebSocket manager level.
 """
 
 from __future__ import annotations
@@ -53,7 +57,6 @@ class WebSocketManager:
         self._connections: List[WSConnection] = []
         self._session: Optional[aiohttp.ClientSession] = None
         self._running = False
-        self._buffer: asyncio.Queue[dict] = asyncio.Queue(maxsize=10_000)
         self._subscribed_streams: Set[str] = set()
         self._rest_fallback_active: bool = False
         self._critical_pairs: Set[str] = set()

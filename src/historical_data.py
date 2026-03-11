@@ -143,13 +143,8 @@ class HistoricalDataStore:
         log.info("Starting historical data seed for %d pairs …", len(pair_mgr.pairs))
         for sym, info in pair_mgr.pairs.items():
             await self.seed_symbol(sym, info.market)
-            pair_mgr.record_candles(
-                sym, "all",
-                sum(
-                    len(d.get("close", []))
-                    for d in self.candles.get(sym, {}).values()
-                ),
-            )
+            for tf_name, data in self.candles.get(sym, {}).items():
+                pair_mgr.record_candles(sym, tf_name, len(data.get("close", [])))
         log.info("Historical data seed complete.")
 
     # ------------------------------------------------------------------

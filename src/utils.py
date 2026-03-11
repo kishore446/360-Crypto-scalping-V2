@@ -14,14 +14,14 @@ from config import LOG_LEVEL
 _loguru_logger.remove()  # remove default handler
 _loguru_logger.add(
     sys.stderr,
-    format="{time:YYYY-MM-DD HH:MM:SS} | {extra[name]:<24} | {level:<7} | {message}",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {extra[name]:<24} | {level:<7} | {message}",
     level=LOG_LEVEL.upper(),
 )
 _loguru_logger.add(
     "logs/engine_{time}.log",
     rotation="50 MB",
     retention="30 days",
-    format="{time:YYYY-MM-DD HH:MM:SS} | {extra[name]:<24} | {level:<7} | {message}",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {extra[name]:<24} | {level:<7} | {message}",
     level="DEBUG",
 )
 _configured = True

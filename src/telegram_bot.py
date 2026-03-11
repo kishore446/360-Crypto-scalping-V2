@@ -103,8 +103,8 @@ class TelegramBot:
         lines.append(sentiment_line)
 
         lines.append(f"⚠️ Risk: {sig.risk_label}")
-        lines.append(f"📊 Market Phase: {getattr(sig, 'market_phase', 'N/A')}")
-        lines.append(f"💧 Liquidity Pool: {getattr(sig, 'liquidity_info', 'Standard')}")
+        lines.append(f"📊 Market Phase: {sig.market_phase}")
+        lines.append(f"💧 Liquidity Pool: {sig.liquidity_info}")
         lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
 
         return "\n".join(lines)

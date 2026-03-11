@@ -36,4 +36,3 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
-=0.7.0

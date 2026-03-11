@@ -123,8 +123,8 @@ class CryptoSignalEngine:
             ok = False
 
         ws_healthy = (
-            (self._ws_spot.is_healthy if self._ws_spot else False)
-            and (self._ws_futures.is_healthy if self._ws_futures else False)
+            (self._ws_spot.is_healthy if self._ws_spot else True)
+            and (self._ws_futures.is_healthy if self._ws_futures else True)
         )
         if not ws_healthy:
             log.warning("Pre-flight: WebSocket managers are not all healthy")

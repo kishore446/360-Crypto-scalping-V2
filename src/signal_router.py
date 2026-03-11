@@ -40,6 +40,7 @@ class SignalRouter:
         self._daily_best: List[Signal] = []  # for free channel
         self._position_lock: Dict[str, Direction] = {}  # symbol → direction
         self._running = False
+        self._free_limit: int = 2  # max daily free signals
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -103,14 +104,23 @@ class SignalRouter:
         # Track for daily free-channel picks
         self._daily_best.append(signal)
         self._daily_best.sort(key=lambda s: s.confidence, reverse=True)
-        self._daily_best = self._daily_best[:2]
+        self._trim_daily_best()
 
     # ------------------------------------------------------------------
     # Free-channel publication (call once/day or on demand)
     # ------------------------------------------------------------------
 
+    def _trim_daily_best(self) -> None:
+        """Trim ``_daily_best`` to the current free-signal limit."""
+        self._daily_best = self._daily_best[:max(self._free_limit, 1)]
+
+    def set_free_limit(self, limit: int) -> None:
+        """Update the maximum number of daily free signals."""
+        self._free_limit = max(0, limit)
+        self._trim_daily_best()
+
     async def publish_free_signals(self) -> None:
-        """Post the top 1–2 signals of the day to the free channel."""
+        """Post the top free signals of the day to the free channel."""
         if not self._daily_best or not TELEGRAM_FREE_CHANNEL_ID:
             return
         for sig in self._daily_best:

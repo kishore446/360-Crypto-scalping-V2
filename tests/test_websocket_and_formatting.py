@@ -1,6 +1,7 @@
 """Tests for WebSocket REST fallback and enhanced signal formatting."""
 
 import asyncio
+import time
 
 import pytest
 
@@ -8,7 +9,7 @@ from src.channels.base import Signal
 from src.smc import Direction
 from src.telegram_bot import TelegramBot
 from src.utils import utcnow
-from src.websocket_manager import WebSocketManager
+from src.websocket_manager import WSConnection, WebSocketManager
 
 
 class TestWebSocketFallback:
@@ -141,3 +142,70 @@ class TestSignalDataclass:
         )
         assert sig.market_phase == "Accumulation"
         assert sig.liquidity_info == "Deep"
+
+
+class TestEscapeMdFunction:
+    """Verify the _escape_md helper escapes all Markdown V1 special characters."""
+
+    def test_escape_asterisk(self):
+        assert TelegramBot._escape_md("*bold*") == "\\*bold\\*"
+
+    def test_escape_underscore(self):
+        assert TelegramBot._escape_md("_italic_") == "\\_italic\\_"
+
+    def test_escape_backtick(self):
+        assert TelegramBot._escape_md("`code`") == "\\`code\\`"
+
+    def test_escape_bracket(self):
+        assert TelegramBot._escape_md("[text]") == "\\[text]"
+
+    def test_escape_backslash(self):
+        assert TelegramBot._escape_md("a\\b") == "a\\\\b"
+
+    def test_escape_all_special_chars(self):
+        raw = "*_`[\\"
+        escaped = TelegramBot._escape_md(raw)
+        assert escaped == "\\*\\_\\`\\[\\\\"
+
+    def test_plain_text_unchanged(self):
+        text = "Sweep SHORT at 0.3572 | FVG 0.3543-0.3538"
+        assert TelegramBot._escape_md(text) == text
+
+    def test_empty_string(self):
+        assert TelegramBot._escape_md("") == ""
+
+
+class TestWebSocketLastPongOnText:
+    """Verify that last_pong is updated when TEXT messages arrive."""
+
+    def test_last_pong_updated_on_text_message(self):
+        """is_healthy should remain True after TEXT messages (not just PONG frames)."""
+        import aiohttp
+
+        received = []
+
+        async def handler(data):
+            received.append(data)
+
+        ws = WebSocketManager(handler, market="spot")
+
+        # Simulate a connection that received a TEXT message recently
+        conn = WSConnection()
+        conn.last_pong = time.monotonic()  # fresh timestamp
+
+        # Immediately after connect the connection should be healthy
+        ws._connections = [conn]
+
+        # Monkey-patch ws so is_healthy thinks the socket is open
+        mock_ws = type("FakeWS", (), {"closed": False})()
+        conn.ws = mock_ws
+
+        assert ws.is_healthy is True
+
+        # Simulate staleness beyond the 3× heartbeat window
+        conn.last_pong = time.monotonic() - 200  # 200 s ago → stale
+        assert ws.is_healthy is False
+
+        # Simulate a TEXT message arriving and updating last_pong
+        conn.last_pong = time.monotonic()
+        assert ws.is_healthy is True

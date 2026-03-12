@@ -38,7 +38,12 @@ class TelegramBot:
     # ------------------------------------------------------------------
 
     async def send_message(self, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
-        """Send a message to *chat_id*. Returns True on success."""
+        """Send a message to *chat_id*. Returns True on success.
+
+        If the send fails with a 400 "can't parse entities" error (Markdown
+        formatting issue in dynamic content), the message is retried as plain
+        text so the user still receives the signal.
+        """
         if not self._token:
             log.debug("Telegram token not configured – message not sent")
             return False
@@ -51,6 +56,17 @@ class TelegramBot:
                     return True
                 body = await resp.text()
                 log.warning("Telegram send failed (%s): %s", resp.status, body)
+                # Retry as plain text if Markdown parsing failed
+                if resp.status == 400 and "can't parse entities" in body:
+                    log.info("Retrying message as plain text after Markdown parse failure")
+                    plain_payload = {"chat_id": chat_id, "text": text}
+                    async with session.post(
+                        url, json=plain_payload, timeout=aiohttp.ClientTimeout(total=10)
+                    ) as retry_resp:
+                        if retry_resp.status == 200:
+                            return True
+                        retry_body = await retry_resp.text()
+                        log.warning("Telegram plain-text retry failed (%s): %s", retry_resp.status, retry_body)
         except Exception as exc:
             log.error("Telegram send error: %s", exc)
         return False
@@ -64,6 +80,19 @@ class TelegramBot:
     # ------------------------------------------------------------------
     # Rich signal formatting
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _escape_md(text: str) -> str:
+        """Escape Markdown V1 special characters in dynamic text fields.
+
+        Telegram's legacy MarkdownV1 uses ``*``, ``_``, `` ` ``, and ``[``
+        as formatting markers.  Dynamic values such as ``liquidity_info``
+        may contain these characters and must be escaped so they are rendered
+        as literal text rather than misinterpreted as entity boundaries.
+        """
+        for ch in ("\\", "*", "_", "`", "["):
+            text = text.replace(ch, f"\\{ch}")
+        return text
 
     @staticmethod
     def format_signal(sig: Signal) -> str:
@@ -93,18 +122,18 @@ class TelegramBot:
             lines.append("🎯 TP3: Dynamic/trailing")
 
         if sig.trailing_active:
-            lines.append(f"💹 Trailing Active ({sig.trailing_desc})")
+            lines.append(f"💹 Trailing Active ({TelegramBot._escape_md(sig.trailing_desc)})")
 
         lines.append(f"🤖 Confidence: *{sig.confidence:.0f}%*")
 
         sentiment_line = f"📰 AI Sentiment: {sig.ai_sentiment_label}"
         if sig.ai_sentiment_summary:
-            sentiment_line += f" — {sig.ai_sentiment_summary}"
+            sentiment_line += f" — {TelegramBot._escape_md(sig.ai_sentiment_summary)}"
         lines.append(sentiment_line)
 
-        lines.append(f"⚠️ Risk: {sig.risk_label}")
-        lines.append(f"📊 Market Phase: {sig.market_phase}")
-        lines.append(f"💧 Liquidity Pool: {sig.liquidity_info}")
+        lines.append(f"⚠️ Risk: {TelegramBot._escape_md(sig.risk_label)}")
+        lines.append(f"📊 Market Phase: {TelegramBot._escape_md(sig.market_phase)}")
+        lines.append(f"💧 Liquidity Pool: {TelegramBot._escape_md(sig.liquidity_info)}")
         lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
 
         return "\n".join(lines)

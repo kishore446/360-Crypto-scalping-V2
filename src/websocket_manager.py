@@ -223,6 +223,9 @@ class WebSocketManager:
         assert conn.ws is not None
         async for msg in conn.ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
+                # Any incoming data message proves the connection is alive;
+                # update last_pong so is_healthy reflects real liveness.
+                conn.last_pong = time.monotonic()
                 try:
                     data = json.loads(msg.data)
                     await self._on_message(data)

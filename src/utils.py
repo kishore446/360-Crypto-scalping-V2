@@ -27,9 +27,53 @@ _loguru_logger.add(
 _configured = True
 
 
-def get_logger(name: str) -> Any:
-    """Return a loguru logger bound with *name* context."""
-    return _loguru_logger.bind(name=name)
+class _LoguroBridge:
+    """Thin wrapper that accepts %-style format strings and forwards to loguru.
+
+    Loguru uses ``{}`` (str.format) style by default.  Most callers in this
+    codebase use the stdlib ``%s`` / ``%d`` convention, so this bridge
+    pre-formats the message before handing it to loguru.
+    """
+
+    __slots__ = ("_logger",)
+
+    def __init__(self, logger: Any) -> None:
+        self._logger = logger
+
+    @staticmethod
+    def _fmt(msg: str, args: tuple) -> str:
+        if args:
+            try:
+                return msg % args
+            except (TypeError, ValueError) as exc:
+                _loguru_logger.warning(
+                    "Log format error ({}) for message: {!r}", exc, msg
+                )
+                return str(msg)
+        return msg
+
+    def debug(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.debug(self._fmt(msg, args), **kwargs)
+
+    def info(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.info(self._fmt(msg, args), **kwargs)
+
+    def warning(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.warning(self._fmt(msg, args), **kwargs)
+
+    def error(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.error(self._fmt(msg, args), **kwargs)
+
+    def critical(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.critical(self._fmt(msg, args), **kwargs)
+
+    def exception(self, msg: str, *args: Any, **kwargs: Any) -> None:
+        self._logger.exception(self._fmt(msg, args), **kwargs)
+
+
+def get_logger(name: str) -> _LoguroBridge:
+    """Return a logger bound with *name* context, accepting %-style format strings."""
+    return _LoguroBridge(_loguru_logger.bind(name=name))
 
 
 def utcnow() -> datetime:

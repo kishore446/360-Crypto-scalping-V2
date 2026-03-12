@@ -62,7 +62,14 @@ class TelemetryCollector:
         self._scan_latency_ms = ms
 
     def set_queue_size(self, size: int) -> None:
-        self._queue_size = size
+        if isinstance(size, int):
+            self._queue_size = size
+        else:
+            log.warning(
+                "set_queue_size received non-int value (%s: %r) — ignoring",
+                type(size).__name__,
+                size,
+            )
 
     def set_redis_client(self, client: Any) -> None:
         """Register the RedisClient instance for health reporting."""

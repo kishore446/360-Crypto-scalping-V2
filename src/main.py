@@ -82,6 +82,12 @@ _TELEGRAM_LOG_MAX_CHARS: int = 3_500
 # Repo root for subprocess git commands
 _REPO_ROOT: Path = Path(__file__).parent.parent
 
+# Order book spread cache TTL and per-cycle fetch cap.
+# A 30-second TTL avoids hammering Binance REST every scan cycle, and
+# the per-cycle cap prevents rate-limit bursts when many pairs are uncached.
+_SPREAD_CACHE_TTL: float = 30.0
+_MAX_ORDER_BOOK_FETCHES_PER_CYCLE: int = 5
+
 
 class CryptoSignalEngine:
     """Top-level orchestrator for the signal engine."""
@@ -127,6 +133,8 @@ class CryptoSignalEngine:
         self._spot_client: Optional[BinanceClient] = None
         # Cache: symbol → (spread_pct, timestamp)
         self._order_book_cache: Dict[str, Tuple[float, float]] = {}
+        # Tracks order book REST fetches made in the current scan cycle
+        self._order_book_fetches_this_cycle: int = 0
 
         # WebSocket managers
         self._ws_spot: Optional[WebSocketManager] = None
@@ -347,6 +355,7 @@ class CryptoSignalEngine:
         log.info("Scanner loop started")
         while True:
             t0 = time.monotonic()
+            self._order_book_fetches_this_cycle = 0
             try:
                 for sym, info in list(self.pair_mgr.pairs.items()):
                     await self._scan_symbol(sym, info.volume_24h_usd)
@@ -359,7 +368,12 @@ class CryptoSignalEngine:
             self.telemetry.set_scan_latency(elapsed_ms)
             self.telemetry.set_pairs_monitored(len(self.pair_mgr.pairs))
             self.telemetry.set_active_signals(len(self.router.active_signals))
-            self.telemetry.set_queue_size(self._signal_queue.qsize())
+            try:
+                qsize = await self._signal_queue.qsize()
+            except Exception as exc:
+                log.warning("Failed to read signal queue size: %s", exc)
+                qsize = 0
+            self.telemetry.set_queue_size(qsize)
             ws_conns = (
                 (self._ws_spot.stream_count if self._ws_spot else 0)
                 + (self._ws_futures.stream_count if self._ws_futures else 0)
@@ -436,15 +450,15 @@ class CryptoSignalEngine:
         except Exception:
             pass
 
-        # Real order book spread with 5-second TTL cache
+        # Real order book spread with TTL cache and per-cycle fetch cap
         spread_pct = 0.01  # fallback
-        _SPREAD_CACHE_TTL = 5.0
         now = time.monotonic()
         cached = self._order_book_cache.get(symbol)
         if cached and (now - cached[1]) < _SPREAD_CACHE_TTL:
             spread_pct = cached[0]
-        else:
+        elif self._order_book_fetches_this_cycle < _MAX_ORDER_BOOK_FETCHES_PER_CYCLE:
             try:
+                self._order_book_fetches_this_cycle += 1
                 if self._spot_client is None:
                     self._spot_client = BinanceClient("spot")
                 book = await self._spot_client.fetch_order_book(symbol, limit=5)
@@ -714,7 +728,7 @@ class CryptoSignalEngine:
                 "🔧 Engine Status",
                 f"Uptime: {hours}h {minutes}m {secs}s",
                 f"Running tasks: {sum(1 for t in self._tasks if not t.done())}",
-                f"Queue size: {self._signal_queue.qsize()}",
+                f"Queue size: {await self._signal_queue.qsize()}",
                 f"Pairs: {len(self.pair_mgr.pairs)}",
                 f"Active signals: {len(self.router.active_signals)}",
                 f"WS healthy: {'✅' if ws_healthy else '❌'}",

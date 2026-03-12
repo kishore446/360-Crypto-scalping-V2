@@ -84,7 +84,7 @@ class TelegramBot:
             f"📈 *{dir_word}* {dir_emoji}",
             f"🚀 Entry: `{fmt_price(sig.entry)}`",
             f"🛡️ SL: `{fmt_price(sig.stop_loss)}`",
-            f"🎯 TP1: `{fmt_price(sig.tp1)}` ✅",
+            f"🎯 TP1: `{fmt_price(sig.tp1)}`",
             f"🎯 TP2: `{fmt_price(sig.tp2)}`",
         ]
         if sig.tp3 is not None:

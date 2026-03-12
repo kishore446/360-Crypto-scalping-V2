@@ -208,3 +208,150 @@ class TestSignalRouter:
             pass
 
         assert "TEST-ADA-001" in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_tp_direction_rejected_long(self, queue, router, sent_messages):
+        """LONG signal where TP1 <= entry must be rejected."""
+        sig = Signal(
+            channel="360_SCALP",
+            symbol="DOTUSDT",
+            direction=Direction.LONG,
+            entry=1.5100,
+            stop_loss=1.5000,
+            tp1=1.5100,  # TP1 == entry → invalid
+            tp2=1.5200,
+            confidence=85,
+            signal_id="TEST-DOT-TP-LONG",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-DOT-TP-LONG" not in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_tp_direction_rejected_short(self, queue, router, sent_messages):
+        """SHORT signal where TP1 >= entry must be rejected."""
+        sig = Signal(
+            channel="360_SCALP",
+            symbol="AVNTUSDT",
+            direction=Direction.SHORT,
+            entry=0.175700,
+            stop_loss=0.176500,
+            tp1=0.177899,  # TP1 > entry for SHORT → invalid
+            tp2=0.177522,
+            confidence=85,
+            signal_id="TEST-AVNT-TP-SHORT",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-AVNT-TP-SHORT" not in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_sl_direction_rejected_long(self, queue, router, sent_messages):
+        """LONG signal where SL >= entry must be rejected."""
+        sig = Signal(
+            channel="360_SCALP",
+            symbol="XYZUSDT",
+            direction=Direction.LONG,
+            entry=1.0000,
+            stop_loss=1.0050,  # SL > entry for LONG → invalid
+            tp1=1.0200,
+            tp2=1.0300,
+            confidence=85,
+            signal_id="TEST-XYZ-SL-LONG",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-XYZ-SL-LONG" not in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_sl_direction_rejected_short(self, queue, router, sent_messages):
+        """SHORT signal where SL <= entry must be rejected."""
+        sig = Signal(
+            channel="360_SCALP",
+            symbol="PIPUSDT",
+            direction=Direction.SHORT,
+            entry=0.355990,
+            stop_loss=0.354000,  # SL < entry for SHORT → invalid
+            tp1=0.353000,
+            tp2=0.351000,
+            confidence=85,
+            signal_id="TEST-PIP-SL-SHORT",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-PIP-SL-SHORT" not in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_global_position_cap_blocks_excess(self, queue, router, sent_messages):
+        """When MAX_CONCURRENT_SIGNALS positions are open, the next signal is blocked."""
+        from config import MAX_CONCURRENT_SIGNALS
+
+        # Pre-fill active_signals to the cap using distinct symbols
+        for i in range(MAX_CONCURRENT_SIGNALS):
+            dummy = _make_signal(symbol=f"DUMMY{i}USDT", confidence=90)
+            dummy.signal_id = f"DUMMY-{i}"
+            router._active_signals[dummy.signal_id] = dummy
+            router._position_lock[dummy.symbol] = dummy.direction
+
+        # Now try to add one more signal for a brand-new symbol
+        sig = Signal(
+            channel="360_SCALP",
+            symbol="NEWUSDT",
+            direction=Direction.LONG,
+            entry=1.0000,
+            stop_loss=0.9900,
+            tp1=1.0200,
+            tp2=1.0300,
+            confidence=90,
+            signal_id="TEST-NEW-CAP",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # The new signal must be blocked; cap must not be exceeded
+        assert "TEST-NEW-CAP" not in router.active_signals
+        assert len(router.active_signals) == MAX_CONCURRENT_SIGNALS

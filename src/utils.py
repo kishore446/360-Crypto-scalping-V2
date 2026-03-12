@@ -82,11 +82,20 @@ def utcnow() -> datetime:
 
 
 def fmt_price(price: float) -> str:
-    """Format a price with comma grouping and adaptive decimals."""
+    """Format a price with comma grouping and adaptive decimals.
+
+    Precision tiers:
+      ≥ $1,000 → 0 decimals  (e.g. BTC, ETH)
+      ≥ $100   → 2 decimals  (e.g. SOL, BNB)
+      ≥ $1     → 4 decimals  (e.g. DOT, UNI – avoids identical TP display)
+      < $1     → 6 decimals  (e.g. DOGE, SHIB)
+    """
     if price >= 1_000:
         return f"{price:,.0f}"
-    if price >= 1:
+    if price >= 100:
         return f"{price:,.2f}"
+    if price >= 1:
+        return f"{price:,.4f}"
     return f"{price:.6f}"
 
 

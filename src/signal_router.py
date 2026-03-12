@@ -22,6 +22,7 @@ from config import (
     ALL_CHANNELS,
     CHANNEL_COOLDOWN_SECONDS,
     CHANNEL_TELEGRAM_MAP,
+    MAX_CONCURRENT_SIGNALS,
     TELEGRAM_FREE_CHANNEL_ID,
 )
 from src.channels.base import Signal
@@ -132,6 +133,43 @@ class SignalRouter:
                     cooldown_secs - elapsed, cooldown_secs,
                 )
                 return
+
+        # Global concurrent position cap
+        if len(self._active_signals) >= MAX_CONCURRENT_SIGNALS:
+            log.info(
+                "Global position cap reached (%d/%d) – %s %s blocked",
+                len(self._active_signals), MAX_CONCURRENT_SIGNALS,
+                signal.symbol, signal.direction.value,
+            )
+            return
+
+        # TP direction sanity – reject signals where TP1 is on wrong side of entry
+        if signal.direction == Direction.LONG and signal.tp1 <= signal.entry:
+            log.warning(
+                "Signal %s %s LONG has TP1 %.8f <= entry %.8f – rejected",
+                signal.symbol, signal.channel, signal.tp1, signal.entry,
+            )
+            return
+        if signal.direction == Direction.SHORT and signal.tp1 >= signal.entry:
+            log.warning(
+                "Signal %s %s SHORT has TP1 %.8f >= entry %.8f – rejected",
+                signal.symbol, signal.channel, signal.tp1, signal.entry,
+            )
+            return
+
+        # SL direction sanity – reject signals where SL is on wrong side of entry
+        if signal.direction == Direction.LONG and signal.stop_loss >= signal.entry:
+            log.warning(
+                "Signal %s %s LONG has SL %.8f >= entry %.8f – rejected",
+                signal.symbol, signal.channel, signal.stop_loss, signal.entry,
+            )
+            return
+        if signal.direction == Direction.SHORT and signal.stop_loss <= signal.entry:
+            log.warning(
+                "Signal %s %s SHORT has SL %.8f <= entry %.8f – rejected",
+                signal.symbol, signal.channel, signal.stop_loss, signal.entry,
+            )
+            return
 
         # Channel min-confidence filter
         chan_cfg = next(

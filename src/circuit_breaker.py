@@ -185,8 +185,8 @@ class CircuitBreaker:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     loop.create_task(self._alert_callback(msg))
-            except Exception as exc:  # pragma: no cover
-                log.debug("Alert callback error: %s", exc)
+            except Exception as exc:
+                log.warning("Alert callback error (circuit breaker): %s", exc)
 
     def _hourly_sl_count(self) -> int:
         """Count SL hits in the last 3600 seconds."""

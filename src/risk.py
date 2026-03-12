@@ -223,7 +223,8 @@ def calculate_position_size(
     if confidence <= 0:
         return 0.0
 
-    # Normalise confidence to a 0-1 multiplier (50 → 0.5, 100 → 1.0)
+    # Normalise confidence to a 0-1 multiplier (0 → 0.0, 100 → 1.0)
+    # e.g. confidence=50 → 0.5, confidence=80 → 0.8, confidence=100 → 1.0
     conf_mult = max(0.0, min(confidence / 100.0, 1.0))
 
     # Normalise ATR volatility: high ATR → smaller position

@@ -17,9 +17,9 @@ def _make_candles(
     trend: float = 0.1,
     noise: float = 0.2,
 ) -> dict:
-    """Generate synthetic OHLCV data."""
+    """Generate synthetic OHLCV data with a fixed RNG seed for reproducibility."""
     close = np.cumsum(np.ones(n) * trend) + base
-    close += np.random.default_rng(42).normal(0, noise, n)
+    close += np.random.default_rng(42).normal(0, noise, n)  # seed=42 for stable tests
     high = close + 0.5
     low = close - 0.5
     volume = np.ones(n) * 1000.0

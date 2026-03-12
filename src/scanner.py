@@ -299,6 +299,7 @@ class Scanner:
 
         # TODO: migrate order book spread fetching to @bookTicker WebSocket stream
         # for real-time spread data without REST API rate-limit cost.
+        # See: https://binance-docs.github.io/apidocs/spot/en/#individual-symbol-book-ticker-streams
 
         is_ranging = regime_result.regime == MarketRegime.RANGING
         adx_val = regime_ind.get("adx_last") or 0

@@ -17,7 +17,7 @@ COPY . .
 
 # Create non-root user for security and own the app and logs directories
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
-    && mkdir -p /app/logs && chown -R appuser:appgroup /app
+    && mkdir -p /app/logs && mkdir -p /app/data/cache && chown -R appuser:appgroup /app
 
 USER appuser
 

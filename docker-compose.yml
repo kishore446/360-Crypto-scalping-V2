@@ -4,6 +4,7 @@ networks:
 
 volumes:
   360scalp-v2-logs:
+  360scalp-v2-data:
   # Uncomment to use Redis for signal queue persistence:
   # 360scalp-v2-redis:
 
@@ -17,6 +18,7 @@ services:
       - 360scalp-v2-net
     volumes:
       - 360scalp-v2-logs:/app/logs
+      - 360scalp-v2-data:/app/data
     mem_limit: 1g
     cpus: "1.5"
     logging:

@@ -32,6 +32,9 @@ Thumbs.db
 *.log
 logs/
 
+# Data cache (auto-generated at runtime)
+data/cache/
+
 # Coverage
 .coverage
 htmlcov/

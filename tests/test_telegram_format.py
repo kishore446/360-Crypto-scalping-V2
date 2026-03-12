@@ -1,9 +1,8 @@
 """Tests for src.telegram_bot – signal formatting."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from src.channels.base import Signal
 from src.smc import Direction

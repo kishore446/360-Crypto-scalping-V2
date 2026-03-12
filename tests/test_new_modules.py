@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from src.channels.base import Signal
 from src.detector import SMCDetector, SMCResult
 from src.filters import (
     check_adx,
@@ -16,8 +14,6 @@ from src.filters import (
 )
 from src.regime import MarketRegime, MarketRegimeDetector
 from src.risk import RiskAssessment, RiskManager
-from src.smc import Direction
-from src.utils import utcnow
 
 
 # ---------------------------------------------------------------------------

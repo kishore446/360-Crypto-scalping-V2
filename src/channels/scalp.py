@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Dict, Optional
 import uuid
 
-import numpy as np
 
 from config import CHANNEL_SCALP
 from src.channels.base import BaseChannel, Signal

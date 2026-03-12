@@ -23,9 +23,9 @@ class StateCache:
         if self._redis.available:
             try:
                 if ttl > 0:
-                    await self._redis.client.setex(f"{CACHE_PREFIX}{key}", ttl, serialized)
+                    await self._redis.client.setex(f"{CACHE_PREFIX}{key}", ttl, serialized)  # type: ignore[union-attr]
                 else:
-                    await self._redis.client.set(f"{CACHE_PREFIX}{key}", serialized)
+                    await self._redis.client.set(f"{CACHE_PREFIX}{key}", serialized)  # type: ignore[union-attr]
                 return
             except Exception as exc:
                 log.warning("Redis set failed for %s: %s", key, exc)
@@ -34,7 +34,7 @@ class StateCache:
     async def get(self, key: str) -> Optional[str]:
         if self._redis.available:
             try:
-                return await self._redis.client.get(f"{CACHE_PREFIX}{key}")
+                return await self._redis.client.get(f"{CACHE_PREFIX}{key}")  # type: ignore[union-attr]
             except Exception as exc:
                 log.warning("Redis get failed for %s: %s", key, exc)
         return self._local.get(key)
@@ -42,7 +42,7 @@ class StateCache:
     async def delete(self, key: str) -> None:
         if self._redis.available:
             try:
-                await self._redis.client.delete(f"{CACHE_PREFIX}{key}")
+                await self._redis.client.delete(f"{CACHE_PREFIX}{key}")  # type: ignore[union-attr]
             except Exception:
                 pass
         self._local.pop(key, None)
@@ -50,7 +50,7 @@ class StateCache:
     async def incr(self, key: str) -> int:
         if self._redis.available:
             try:
-                return await self._redis.client.incr(f"{CACHE_PREFIX}{key}")
+                return await self._redis.client.incr(f"{CACHE_PREFIX}{key}")  # type: ignore[union-attr]
             except Exception:
                 pass
         try:

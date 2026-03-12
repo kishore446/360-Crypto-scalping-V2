@@ -8,7 +8,6 @@ from src.confidence import (
     score_ai_sentiment,
     score_data_sufficiency,
     score_liquidity,
-    score_multi_exchange,
     score_smc,
     score_spread,
     score_trend,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import aiohttp
 
@@ -61,6 +61,7 @@ async def fetch_news_sentiment(
             session = aiohttp.ClientSession()
         try:
             url = f"https://newsapi.example.com/v1/sentiment?q={symbol}&apiKey={NEWS_API_KEY}"
+            assert session is not None
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -100,6 +101,7 @@ async def fetch_social_sentiment(
                 f"https://social-api.example.com/v1/sentiment"
                 f"?symbol={symbol}&key={SOCIAL_SENTIMENT_API_KEY}"
             )
+            assert session is not None
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -155,6 +157,9 @@ async def get_ai_insight(
     session: Optional[aiohttp.ClientSession] = None,
 ) -> SentimentResult:
     """Combine news + social sentiment into a single insight."""
+    # TODO: add on-chain metrics (active addresses, exchange inflows/outflows)
+    # TODO: integrate Fear & Greed Index as a regime overlay
+    # TODO: add social media trending coin mentions (Twitter/X API)
     news, social = await asyncio.gather(
         fetch_news_sentiment(symbol, session),
         fetch_social_sentiment(symbol, session),

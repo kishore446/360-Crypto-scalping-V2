@@ -2,7 +2,6 @@
 
 import os
 
-import pytest
 
 from src.historical_data import HistoricalDataStore
 

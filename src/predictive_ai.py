@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from src.utils import get_logger, utcnow
 
@@ -61,6 +61,10 @@ class PredictiveEngine:
         """
         log.info("Loading predictive model '%s' …", self.model_name)
         # TODO: load real LSTM / Transformer weights here
+        # TODO: add funding rate data as a feature (contrarian indicator for futures)
+        # TODO: add open interest changes as a momentum / squeeze indicator
+        # TODO: add liquidation heatmap data to identify price magnets
+        # TODO: add cross-timeframe confluence scoring (e.g. M5 sweep + H1 FVG alignment)
         self.model_loaded = True
         log.info("Predictive model '%s' ready.", self.model_name)
 

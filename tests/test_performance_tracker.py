@@ -1,0 +1,168 @@
+"""Tests for PerformanceTracker – recording and stats computation."""
+
+from __future__ import annotations
+
+import json
+import time
+
+
+from src.performance_tracker import PerformanceTracker
+
+
+class TestPerformanceTrackerRecording:
+    def test_records_outcome(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome(
+            signal_id="SIG001",
+            channel="360_SCALP",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry=50000.0,
+            hit_tp=1,
+            hit_sl=False,
+            pnl_pct=1.5,
+        )
+        assert len(pt._records) == 1
+        assert pt._records[0].signal_id == "SIG001"
+
+    def test_persists_to_file(self, tmp_path):
+        path = tmp_path / "perf.json"
+        pt = PerformanceTracker(storage_path=str(path))
+        pt.record_outcome("S1", "360_SCALP", "BTCUSDT", "LONG", 50000, 1, False, 1.5)
+        assert path.exists()
+        with open(path) as f:
+            data = json.load(f)
+        assert len(data) == 1
+        assert data[0]["signal_id"] == "S1"
+
+    def test_loads_from_file(self, tmp_path):
+        path = tmp_path / "perf.json"
+        pt1 = PerformanceTracker(storage_path=str(path))
+        pt1.record_outcome("S1", "360_SCALP", "BTCUSDT", "LONG", 50000, 1, False, 1.5)
+
+        # Load in new instance
+        pt2 = PerformanceTracker(storage_path=str(path))
+        assert len(pt2._records) == 1
+        assert pt2._records[0].signal_id == "S1"
+
+    def test_multiple_records(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        for i in range(5):
+            pt.record_outcome(
+                f"SIG{i}", "360_SCALP", "BTCUSDT", "LONG", 50000, 1, False, float(i)
+            )
+        assert len(pt._records) == 5
+
+
+class TestPerformanceTrackerStats:
+    def _make_tracker(self, tmp_path, records):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        for r in records:
+            pt.record_outcome(*r)
+        return pt
+
+    def test_win_rate_all_wins(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0),
+            ("S2", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 1.5),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        stats = pt.get_stats(channel="360_SCALP")
+        assert stats.win_rate == 100.0
+
+    def test_win_rate_mixed(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0),
+            ("S2", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -1.0),
+            ("S3", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 1.5),
+            ("S4", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -1.0),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        stats = pt.get_stats(channel="360_SCALP")
+        assert abs(stats.win_rate - 50.0) < 0.01
+
+    def test_avg_pnl(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 3.0),
+            ("S2", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -1.0),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        stats = pt.get_stats(channel="360_SCALP")
+        assert abs(stats.avg_pnl_pct - 1.0) < 0.01
+
+    def test_best_worst_trade(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 5.0),
+            ("S2", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -2.0),
+            ("S3", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 1.0),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        stats = pt.get_stats(channel="360_SCALP")
+        assert stats.best_trade == 5.0
+        assert stats.worst_trade == -2.0
+
+    def test_max_drawdown_computed(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 5.0),
+            ("S2", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -3.0),
+            ("S3", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -3.0),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        stats = pt.get_stats(channel="360_SCALP")
+        # Peak at 5.0, trough at -1.0 → drawdown = 6.0
+        assert stats.max_drawdown > 0
+
+    def test_no_records_returns_zero_stats(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        stats = pt.get_stats(channel="360_SCALP")
+        assert stats.total_signals == 0
+        assert stats.win_rate == 0.0
+
+    def test_channel_filter(self, tmp_path):
+        records = [
+            ("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0),
+            ("S2", "360_SWING", "ETH", "LONG", 200.0, 1, False, 3.0),
+        ]
+        pt = self._make_tracker(tmp_path, records)
+        scalp_stats = pt.get_stats(channel="360_SCALP")
+        swing_stats = pt.get_stats(channel="360_SWING")
+        assert scalp_stats.total_signals == 1
+        assert swing_stats.total_signals == 1
+
+    def test_rolling_window_filter(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        # Add one recent record
+        pt.record_outcome("new", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0)
+        # Inject one old record (31 days ago)
+        from src.performance_tracker import SignalRecord
+        old = SignalRecord(
+            signal_id="old",
+            channel="360_SCALP",
+            symbol="BTC",
+            direction="LONG",
+            entry=100.0,
+            hit_tp=0,
+            hit_sl=True,
+            pnl_pct=-1.0,
+            confidence=50.0,
+            timestamp=time.time() - 31 * 86400,
+        )
+        pt._records.insert(0, old)
+
+        stats_7d = pt.get_stats(channel="360_SCALP", window_days=7)
+        assert stats_7d.total_signals == 1  # only recent one
+
+
+class TestPerformanceTrackerFormatting:
+    def test_format_message_contains_key_fields(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0)
+        msg = pt.format_stats_message(channel="360_SCALP")
+        assert "Win rate" in msg
+        assert "Total signals" in msg
+        assert "Avg PnL" in msg
+
+    def test_format_message_all_channels(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        msg = pt.format_stats_message()
+        assert "All Channels" in msg

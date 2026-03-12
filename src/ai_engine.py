@@ -155,6 +155,9 @@ async def get_ai_insight(
     session: Optional[aiohttp.ClientSession] = None,
 ) -> SentimentResult:
     """Combine news + social sentiment into a single insight."""
+    # TODO: add on-chain metrics (active addresses, exchange inflows/outflows)
+    # TODO: integrate Fear & Greed Index as a regime overlay
+    # TODO: add social media trending coin mentions (Twitter/X API)
     news, social = await asyncio.gather(
         fetch_news_sentiment(symbol, session),
         fetch_social_sentiment(symbol, session),

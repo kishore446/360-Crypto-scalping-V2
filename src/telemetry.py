@@ -27,6 +27,9 @@ class TelemetrySnapshot:
     pairs_monitored: int = 0
     redis_connected: bool = False
     queue_size: int = 0
+    signal_latency_ms: float = 0.0       # signal creation → Telegram delivery
+    api_weight_used: int = 0             # Binance API weight used (last minute)
+    ws_message_lag_ms: float = 0.0       # WebSocket kline message lag (ms)
 
 
 class TelemetryCollector:
@@ -44,9 +47,25 @@ class TelemetryCollector:
         self._scan_latency_ms: float = 0.0
         self._queue_size: int = 0
         self._redis_client: Optional[Any] = None
+        # Enhanced metrics
+        self._signal_latency_ms: float = 0.0
+        self._api_weight_used: int = 0
+        self._ws_message_lag_ms: float = 0.0
 
     def record_api_call(self) -> None:
         self._api_call_count += 1
+
+    def record_signal_latency(self, latency_ms: float) -> None:
+        """Record time from signal creation to Telegram delivery (ms)."""
+        self._signal_latency_ms = latency_ms
+
+    def record_api_weight(self, weight_used: int) -> None:
+        """Record the Binance API weight consumed in the last interval."""
+        self._api_weight_used = weight_used
+
+    def record_ws_message_lag(self, lag_ms: float) -> None:
+        """Record the WebSocket kline message lag (expected vs received close time)."""
+        self._ws_message_lag_ms = lag_ms
 
     def set_ws_health(self, healthy: bool, connections: int) -> None:
         self._ws_healthy = healthy
@@ -121,6 +140,9 @@ class TelemetryCollector:
             pairs_monitored=self._pairs_monitored,
             redis_connected=redis_ok,
             queue_size=self._queue_size,
+            signal_latency_ms=self._signal_latency_ms,
+            api_weight_used=self._api_weight_used,
+            ws_message_lag_ms=self._ws_message_lag_ms,
         )
 
     def dashboard_text(self) -> str:
@@ -132,7 +154,10 @@ class TelemetryCollector:
             f"Active signals: {s.active_signals}\n"
             f"Pairs monitored: {s.pairs_monitored}\n"
             f"Scan latency: {s.scan_latency_ms:.0f} ms\n"
+            f"Signal latency: {s.signal_latency_ms:.0f} ms\n"
             f"Queue size: {s.queue_size}\n"
             f"API calls/min: {s.api_calls_last_min}\n"
+            f"API weight used: {s.api_weight_used}\n"
+            f"WS message lag: {s.ws_message_lag_ms:.0f} ms\n"
             f"Redis: {'✅ connected' if s.redis_connected else '⚠️ in-memory'}"
         )

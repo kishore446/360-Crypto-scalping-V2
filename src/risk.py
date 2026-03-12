@@ -185,3 +185,51 @@ class RiskManager:
         if same_dir >= self.max_concurrent_same_direction:
             return False, f"Max {self.max_concurrent_same_direction} concurrent {direction} signals for {symbol}"
         return True, ""
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def calculate_position_size(
+    confidence: float,
+    atr: float,
+    account_risk_pct: float = 1.0,
+    entry: float = 0.0,
+) -> float:
+    """Compute a recommended position size (% of account) from confidence and ATR.
+
+    The base size is ``account_risk_pct``.  It is scaled linearly with
+    confidence (50-100 range) and inversely with ATR volatility so that
+    high-confidence, low-volatility setups receive larger allocations.
+
+    Parameters
+    ----------
+    confidence:
+        Signal confidence score (0-100).
+    atr:
+        Average True Range value.
+    account_risk_pct:
+        Base account risk per trade (default 1.0%).
+    entry:
+        Entry price.  When provided and > 0, ATR is expressed as a %
+        of entry for normalisation.
+
+    Returns
+    -------
+    Recommended position size as a percentage of account equity.
+    """
+    if confidence <= 0:
+        return 0.0
+
+    # Normalise confidence to a 0-1 multiplier (50 → 0.5, 100 → 1.0)
+    conf_mult = max(0.0, min(confidence / 100.0, 1.0))
+
+    # Normalise ATR volatility: high ATR → smaller position
+    atr_pct = (atr / entry * 100.0) if (atr > 0 and entry > 0) else atr
+    # Scale: 0% ATR → mult=1.5, 1% ATR → mult=1.0, 2%+ ATR → mult=0.5
+    atr_mult = max(0.5, 1.5 - atr_pct * 0.5)
+
+    size = account_risk_pct * conf_mult * atr_mult
+    return round(min(size, 100.0), 2)

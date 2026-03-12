@@ -185,6 +185,48 @@ CHANNEL_COOLDOWN_SECONDS: Dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------------
+# Scanner-level signal cooldown: per-(symbol, channel) cooldown after a
+# signal is *fired* (i.e. enqueued), to prevent re-evaluating the same setup
+# within the cooldown window.
+# ---------------------------------------------------------------------------
+SIGNAL_SCAN_COOLDOWN_SECONDS: Dict[str, int] = {
+    "360_SCALP": int(os.getenv("SCALP_SCAN_COOLDOWN", "300")),      # 5 min
+    "360_SWING": int(os.getenv("SWING_SCAN_COOLDOWN", "1800")),     # 30 min
+    "360_RANGE": int(os.getenv("RANGE_SCAN_COOLDOWN", "900")),      # 15 min
+    "360_THE_TAPE": int(os.getenv("TAPE_SCAN_COOLDOWN", "300")),    # 5 min
+}
+
+# ---------------------------------------------------------------------------
+# Circuit Breaker thresholds
+# ---------------------------------------------------------------------------
+CIRCUIT_BREAKER_MAX_CONSECUTIVE_SL: int = int(
+    os.getenv("CIRCUIT_BREAKER_MAX_CONSECUTIVE_SL", "3")
+)
+CIRCUIT_BREAKER_MAX_HOURLY_SL: int = int(
+    os.getenv("CIRCUIT_BREAKER_MAX_HOURLY_SL", "5")
+)
+CIRCUIT_BREAKER_MAX_DAILY_DRAWDOWN_PCT: float = float(
+    os.getenv("CIRCUIT_BREAKER_MAX_DAILY_DRAWDOWN_PCT", "10.0")
+)
+
+# ---------------------------------------------------------------------------
+# Performance Tracker persistence path
+# ---------------------------------------------------------------------------
+PERFORMANCE_TRACKER_PATH: str = os.getenv(
+    "PERFORMANCE_TRACKER_PATH", "data/signal_performance.json"
+)
+
+# ---------------------------------------------------------------------------
+# Max concurrent signals per channel
+# ---------------------------------------------------------------------------
+MAX_CONCURRENT_SIGNALS_PER_CHANNEL: Dict[str, int] = {
+    "360_SCALP": int(os.getenv("MAX_SCALP_SIGNALS", "3")),
+    "360_SWING": int(os.getenv("MAX_SWING_SIGNALS", "2")),
+    "360_RANGE": int(os.getenv("MAX_RANGE_SIGNALS", "3")),
+    "360_THE_TAPE": int(os.getenv("MAX_TAPE_SIGNALS", "2")),
+}
+
+# ---------------------------------------------------------------------------
 # Anti-noise: minimum signal lifespan before SL/TP checks are applied (secs)
 # ---------------------------------------------------------------------------
 MIN_SIGNAL_LIFESPAN_SECONDS: Dict[str, int] = {

@@ -88,6 +88,9 @@ _REPO_ROOT: Path = Path(__file__).parent.parent
 _SPREAD_CACHE_TTL: float = 30.0
 _MAX_ORDER_BOOK_FETCHES_PER_CYCLE: int = 5
 
+# Interval between automatic disk snapshots of historical data (seconds)
+_SNAPSHOT_INTERVAL_SECONDS: int = 300  # 5 minutes
+
 
 class CryptoSignalEngine:
     """Top-level orchestrator for the signal engine."""
@@ -228,8 +231,14 @@ class CryptoSignalEngine:
         # 1. Fetch pairs
         await self.pair_mgr.refresh_pairs()
 
-        # 2. Seed historical data
-        await self.data_store.seed_all(self.pair_mgr)
+        # 2. Smart seed: load disk cache first, then gap-fill
+        cached = self.data_store.load_snapshot()
+        if cached:
+            log.info("Disk cache loaded — gap-filling missing data only")
+            await self.data_store.gap_fill(self.pair_mgr)
+        else:
+            log.info("No disk cache found — performing full historical seed")
+            await self.data_store.seed_all(self.pair_mgr)
 
         # 3. Load predictive model
         await self.predictive.load_model()
@@ -250,6 +259,7 @@ class CryptoSignalEngine:
             asyncio.create_task(self._scan_loop()),
             asyncio.create_task(self.telegram.poll_commands(self._handle_command)),
             asyncio.create_task(self._free_channel_loop()),
+            asyncio.create_task(self._snapshot_loop()),
         ]
 
         await self.telegram.send_admin_alert("✅ Engine booted successfully")
@@ -266,6 +276,11 @@ class CryptoSignalEngine:
             await self._ws_spot.stop()
         if self._ws_futures:
             await self._ws_futures.stop()
+        # Save data cache before closing
+        try:
+            await self.data_store.save_snapshot()
+        except Exception as exc:
+            log.error("Failed to save snapshot on shutdown: %s", exc)
         await self.data_store.close()
         await self.pair_mgr.close()
         await self._exchange_mgr.close()
@@ -631,6 +646,17 @@ class CryptoSignalEngine:
             except Exception as exc:
                 log.error("Pair refresh loop error: %s", exc)
 
+    async def _snapshot_loop(self) -> None:
+        """Periodically save historical data to disk for fast restarts."""
+        while True:
+            await asyncio.sleep(_SNAPSHOT_INTERVAL_SECONDS)
+            try:
+                await self.data_store.save_snapshot()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                log.error("Snapshot save error: %s", exc)
+
     # ------------------------------------------------------------------
     # Admin command handler
     # ------------------------------------------------------------------
@@ -867,6 +893,7 @@ class CryptoSignalEngine:
                     asyncio.create_task(self._scan_loop()),
                     asyncio.create_task(self.telegram.poll_commands(self._handle_command)),
                     asyncio.create_task(self._free_channel_loop()),
+                    asyncio.create_task(self._snapshot_loop()),
                 ]
                 await self.telegram.send_message(chat_id, "✅ Engine tasks restarted.")
             except Exception as exc:

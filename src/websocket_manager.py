@@ -15,7 +15,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Callable, Coroutine, List, Optional, Set
 
 import aiohttp
 

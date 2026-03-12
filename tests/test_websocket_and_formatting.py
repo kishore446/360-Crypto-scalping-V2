@@ -1,9 +1,7 @@
 """Tests for WebSocket REST fallback and enhanced signal formatting."""
 
-import asyncio
 import time
 
-import pytest
 
 from src.channels.base import Signal
 from src.smc import Direction
@@ -180,7 +178,6 @@ class TestWebSocketLastPongOnText:
 
     def test_last_pong_updated_on_text_message(self):
         """is_healthy should remain True after TEXT messages (not just PONG frames)."""
-        import aiohttp
 
         received = []
 

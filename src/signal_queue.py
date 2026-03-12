@@ -37,9 +37,9 @@ class SignalQueue:
     async def put(self, signal: Signal) -> None:
         if self._redis.available:
             try:
-                await self._redis.client.rpush(QUEUE_KEY, self._serialize(signal))
+                await self._redis.client.rpush(QUEUE_KEY, self._serialize(signal))  # type: ignore[union-attr]
                 # Cap queue length
-                await self._redis.client.ltrim(QUEUE_KEY, -QUEUE_MAXSIZE, -1)
+                await self._redis.client.ltrim(QUEUE_KEY, -QUEUE_MAXSIZE, -1)  # type: ignore[union-attr]
                 return
             except Exception as exc:
                 log.warning("Redis put failed (%s), falling back to memory queue.", exc)
@@ -52,7 +52,7 @@ class SignalQueue:
     async def get(self, timeout: float = 1.0) -> Optional[Union[Signal, dict]]:
         if self._redis.available:
             try:
-                result = await self._redis.client.blpop(QUEUE_KEY, timeout=timeout)
+                result = await self._redis.client.blpop([QUEUE_KEY], timeout=int(timeout))  # type: ignore[union-attr]
                 if result:
                     _, raw = result
                     data = self._deserialize(raw)
@@ -69,7 +69,7 @@ class SignalQueue:
     async def qsize(self) -> int:
         if self._redis.available:
             try:
-                return await self._redis.client.llen(QUEUE_KEY)
+                return await self._redis.client.llen(QUEUE_KEY)  # type: ignore[union-attr]
             except Exception:
                 pass
         return self._fallback.qsize()

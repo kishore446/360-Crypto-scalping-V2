@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from src.backtester import Backtester, BacktestResult, _compute_indicators, _simulate_trade
 from src.channels.scalp import ScalpChannel
 from src.channels.range_channel import RangeChannel
-from src.smc import Direction
 
 
 def _make_candles(

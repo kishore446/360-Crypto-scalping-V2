@@ -1,7 +1,6 @@
 """Tests for channel strategies – evaluate() logic."""
 
 import numpy as np
-import pytest
 
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel

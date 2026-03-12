@@ -16,15 +16,12 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from config import (
     PAIR_FETCH_INTERVAL_HOURS,
-    TELEGRAM_ADMIN_CHAT_ID,
 )
 from src.ai_engine import get_ai_insight
-from src.binance import BinanceClient
 from src.bootstrap import Bootstrap
 from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel

@@ -79,7 +79,7 @@ class MarketRegimeDetector:
         # ema_slow defaults to close price from candles when unavailable
         close: Optional[float] = None
         if candles is not None and len(candles.get("close", [])) > 0:
-            close = float(candles["close"][-1])
+            close = float(candles["close"][-1])  # noqa: F841
 
         # EMA slope (approximation via % diff between fast and slow)
         ema_slope: Optional[float] = None

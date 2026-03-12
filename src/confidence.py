@@ -13,7 +13,7 @@ Factors:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from config import NEW_PAIR_MIN_CONFIDENCE
 

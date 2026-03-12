@@ -4,7 +4,6 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
-import pytest_asyncio
 
 from src.channels.base import Signal
 from src.signal_router import SignalRouter

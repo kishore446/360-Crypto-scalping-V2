@@ -1,7 +1,6 @@
 """Tests for src.smc – Smart Money Concepts detection."""
 
 import numpy as np
-import pytest
 
 from src.smc import (
     Direction,

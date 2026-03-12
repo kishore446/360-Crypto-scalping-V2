@@ -16,7 +16,6 @@ import numpy as np
 from config import SEED_TIMEFRAMES, SIGNAL_SCAN_COOLDOWN_SECONDS
 from src.ai_engine import get_ai_insight
 from src.binance import BinanceClient
-from src.channels.base import Signal
 from src.confidence import (
     ConfidenceInput,
     compute_confidence,
@@ -214,7 +213,7 @@ class Scanner:
         # Compute indicators per timeframe
         indicators: Dict[str, dict] = {}
         for tf_key, cd in candles.items():
-            h, lo, c, v = (
+            h, lo, c, _ = (
                 cd["high"],
                 cd["low"],
                 cd["close"],

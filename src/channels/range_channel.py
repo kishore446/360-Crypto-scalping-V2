@@ -48,7 +48,7 @@ class RangeChannel(BaseChannel):
         # --- Bollinger Band rejection ---
         bb_upper = ind.get("bb_upper_last")
         bb_lower = ind.get("bb_lower_last")
-        bb_mid = ind.get("bb_mid_last")
+        bb_mid = ind.get("bb_mid_last")  # noqa: F841
         if bb_upper is None or bb_lower is None:
             return None
 

@@ -44,7 +44,7 @@ jobs:
         run: pip install ruff
 
       - name: Run ruff linter
-        run: ruff check src/ tests/ --select E,W,F --ignore E501,W503
+        run: ruff check src/ tests/ --select E,W,F --ignore E501,E741
 
   typecheck:
     runs-on: ubuntu-latest

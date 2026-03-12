@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Optional
+from typing import Any, Callable, Deque, Optional
 
 from src.utils import get_logger
 
@@ -53,7 +53,7 @@ class CircuitBreaker:
         max_consecutive_sl: int = _DEFAULT_MAX_CONSECUTIVE_SL,
         max_hourly_sl: int = _DEFAULT_MAX_HOURLY_SL,
         max_daily_drawdown_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT,
-        alert_callback: Optional[object] = None,
+        alert_callback: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.max_consecutive_sl = max_consecutive_sl
         self.max_hourly_sl = max_hourly_sl

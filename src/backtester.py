@@ -11,14 +11,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from config import (
-    ALL_CHANNELS,
-    CHANNEL_SCALP,
-    CHANNEL_SWING,
-    CHANNEL_RANGE,
-    CHANNEL_TAPE,
-    ChannelConfig,
-)
 from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel
@@ -122,7 +114,6 @@ def _simulate_trade(
     if signal.tp3 is not None:
         targets.append(signal.tp3)
 
-    tp_level = 0
     for i in range(min(len(highs), len(lows))):
         h, lo = float(highs[i]), float(lows[i])
 

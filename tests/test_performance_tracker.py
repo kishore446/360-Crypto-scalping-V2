@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
-import pytest
 
-from src.performance_tracker import PerformanceTracker, ChannelStats
+from src.performance_tracker import PerformanceTracker
 
 
 class TestPerformanceTrackerRecording:

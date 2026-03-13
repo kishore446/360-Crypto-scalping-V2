@@ -29,6 +29,8 @@ from src.confidence import (
     score_trend,
 )
 from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi
+from src.onchain import OnChainClient, score_onchain
+from src.openai_evaluator import OpenAIEvaluator
 from src.regime import MarketRegime
 from src.utils import get_logger
 
@@ -87,6 +89,8 @@ class Scanner:
         telemetry: Any,
         signal_queue: Any,
         router: Any,
+        openai_evaluator: Optional[Any] = None,
+        onchain_client: Optional[Any] = None,
     ) -> None:
         self.pair_mgr = pair_mgr
         self.data_store = data_store
@@ -99,6 +103,8 @@ class Scanner:
         self.telemetry = telemetry
         self.signal_queue = signal_queue
         self.router = router
+        self.openai_evaluator: Optional[Any] = openai_evaluator
+        self.onchain_client: Optional[Any] = onchain_client
 
         # Mutable state shared with the engine / command handler
         self.paused_channels: Set[str] = set()
@@ -373,8 +379,8 @@ class Scanner:
                 )
 
             # Predictive AI: adjust TP/SL and confidence
+            ind_for_predict = indicators.get("5m", indicators.get("1m", {}))
             try:
-                ind_for_predict = indicators.get("5m", indicators.get("1m", {}))
                 prediction = await self.predictive.predict(
                     symbol, candles, ind_for_predict
                 )
@@ -383,12 +389,75 @@ class Scanner:
             except Exception as exc:
                 log.debug("Predictive AI error for %s: %s", symbol, exc)
 
+            # On-chain intelligence: exchange flow confidence sub-score
+            onchain_data = None
+            try:
+                if self.onchain_client is not None:
+                    onchain_data = await asyncio.wait_for(
+                        self.onchain_client.get_exchange_flow(symbol),
+                        timeout=3,
+                    )
+            except Exception as exc:
+                log.debug("On-chain fetch error for %s: %s", symbol, exc)
+
+            # OpenAI GPT-4 evaluation (optional)
+            try:
+                if self.openai_evaluator and self.openai_evaluator.enabled:
+                    # Build SMC summary from already-computed smc_result
+                    smc_parts = []
+                    if smc_result.sweeps:
+                        sweep = smc_result.sweeps[0]
+                        smc_parts.append(
+                            f"Sweep {sweep.direction.value} at {sweep.sweep_level:.4f}"
+                        )
+                    if smc_result.fvg:
+                        fvg = smc_result.fvg[0]
+                        smc_parts.append(
+                            f"FVG {fvg.gap_high:.4f}-{fvg.gap_low:.4f}"
+                        )
+                    smc_summary = " | ".join(smc_parts) if smc_parts else "None detected"
+
+                    openai_eval = await asyncio.wait_for(
+                        self.openai_evaluator.evaluate(
+                            symbol=symbol,
+                            direction=sig.direction.value,
+                            channel=chan_name,
+                            entry_price=sig.entry,
+                            stop_loss=sig.stop_loss,
+                            tp1=sig.tp1,
+                            tp2=sig.tp2,
+                            indicators=ind_for_predict,
+                            smc_summary=smc_summary,
+                            ai_sentiment_summary=ai.get("summary", ""),
+                            market_phase=regime_result.regime.value,
+                            confidence_before=sig.confidence,
+                        ),
+                        timeout=6,
+                    )
+                    if openai_eval and not openai_eval.recommended:
+                        log.info(
+                            "OpenAI recommends SKIP for %s %s: %s",
+                            symbol, chan_name, openai_eval.reasoning,
+                        )
+                        continue  # Skip this signal entirely
+                    if openai_eval and openai_eval.adjustment != 0.0:
+                        sig.confidence = max(
+                            0.0, min(100.0, sig.confidence + openai_eval.adjustment)
+                        )
+                        log.debug(
+                            "OpenAI adjusted confidence for %s %s by %+.1f → %.1f (%s)",
+                            symbol, chan_name, openai_eval.adjustment,
+                            sig.confidence, openai_eval.reasoning,
+                        )
+            except Exception as exc:
+                log.debug("OpenAI evaluation error for %s: %s", symbol, exc)
+
             # Confidence scoring
             has_sweep = bool(smc_data["sweeps"])
             has_mss = smc_data["mss"] is not None
             has_fvg = bool(smc_data["fvg"])
 
-            ind_5m = indicators.get("5m", indicators.get("1m", {}))
+            ind_5m = ind_for_predict
             ema_aligned = (
                 ind_5m.get("ema9_last") is not None
                 and ind_5m.get("ema21_last") is not None
@@ -435,6 +504,7 @@ class Scanner:
                 spread_score=score_spread(spread_pct),
                 data_sufficiency=score_data_sufficiency(candle_total),
                 multi_exchange=score_multi_exchange(verified=cross_verified),
+                onchain_score=score_onchain(onchain_data),
                 has_enough_history=self.pair_mgr.has_enough_history(symbol),
                 opposing_position_open=False,
             )

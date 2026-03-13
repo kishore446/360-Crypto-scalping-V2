@@ -50,7 +50,7 @@ class TestPredictiveEngine:
             {"momentum_last": 0.5, "ema9_last": 32100.0, "ema21_last": 32000.0, "close": 32000.0},
         )
         assert result.predicted_direction in ("UP", "DOWN", "NEUTRAL")
-        assert result.model_name == "placeholder-momentum-v0"
+        assert result.model_name == "multi-feature-v1"
 
     @pytest.mark.asyncio
     async def test_predict_bullish_heuristic(self):

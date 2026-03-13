@@ -46,6 +46,13 @@ FEAR_GREED_API_URL: str = os.getenv(
     "FEAR_GREED_API_URL", "https://api.alternative.me/fng/?limit=1"
 )
 
+# OpenAI GPT-4 trade evaluator (optional)
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# On-chain intelligence — Glassnode (optional)
+ONCHAIN_API_KEY: str = os.getenv("ONCHAIN_API_KEY", "")
+
 # ---------------------------------------------------------------------------
 # Pair management
 # ---------------------------------------------------------------------------

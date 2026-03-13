@@ -61,8 +61,9 @@ class PredictiveEngine:
     it replaces.
 
     The model architecture is designed to accept real trained weights in the
-    future (load via :meth:`load_model`).  While placeholder weights are in
-    use the model name is ``"multi-feature-v1"``.
+    future (load via :meth:`load_model`).  The built-in multi-feature heuristic
+    uses calibrated, domain-knowledge-derived weights rather than learned ones;
+    the model name is ``"multi-feature-v1"``.
     """
 
     def __init__(self) -> None:

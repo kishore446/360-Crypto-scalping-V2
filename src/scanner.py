@@ -457,21 +457,20 @@ class Scanner:
             has_mss = smc_data["mss"] is not None
             has_fvg = bool(smc_data["fvg"])
 
-            ind_5m = ind_for_predict
             ema_aligned = (
-                ind_5m.get("ema9_last") is not None
-                and ind_5m.get("ema21_last") is not None
+                ind_for_predict.get("ema9_last") is not None
+                and ind_for_predict.get("ema21_last") is not None
                 and (
-                    (ind_5m["ema9_last"] > ind_5m["ema21_last"])
+                    (ind_for_predict["ema9_last"] > ind_for_predict["ema21_last"])
                     if sig.direction.value == "LONG"
-                    else (ind_5m["ema9_last"] < ind_5m["ema21_last"])
+                    else (ind_for_predict["ema9_last"] < ind_for_predict["ema21_last"])
                 )
             )
-            adx_ok = (ind_5m.get("adx_last") or 0) >= 20
+            adx_ok = (ind_for_predict.get("adx_last") or 0) >= 20
             mom_positive = (
-                (ind_5m.get("momentum_last") or 0) > 0
+                (ind_for_predict.get("momentum_last") or 0) > 0
                 if sig.direction.value == "LONG"
-                else (ind_5m.get("momentum_last") or 0) < 0
+                else (ind_for_predict.get("momentum_last") or 0) < 0
             )
 
             candle_total = sum(

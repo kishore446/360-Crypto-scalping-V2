@@ -41,6 +41,11 @@ TELEGRAM_SELECT_CHANNEL_ID: str = os.getenv("TELEGRAM_SELECT_CHANNEL_ID", "")
 NEWS_API_KEY: str = os.getenv("NEWS_API_KEY", "")
 SOCIAL_SENTIMENT_API_KEY: str = os.getenv("SOCIAL_SENTIMENT_API_KEY", "")
 
+# Fear & Greed Index (free, no key needed)
+FEAR_GREED_API_URL: str = os.getenv(
+    "FEAR_GREED_API_URL", "https://api.alternative.me/fng/?limit=1"
+)
+
 # ---------------------------------------------------------------------------
 # Pair management
 # ---------------------------------------------------------------------------

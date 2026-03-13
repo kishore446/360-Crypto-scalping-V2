@@ -45,7 +45,7 @@ Binance WS ──► WebSocketManager (multi-conn, heartbeat, auto-reconnect)
 |---|---|
 | **SMC Detection** | Liquidity Sweeps, Market Structure Shifts (MSS), Fair Value Gaps (FVG) |
 | **4 Channels** | SCALP (M1/M5), SWING (H1/H4), RANGE (M15), THE_TAPE (Tick) |
-| **AI Modules** | News sentiment, social sentiment, whale detection |
+| **AI Modules** | CryptoPanic news sentiment, LunarCrush social sentiment, Alternative.me Fear & Greed, whale detection |
 | **Confidence Scoring** | Multi-layer 0–100 with 7 sub-components |
 | **Dynamic Pairs** | Auto-fetch top 50–100 Spot & Futures pairs |
 | **WebSocket Resilience** | Multi-connection, heartbeat, exponential-backoff reconnect |
@@ -75,6 +75,33 @@ Binance WS ──► WebSocketManager (multi-conn, heartbeat, auto-reconnect)
 - **Trigger**: Trade > 1M USD or Volume Delta > 2×
 - **Filters**: Order book imbalance, whale detection, AI sentiment
 - **Risk**: SL 0.1–0.3% AI-adaptive, Trailing AI-adaptive
+
+## AI Sentiment APIs
+
+The engine integrates three external APIs to power the `ai_sentiment_score` component (0–15 points) of the confidence scorer.  All APIs have free tiers and degrade gracefully if a key is absent.
+
+| Service | Data | Key required | Cache TTL |
+|---|---|---|---|
+| **CryptoPanic** | News sentiment (bullish/bearish/neutral counts) | Yes — [get free key](https://cryptopanic.com/developers/api/) | 60 s |
+| **LunarCrush** | Social sentiment & galaxy score (0–100, normalised to ±1) | Yes — [get free key](https://lunarcrush.com/developers) | 300 s |
+| **Alternative.me** | Bitcoin Fear & Greed Index (0–100) | No — completely free | 3600 s |
+
+### Configuration
+
+Set the following environment variables in your `.env` file:
+
+```env
+# CryptoPanic (News Sentiment) - Get free key at https://cryptopanic.com/developers/api/
+NEWS_API_KEY=your_cryptopanic_token
+
+# LunarCrush (Social Sentiment) - Get free key at https://lunarcrush.com/developers
+SOCIAL_SENTIMENT_API_KEY=your_lunarcrush_bearer_token
+
+# Fear & Greed Index (free, no key needed)
+FEAR_GREED_API_URL=https://api.alternative.me/fng/?limit=1
+```
+
+If no keys are set, all sentiment functions return a neutral score of 0.0 — the bot runs at up to 85/100 confidence maximum instead of 100/100.
 
 ## Quick VPS Deployment
 

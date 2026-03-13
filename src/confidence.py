@@ -28,6 +28,7 @@ class ConfidenceInput:
     spread_score: float = 0.0        # 0-10
     data_sufficiency: float = 0.0    # 0-10
     multi_exchange: float = 0.0      # 0-5
+    onchain_score: float = 0.0       # 0-5 (populated by score_onchain(); 0 = no data)
     has_enough_history: bool = True
     opposing_position_open: bool = False
 
@@ -129,6 +130,7 @@ def compute_confidence(inp: ConfidenceInput) -> ConfidenceResult:
         "spread": inp.spread_score,
         "data_sufficiency": inp.data_sufficiency,
         "multi_exchange": inp.multi_exchange,
+        "onchain": inp.onchain_score,
     }
     total = sum(breakdown.values())
     total = round(min(max(total, 0.0), 100.0), 2)

@@ -33,6 +33,8 @@ from src.commands import CommandHandler
 from src.detector import SMCDetector
 from src.exchange import ExchangeManager
 from src.historical_data import HistoricalDataStore
+from src.onchain import OnChainClient
+from src.openai_evaluator import OpenAIEvaluator
 from src.pair_manager import PairManager
 from src.performance_tracker import PerformanceTracker
 from src.predictive_ai import PredictiveEngine
@@ -52,6 +54,7 @@ from config import (
     CIRCUIT_BREAKER_MAX_CONSECUTIVE_SL,
     CIRCUIT_BREAKER_MAX_HOURLY_SL,
     CIRCUIT_BREAKER_MAX_DAILY_DRAWDOWN_PCT,
+    ONCHAIN_API_KEY,
     PERFORMANCE_TRACKER_PATH,
 )
 
@@ -118,6 +121,12 @@ class CryptoSignalEngine:
         # Predictive AI engine
         self.predictive = PredictiveEngine()
 
+        # OpenAI GPT-4 trade evaluator (optional — no-op if key is absent)
+        self._openai_evaluator = OpenAIEvaluator()
+
+        # On-chain intelligence client (optional — no-op if key is absent)
+        self._onchain_client = OnChainClient(api_key=ONCHAIN_API_KEY)
+
         # Multi-exchange verification
         self._exchange_mgr = ExchangeManager(
             second_exchange_url=os.getenv("SECOND_EXCHANGE_URL")
@@ -149,6 +158,8 @@ class CryptoSignalEngine:
             telemetry=self.telemetry,
             signal_queue=self._signal_queue,
             router=self.router,
+            openai_evaluator=self._openai_evaluator,
+            onchain_client=self._onchain_client,
         )
         # Share mutable state with scanner
         self._scanner.paused_channels = self._paused_channels

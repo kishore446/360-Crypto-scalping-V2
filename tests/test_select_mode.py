@@ -44,8 +44,8 @@ def _good_smc() -> dict:
     return {"sweeps": [{"level": 100}], "mss": None, "fvg": []}
 
 
-def _good_ai(direction: str = "Bullish") -> dict:
-    return {"label": direction, "score": 0.8}
+def _good_ai(ai_label: str = "Bullish") -> dict:
+    return {"label": ai_label, "score": 0.8}
 
 
 def _call_should_publish(

@@ -537,7 +537,7 @@ class CommandHandler:
         elif cmd == "/select_mode":
             if self._select_mode is None:
                 await self._telegram.send_message(
-                    chat_id, "❌ Select mode filter is not initialised."
+                    chat_id, "❌ Select mode filter is not initialized."
                 )
                 return
             sub = parts[1].lower() if len(parts) >= 2 else "status"
@@ -561,7 +561,7 @@ class CommandHandler:
         elif cmd == "/select_config":
             if self._select_mode is None:
                 await self._telegram.send_message(
-                    chat_id, "❌ Select mode filter is not initialised."
+                    chat_id, "❌ Select mode filter is not initialized."
                 )
                 return
             if len(parts) < 3:

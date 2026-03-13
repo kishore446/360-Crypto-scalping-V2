@@ -29,8 +29,7 @@ from src.confidence import (
     score_trend,
 )
 from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi
-from src.onchain import OnChainClient, score_onchain
-from src.openai_evaluator import OpenAIEvaluator
+from src.onchain import score_onchain
 from src.regime import MarketRegime
 from src.utils import get_logger
 

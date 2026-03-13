@@ -61,6 +61,7 @@ class WebSocketManager:
         self._rest_fallback_active: bool = False
         self._critical_pairs: Set[str] = set()
         self._fallback_task: Optional[asyncio.Task] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
         self._admin_alert = admin_alert_callback
 
     # ------------------------------------------------------------------
@@ -82,12 +83,15 @@ class WebSocketManager:
             "WS manager started: %d streams across %d connections (%s)",
             len(streams), len(self._connections), self._market,
         )
+        self._watchdog_task = asyncio.create_task(self._health_watchdog())
 
     async def stop(self) -> None:
         self._running = False
         self._rest_fallback_active = False
         if self._fallback_task and not self._fallback_task.done():
             self._fallback_task.cancel()
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
         for conn in self._connections:
             if conn.task:
                 conn.task.cancel()
@@ -236,6 +240,27 @@ class WebSocketManager:
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                 log.warning("WS closed/error, will reconnect")
                 break
+
+    # ------------------------------------------------------------------
+    # Health watchdog
+    # ------------------------------------------------------------------
+
+    async def _health_watchdog(self) -> None:
+        """Periodically force-close stale connections so _run_connection reconnects."""
+        try:
+            while self._running:
+                await asyncio.sleep(WS_HEARTBEAT_INTERVAL)
+                now = time.monotonic()
+                for conn in self._connections:
+                    if conn.ws and not conn.ws.closed:
+                        if (now - conn.last_pong) >= WS_HEARTBEAT_INTERVAL * 3:
+                            log.warning(
+                                "Watchdog: stale WS connection (%.0fs since last data) — force-closing to trigger reconnect",
+                                now - conn.last_pong,
+                            )
+                            await conn.ws.close()
+        except asyncio.CancelledError:
+            pass
 
     # ------------------------------------------------------------------
     # Dynamic subscription helpers

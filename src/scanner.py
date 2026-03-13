@@ -45,6 +45,9 @@ _RANGING_ADX_SUPPRESS_THRESHOLD: float = 15.0
 # Confidence boost applied to RANGE channel when regime is RANGING
 _RANGING_RANGE_CONF_BOOST: float = 5.0
 
+# Maximum number of symbols scanned concurrently
+_MAX_CONCURRENT_SCANS: int = 10
+
 
 class Scanner:
     """Scans all pairs across channel strategies on every cycle.
@@ -127,6 +130,9 @@ class Scanner:
         # Cooldown tracking: (symbol, channel_name) → monotonic expiry time
         self._cooldown_until: Dict[Tuple[str, str], float] = {}
 
+        # Semaphore to limit concurrent symbol scans
+        self._scan_semaphore: asyncio.Semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SCANS)
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -151,8 +157,18 @@ class Scanner:
                     key=lambda kv: kv[1].volume_24h_usd,
                     reverse=True,
                 )
-                for sym, info in sorted_pairs:
-                    await self._scan_symbol(sym, info.volume_24h_usd)
+                sem = self._scan_semaphore
+                tasks = [
+                    self._scan_symbol_bounded(sem, sym, info.volume_24h_usd)
+                    for sym, info in sorted_pairs
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for sym_info, result in zip(sorted_pairs, results):
+                    if isinstance(result, Exception):
+                        log.warning(
+                            "Scan error for %s (%s): %s",
+                            sym_info[0], type(result).__name__, result,
+                        )
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -207,6 +223,11 @@ class Scanner:
         log.debug(
             "Cooldown set for %s %s (%.0fs)", symbol, channel_name, cooldown_s
         )
+
+    async def _scan_symbol_bounded(self, sem: asyncio.Semaphore, symbol: str, volume_24h: float) -> None:
+        """Acquire *sem* then delegate to :meth:`_scan_symbol`."""
+        async with sem:
+            await self._scan_symbol(symbol, volume_24h)
 
     async def _scan_symbol(self, symbol: str, volume_24h: float) -> None:
         """Run all channel evaluations for one symbol."""

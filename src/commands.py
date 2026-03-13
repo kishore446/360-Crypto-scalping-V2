@@ -570,8 +570,8 @@ class CommandHandler:
                 )
             else:
                 key = parts[1]
-                value = parts[2]
-                success, msg = self._select_mode.update_config(key, value)
+                cfg_value = parts[2]
+                success, msg = self._select_mode.update_config(key, cfg_value)
                 await self._telegram.send_message(chat_id, msg)
 
         else:

@@ -111,6 +111,9 @@ class Scanner:
         # Optional circuit breaker (set after construction)
         self.circuit_breaker: Optional[Any] = None
 
+        # Optional select mode filter (set after construction)
+        self.select_mode_filter: Optional[Any] = None
+
         # Order book spread cache: symbol → (spread_pct, timestamp)
         self._order_book_cache: Dict[str, Tuple[float, float]] = {}
         self._order_book_fetches_this_cycle: int = 0
@@ -471,6 +474,25 @@ class Scanner:
 
             # Start cooldown timer for this (symbol, channel) pair
             self._set_cooldown(symbol, chan_name)
+
+            # Select mode filter: ultra-selective check before publishing
+            if self.select_mode_filter is not None:
+                allowed, reason = self.select_mode_filter.should_publish(
+                    signal=sig,
+                    confidence=sig.confidence,
+                    indicators=indicators,
+                    smc_data=smc_result,
+                    ai_sentiment=ai,
+                    cross_exchange_verified=cross_verified,
+                    volume_24h=volume_24h,
+                    spread_pct=spread_pct,
+                )
+                if not allowed:
+                    log.info(
+                        "Select mode rejected %s %s: %s",
+                        symbol, chan_name, reason,
+                    )
+                    continue
 
             try:
                 self.signal_queue.put_nowait(sig)

@@ -191,6 +191,30 @@ class PerformanceTracker:
             f"Max drawdown: {stats.max_drawdown:.2f}%"
         )
 
+    def reset_stats(self, channel: Optional[str] = None) -> int:
+        """Clear all performance records, or only records for a specific channel.
+
+        Parameters
+        ----------
+        channel:
+            If provided, only clear records for this channel. If None, clear all records.
+
+        Returns
+        -------
+        int
+            Number of records that were cleared.
+        """
+        if channel:
+            before = len(self._records)
+            self._records = [r for r in self._records if r.channel != channel]
+            cleared = before - len(self._records)
+        else:
+            cleared = len(self._records)
+            self._records = []
+        self._save()
+        log.info("Performance stats reset: cleared %d records (channel=%s)", cleared, channel or "ALL")
+        return cleared
+
     def all_channel_stats(self, window_days: Optional[int] = None) -> Dict[str, ChannelStats]:
         """Return a dict of channel → ChannelStats."""
         channels = {r.channel for r in self._records}

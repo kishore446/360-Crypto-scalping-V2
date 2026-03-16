@@ -469,3 +469,116 @@ class TestScannerEnqueueSemantics:
 
         assert signal_queue.put.await_count == 2
         assert scanner._cooldown_until.get(("BTCUSDT", "360_SCALP")) is not None
+
+
+class TestComputeIndicatorsArrayShape:
+    """_compute_indicators must tolerate 2-D (non-flat) candle arrays."""
+
+    def test_2d_arrays_do_not_raise(self):
+        """Candle data stored as 2-D arrays must be flattened without error."""
+        import numpy as np
+        n = 40
+        flat = np.arange(1.0, n + 1.0)
+        # Wrap flat 1-D arrays into 2-D column vectors (simulates bad storage)
+        candles = {
+            "5m": {
+                "high": flat.reshape(-1, 1),
+                "low": (flat - 0.5).reshape(-1, 1),
+                "close": flat.reshape(-1, 1),
+                "volume": np.ones((n, 1)) * 100,
+            }
+        }
+        scanner = _make_scanner()
+        # Should not raise ValueError about truth value of array
+        indicators = scanner._compute_indicators(candles)
+        assert "5m" in indicators
+        # EMA values must be scalar floats
+        assert isinstance(indicators["5m"].get("ema9_last"), float)
+        assert isinstance(indicators["5m"].get("ema21_last"), float)
+
+    def test_1d_arrays_still_work(self):
+        """Normal 1-D candle arrays continue to produce correct indicators."""
+        import numpy as np
+        n = 40
+        flat = np.arange(1.0, n + 1.0)
+        candles = {
+            "5m": {
+                "high": flat,
+                "low": flat - 0.5,
+                "close": flat,
+                "volume": np.ones(n) * 100,
+            }
+        }
+        scanner = _make_scanner()
+        indicators = scanner._compute_indicators(candles)
+        assert isinstance(indicators["5m"].get("ema9_last"), float)
+
+
+class TestSpreadCacheFailureTTL:
+    """Failed order-book fetches (e.g. HTTP 400) must be cached long enough
+    to avoid hammering the endpoint on every scan cycle."""
+
+    @pytest.mark.asyncio
+    async def test_failed_fetch_not_retried_within_fail_ttl(self):
+        """When fetch_order_book returns None the fallback is cached for
+        _SPREAD_FAIL_CACHE_TTL seconds, not the shorter _SPREAD_CACHE_TTL."""
+        from src.scanner import _SPREAD_FAIL_CACHE_TTL
+        scanner = _make_scanner()
+        mock_client = MagicMock()
+        mock_client.fetch_order_book = AsyncMock(return_value=None)
+        scanner.spot_client = mock_client
+
+        spread1 = await scanner._get_spread_pct("EURUSDT")
+        assert spread1 == 0.01  # fallback
+
+        # Second call within the fail-TTL window should hit cache, not the client
+        spread2 = await scanner._get_spread_pct("EURUSDT")
+        assert spread2 == 0.01
+        # fetch_order_book must only have been called once despite two calls
+        assert mock_client.fetch_order_book.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_successful_fetch_uses_normal_ttl(self):
+        """Successful fetches are cached and returned on the next call."""
+        scanner = _make_scanner()
+        mock_client = MagicMock()
+        mock_client.fetch_order_book = AsyncMock(
+            return_value={"bids": [["100.0", "1"]], "asks": [["100.01", "1"]]}
+        )
+        scanner.spot_client = mock_client
+
+        spread1 = await scanner._get_spread_pct("BTCUSDT")
+        spread2 = await scanner._get_spread_pct("BTCUSDT")
+        assert spread1 == spread2
+        # Client called only once due to caching
+        assert mock_client.fetch_order_book.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fail_cache_expires_and_retries(self):
+        """After _SPREAD_FAIL_CACHE_TTL elapses the endpoint is retried."""
+        from src.scanner import _SPREAD_FAIL_CACHE_TTL
+        scanner = _make_scanner()
+        mock_client = MagicMock()
+        mock_client.fetch_order_book = AsyncMock(return_value=None)
+        scanner.spot_client = mock_client
+
+        await scanner._get_spread_pct("EURUSDT")
+        assert mock_client.fetch_order_book.await_count == 1
+
+        # Simulate the fail-TTL expiring by backdating the cached expiry
+        symbol = "EURUSDT"
+        cached_spread, expiry = scanner._order_book_cache[symbol]
+        scanner._order_book_cache[symbol] = (cached_spread, expiry - _SPREAD_FAIL_CACHE_TTL - 1)
+
+        # Reset per-cycle fetch counter so the cap doesn't block the retry
+        scanner._order_book_fetches_this_cycle = 0
+
+        await scanner._get_spread_pct("EURUSDT")
+        # Endpoint must have been called a second time after expiry
+        assert mock_client.fetch_order_book.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_fail_ttl_longer_than_success_ttl(self):
+        """_SPREAD_FAIL_CACHE_TTL must be greater than _SPREAD_CACHE_TTL."""
+        from src.scanner import _SPREAD_CACHE_TTL, _SPREAD_FAIL_CACHE_TTL
+        assert _SPREAD_FAIL_CACHE_TTL > _SPREAD_CACHE_TTL

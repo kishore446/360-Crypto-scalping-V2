@@ -227,7 +227,15 @@ class WebSocketManager:
             try:
                 await self._connect(conn)
                 self._set_connection_degraded(conn, False)
-                await self._listen(conn)
+                ping_task = asyncio.create_task(self._ping_loop(conn))
+                try:
+                    await self._listen(conn)
+                finally:
+                    ping_task.cancel()
+                    try:
+                        await ping_task
+                    except asyncio.CancelledError:
+                        pass
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -280,6 +288,26 @@ class WebSocketManager:
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                 log.warning("WS closed/error, will reconnect")
                 break
+
+    # ------------------------------------------------------------------
+    # Ping loop – keeps low-activity connections alive
+    # ------------------------------------------------------------------
+
+    async def _ping_loop(self, conn: WSConnection) -> None:
+        """Send periodic WebSocket pings so the server responds with PONG.
+
+        This keeps ``conn.last_pong`` updated on connections that receive
+        little or no market data, preventing the watchdog from force-closing
+        them due to apparent inactivity.
+        """
+        try:
+            while conn.ws and not conn.ws.closed:
+                await conn.ws.ping()
+                await asyncio.sleep(WS_HEARTBEAT_INTERVAL)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            log.debug("Ping loop exited with error: {}", exc)
 
     # ------------------------------------------------------------------
     # Health watchdog

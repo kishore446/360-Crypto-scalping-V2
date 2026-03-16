@@ -51,6 +51,9 @@ log = get_logger("scanner")
 
 # Order book spread cache TTL and per-cycle fetch cap
 _SPREAD_CACHE_TTL: float = 30.0
+# Longer TTL for symbols that fail (e.g. futures-only on spot) to avoid
+# hammering the endpoint every cycle.
+_SPREAD_FAIL_CACHE_TTL: float = 300.0
 _MAX_ORDER_BOOK_FETCHES_PER_CYCLE: int = 5
 
 # ADX threshold below which SCALP signals are suppressed during RANGING regime
@@ -155,7 +158,9 @@ class Scanner:
         # Optional select-mode filter (set after construction)
         self.select_mode_filter: Optional[Any] = None
 
-        # Order book spread cache: symbol → (spread_pct, timestamp)
+        # Order book spread cache: symbol → (spread_pct, expiry_monotonic_time)
+        # expiry_monotonic_time is an absolute time.monotonic() value; the entry
+        # is valid while time.monotonic() < expiry_monotonic_time.
         self._order_book_cache: Dict[str, Tuple[float, float]] = {}
         self._order_book_fetches_this_cycle: int = 0
 
@@ -272,12 +277,9 @@ class Scanner:
     def _compute_indicators(self, candles: Dict[str, dict]) -> Dict[str, dict]:
         indicators: Dict[str, dict] = {}
         for tf_key, cd in candles.items():
-            h, lo, c, _ = (
-                cd["high"],
-                cd["low"],
-                cd["close"],
-                cd.get("volume", np.array([])),
-            )
+            h = np.asarray(cd["high"], dtype=np.float64).ravel()
+            lo = np.asarray(cd["low"], dtype=np.float64).ravel()
+            c = np.asarray(cd["close"], dtype=np.float64).ravel()
             ind: dict = {}
             if len(c) >= 21:
                 ind["ema9_last"] = float(ema(c, 9)[-1])
@@ -328,7 +330,7 @@ class Scanner:
         spread_pct = 0.01  # fallback
         now = time.monotonic()
         cached = self._order_book_cache.get(symbol)
-        if cached and (now - cached[1]) < _SPREAD_CACHE_TTL:
+        if cached and now < cached[1]:
             return cached[0]
         if self._order_book_fetches_this_cycle >= _MAX_ORDER_BOOK_FETCHES_PER_CYCLE:
             return spread_pct
@@ -343,9 +345,14 @@ class Scanner:
                 mid = (best_bid + best_ask) / 2.0
                 if mid > 0:
                     spread_pct = (best_ask - best_bid) / mid * 100.0
-            self._order_book_cache[symbol] = (spread_pct, now)
+                # Successful fetch: cache with normal TTL
+                self._order_book_cache[symbol] = (spread_pct, now + _SPREAD_CACHE_TTL)
+            else:
+                # Failed fetch (e.g. futures-only symbol on spot endpoint):
+                # cache with a longer TTL to avoid hammering the endpoint every cycle.
+                self._order_book_cache[symbol] = (spread_pct, now + _SPREAD_FAIL_CACHE_TTL)
         except Exception:
-            pass
+            self._order_book_cache[symbol] = (spread_pct, now + _SPREAD_FAIL_CACHE_TTL)
         return spread_pct
 
     async def _fetch_onchain_data(self, symbol: str) -> Any:

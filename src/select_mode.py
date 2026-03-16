@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, Optional, Tuple
 
+from src.signal_quality import passes_select_filter
 from src.utils import get_logger
 
 log = get_logger("select_mode")
@@ -83,6 +84,10 @@ class SelectModeConfig:
     """Require cross-exchange verification to pass (``True``) or be neutral
     (``None``).  A result of ``False`` will always reject the signal."""
 
+    min_pair_quality: float = 80.0
+    min_quality_tier: str = "A"
+    min_r_multiple: float = 1.3
+
 
 class SelectModeFilter:
     """Ultra-selective filter that gates signals for the 360_SELECT channel.
@@ -132,6 +137,13 @@ class SelectModeFilter:
         cross_exchange_verified: Optional[bool],
         volume_24h: float,
         spread_pct: float,
+        setup_class: str = "",
+        market_state: str = "",
+        quality_tier: str = "",
+        component_scores: Optional[Dict[str, float]] = None,
+        pair_quality_score: float = 0.0,
+        r_multiple: float = 0.0,
+        higher_timeframe_aligned: bool = True,
     ) -> Tuple[bool, str]:
         """Evaluate whether a signal should be published to 360_SELECT.
 
@@ -256,6 +268,27 @@ class SelectModeFilter:
         # 10. Cross-exchange verification
         if self._config.require_cross_exchange and cross_exchange_verified is False:
             return False, "cross-exchange verification failed"
+
+        component_scores = component_scores or {}
+        allowed, reason = passes_select_filter(
+            setup_class=setup_class,
+            market_state=market_state,
+            pair_quality_score=pair_quality_score,
+            quality_tier=quality_tier,
+            confidence=confidence,
+            r_multiple=r_multiple,
+            component_scores=component_scores,
+            higher_timeframe_aligned=higher_timeframe_aligned,
+        )
+        if not allowed:
+            return False, reason
+
+        if pair_quality_score < self._config.min_pair_quality:
+            return False, f"pair quality {pair_quality_score:.1f} < {self._config.min_pair_quality}"
+        if r_multiple < self._config.min_r_multiple:
+            return False, f"rr {r_multiple:.2f} < {self._config.min_r_multiple:.2f}"
+        if quality_tier not in {"A+", self._config.min_quality_tier}:
+            return False, f"quality tier {quality_tier} below {self._config.min_quality_tier}"
 
         # 11. Daily cap
         self._maybe_reset_daily(channel)

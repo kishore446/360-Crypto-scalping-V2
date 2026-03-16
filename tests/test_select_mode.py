@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from src.select_mode import SelectModeConfig, SelectModeFilter
+from src.signal_quality import MarketState, SetupClass
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +58,13 @@ def _call_should_publish(
     cross_exchange_verified: bool | None = True,
     volume_24h: float = 15_000_000.0,
     spread_pct: float = 0.008,
+    setup_class: str = SetupClass.BREAKOUT_RETEST.value,
+    market_state: str = MarketState.STRONG_TREND.value,
+    quality_tier: str = "A",
+    component_scores: dict | None = None,
+    pair_quality_score: float = 88.0,
+    r_multiple: float = 1.5,
+    higher_timeframe_aligned: bool = True,
 ):
     signal = _make_signal(direction, channel)
     return sf.should_publish(
@@ -68,6 +76,13 @@ def _call_should_publish(
         cross_exchange_verified=cross_exchange_verified,
         volume_24h=volume_24h,
         spread_pct=spread_pct,
+        setup_class=setup_class,
+        market_state=market_state,
+        quality_tier=quality_tier,
+        component_scores=component_scores or {"market": 20.0, "execution": 16.0},
+        pair_quality_score=pair_quality_score,
+        r_multiple=r_multiple,
+        higher_timeframe_aligned=higher_timeframe_aligned,
     )
 
 
@@ -293,6 +308,26 @@ class TestAISentimentMatch:
             indicators=ind_short,
         )
         assert allowed_short is True
+
+
+class TestPremiumQualityGating:
+    def test_rejects_lower_quality_tier(self):
+        sf = SelectModeFilter(SelectModeConfig(enabled=True))
+        allowed, reason = _call_should_publish(sf, quality_tier="B")
+        assert allowed is False
+        assert "quality tier" in reason
+
+    def test_rejects_higher_timeframe_contradiction(self):
+        sf = SelectModeFilter(SelectModeConfig(enabled=True))
+        allowed, reason = _call_should_publish(sf, higher_timeframe_aligned=False)
+        assert allowed is False
+        assert "higher timeframe" in reason
+
+    def test_rejects_low_pair_quality(self):
+        sf = SelectModeFilter(SelectModeConfig(enabled=True))
+        allowed, reason = _call_should_publish(sf, pair_quality_score=70.0)
+        assert allowed is False
+        assert "pair quality" in reason
 
 
 # ---------------------------------------------------------------------------

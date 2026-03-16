@@ -102,16 +102,24 @@ class TelegramBot:
             "360_SWING": "🏛️",
             "360_RANGE": "⚖️",
             "360_THE_TAPE": "🐋",
+            "360_SELECT": "🌹",
         }
         emoji = chan_emojis.get(sig.channel, "📡")
         dir_emoji = "🚀" if sig.direction == Direction.LONG else "⬇️"
         dir_word = sig.direction.value
 
+        entry_text = f"🚀 Entry: `{fmt_price(sig.entry)}`"
+        if sig.entry_zone:
+            entry_text = (
+                f"🚀 Entry: `{fmt_price(sig.entry)}`"
+                f" | Zone: `{TelegramBot._escape_md(sig.entry_zone)}`"
+            )
+
         lines = [
             f"{emoji} *{sig.channel} ALERT* 💎",
             f"Pair: *{sig.symbol}*",
             f"📈 *{dir_word}* {dir_emoji}",
-            f"🚀 Entry: `{fmt_price(sig.entry)}`",
+            entry_text,
             f"🛡️ SL: `{fmt_price(sig.stop_loss)}`",
             f"🎯 TP1: `{fmt_price(sig.tp1)}`",
             f"🎯 TP2: `{fmt_price(sig.tp2)}`",
@@ -125,15 +133,35 @@ class TelegramBot:
             lines.append(f"💹 Trailing Active ({TelegramBot._escape_md(sig.trailing_desc)})")
 
         lines.append(f"🤖 Confidence: *{sig.confidence:.0f}%*")
+        if sig.component_scores:
+            lines.append(
+                "🧩 Quality: *{}* | M:{:.0f} S:{:.0f} E:{:.0f} R:{:.0f} C:{:.0f}".format(
+                    TelegramBot._escape_md(sig.quality_tier),
+                    sig.component_scores.get("market", 0.0),
+                    sig.component_scores.get("setup", 0.0),
+                    sig.component_scores.get("execution", 0.0),
+                    sig.component_scores.get("risk", 0.0),
+                    sig.component_scores.get("context", 0.0),
+                )
+            )
 
         sentiment_line = f"📰 AI Sentiment: {sig.ai_sentiment_label}"
         if sig.ai_sentiment_summary:
             sentiment_line += f" — {TelegramBot._escape_md(sig.ai_sentiment_summary)}"
         lines.append(sentiment_line)
 
+        if sig.setup_class and sig.setup_class != "UNCLASSIFIED":
+            setup_label = sig.setup_class.replace("_", " ").title()
+            lines.append(f"🧠 Setup: {TelegramBot._escape_md(setup_label)}")
         lines.append(f"⚠️ Risk: {TelegramBot._escape_md(sig.risk_label)}")
         lines.append(f"📊 Market Phase: {TelegramBot._escape_md(sig.market_phase)}")
         lines.append(f"💧 Liquidity Pool: {TelegramBot._escape_md(sig.liquidity_info)}")
+        if sig.invalidation_summary:
+            lines.append(f"🧱 Invalidation: {TelegramBot._escape_md(sig.invalidation_summary)}")
+        if sig.analyst_reason:
+            lines.append(f"📝 Thesis: {TelegramBot._escape_md(sig.analyst_reason)}")
+        if sig.execution_note:
+            lines.append(f"⏱️ Execution: {TelegramBot._escape_md(sig.execution_note)}")
         lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
 
         return "\n".join(lines)

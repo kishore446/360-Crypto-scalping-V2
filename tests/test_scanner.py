@@ -14,9 +14,6 @@ from src.regime import MarketRegime
 from src.scanner import Scanner, _RANGING_ADX_SUPPRESS_THRESHOLD
 from src.signal_quality import (
     ExecutionAssessment,
-    MarketState,
-    PairQualityAssessment,
-    QualityTier,
     RiskAssessment,
     SetupAssessment,
     SetupClass,

@@ -33,7 +33,6 @@ from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi
 from src.onchain import score_onchain
 from src.regime import MarketRegime
 from src.signal_quality import (
-    ComponentScore,
     ExecutionAssessment,
     MarketState,
     PairQualityAssessment,

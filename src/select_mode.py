@@ -38,6 +38,13 @@ from src.utils import get_logger
 
 log = get_logger("select_mode")
 
+_QUALITY_TIER_ORDER = {
+    "C": 0,
+    "B": 1,
+    "A": 2,
+    "A+": 3,
+}
+
 
 @dataclass
 class SelectModeConfig:
@@ -126,6 +133,10 @@ class SelectModeFilter:
     # ------------------------------------------------------------------
     # Main filter
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _quality_tier_meets_minimum(actual: str, minimum: str) -> bool:
+        return _QUALITY_TIER_ORDER.get(actual, -1) >= _QUALITY_TIER_ORDER.get(minimum, -1)
 
     def should_publish(
         self,
@@ -287,7 +298,7 @@ class SelectModeFilter:
             return False, f"pair quality {pair_quality_score:.1f} < {self._config.min_pair_quality}"
         if r_multiple < self._config.min_r_multiple:
             return False, f"rr {r_multiple:.2f} < {self._config.min_r_multiple:.2f}"
-        if quality_tier not in {"A+", self._config.min_quality_tier}:
+        if not self._quality_tier_meets_minimum(quality_tier, self._config.min_quality_tier):
             return False, f"quality tier {quality_tier} below {self._config.min_quality_tier}"
 
         # 11. Daily cap

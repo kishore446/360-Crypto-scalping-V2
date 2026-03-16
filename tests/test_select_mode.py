@@ -329,6 +329,11 @@ class TestPremiumQualityGating:
         assert allowed is False
         assert "pair quality" in reason
 
+    def test_quality_tier_hierarchy_respects_lower_minimum(self):
+        sf = SelectModeFilter(SelectModeConfig(enabled=True, min_quality_tier="B"))
+        allowed, _ = _call_should_publish(sf, quality_tier="A")
+        assert allowed is True
+
 
 # ---------------------------------------------------------------------------
 # Tests: config update

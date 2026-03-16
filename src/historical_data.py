@@ -308,7 +308,7 @@ class HistoricalDataStore:
         semaphore = asyncio.Semaphore(_GAP_FILL_CONCURRENT_SYMBOLS)
 
         await asyncio.gather(*[
-            self._gap_fill_symbol(sym, info, meta, semaphore)
+            self._gap_fill_symbol(sym, info, meta, semaphore, pair_mgr)
             for sym, info in pair_mgr.pairs.items()
         ])
         log.info("Gap-fill complete.")
@@ -319,6 +319,7 @@ class HistoricalDataStore:
         info: Any,
         meta: Dict[str, Any],
         semaphore: asyncio.Semaphore,
+        pair_mgr: PairManager,
     ) -> None:
         """Process gap-fill for a single symbol, bounded by *semaphore*."""
         async with semaphore:

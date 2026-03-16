@@ -299,9 +299,10 @@ class CryptoSignalEngine:
                 log.error("Free channel publish error: %s", exc)
 
     def _current_ws_symbol_sets(self) -> tuple[set[str], set[str]]:
+        ws_limit = _WS_SYMBOL_LIMIT
         return (
-            set(self.pair_mgr.spot_symbols[:_WS_SYMBOL_LIMIT]),
-            set(self.pair_mgr.futures_symbols[:_WS_SYMBOL_LIMIT]),
+            set(self.pair_mgr.spot_symbols[:ws_limit]),
+            set(self.pair_mgr.futures_symbols[:ws_limit]),
         )
 
     async def _restart_websockets_if_pair_universe_changed(

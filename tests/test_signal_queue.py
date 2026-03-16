@@ -27,7 +27,7 @@ def _make_signal(signal_id: str = "TEST-SIGNAL-001") -> Signal:
     )
 
 
-class _FakeRedisBackend:
+class FakeRedisBackend:
     def __init__(self, size: int) -> None:
         self.available = True
         self.mode = "redis"
@@ -61,7 +61,7 @@ class _FakeRedisBackend:
 
 @pytest.mark.asyncio
 async def test_redis_full_queue_returns_false():
-    redis_backend = _FakeRedisBackend(size=500)
+    redis_backend = FakeRedisBackend(size=500)
     queue = SignalQueue(redis_backend)
 
     ok = await queue.put(_make_signal("REDIS-FULL-1"))
@@ -75,7 +75,7 @@ async def test_redis_full_queue_returns_false():
 
 @pytest.mark.asyncio
 async def test_redis_full_queue_records_drop_count():
-    redis_backend = _FakeRedisBackend(size=500)
+    redis_backend = FakeRedisBackend(size=500)
     queue = SignalQueue(redis_backend)
 
     await queue.put(_make_signal("REDIS-FULL-COUNT"))
@@ -87,7 +87,7 @@ async def test_redis_full_queue_records_drop_count():
 
 @pytest.mark.asyncio
 async def test_redis_successful_enqueue_returns_true():
-    redis_backend = _FakeRedisBackend(size=0)
+    redis_backend = FakeRedisBackend(size=0)
     queue = SignalQueue(redis_backend)
 
     ok = await queue.put(_make_signal("REDIS-OK-1"))
@@ -102,7 +102,7 @@ async def test_redis_successful_enqueue_returns_true():
 
 @pytest.mark.asyncio
 async def test_redis_overflow_records_last_dropped_signal_id():
-    redis_backend = _FakeRedisBackend(size=500)
+    redis_backend = FakeRedisBackend(size=500)
     queue = SignalQueue(redis_backend)
 
     await queue.put(_make_signal("REDIS-OVERFLOW-ID"))

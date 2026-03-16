@@ -140,6 +140,11 @@ class Bootstrap:
         This helper is shared by the initial boot path and the admin-triggered
         restart flow so both launch the same runtime loops after one-time setup
         such as pair loading, historical seeding, and WebSocket startup.
+
+        Returns
+        -------
+        list[asyncio.Task]
+            The running task objects for the engine's background loops.
         """
         engine = self._engine
         return [

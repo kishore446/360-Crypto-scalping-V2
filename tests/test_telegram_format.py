@@ -269,7 +269,7 @@ class TestFormatSignalEscaping:
         assert "31\\_980 - 32\\_020" in text
         assert "\\*with\\*" in text
         assert "\\[confirmed]" in text
-        assert "don\\'t" not in text
+        assert "don't" in text
         assert "\\_extension\\_" in text
 
 

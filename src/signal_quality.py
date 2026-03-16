@@ -351,7 +351,8 @@ def execution_quality_check(
     atr_val = max(_safe_float(primary.get("atr_last")), max(signal.entry, 1.0) * 0.001)
     ema_anchor = _safe_float(primary.get("ema21_last"), signal.entry)
     bb_mid = _safe_float(primary.get("bb_mid_last"), signal.entry)
-    sweep_level = _safe_float(smc_data.get("sweeps", [None])[0].sweep_level if smc_data.get("sweeps") else None, signal.entry)
+    sweep = smc_data.get("sweeps", [None])[0] if smc_data.get("sweeps") else None
+    sweep_level = _safe_float(sweep.sweep_level if sweep else None, signal.entry)
     mss = smc_data.get("mss")
     anchor = ema_anchor
     trigger_confirmed = False

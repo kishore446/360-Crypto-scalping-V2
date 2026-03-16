@@ -522,7 +522,6 @@ class TestSpreadCacheFailureTTL:
     async def test_failed_fetch_not_retried_within_fail_ttl(self):
         """When fetch_order_book returns None the fallback is cached for
         _SPREAD_FAIL_CACHE_TTL seconds, not the shorter _SPREAD_CACHE_TTL."""
-        from src.scanner import _SPREAD_FAIL_CACHE_TTL
         scanner = _make_scanner()
         mock_client = MagicMock()
         mock_client.fetch_order_book = AsyncMock(return_value=None)

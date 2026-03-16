@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from src.regime import MarketRegime
 from src.smc import Direction
 
@@ -191,10 +193,12 @@ def _recent_structure(candles: Optional[dict], direction: Direction, lookback: i
         return 0.0
     highs = candles.get("high", [])
     lows = candles.get("low", [])
-    if direction == Direction.LONG and lows:
-        return float(min(lows[-lookback:]))
-    if direction == Direction.SHORT and highs:
-        return float(max(highs[-lookback:]))
+    if direction == Direction.LONG and len(lows) > 0:
+        segment = lows[-lookback:]
+        return float(np.min(segment))
+    if direction == Direction.SHORT and len(highs) > 0:
+        segment = highs[-lookback:]
+        return float(np.max(segment))
     return 0.0
 
 

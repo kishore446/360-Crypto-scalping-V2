@@ -34,6 +34,8 @@ CACHE_DIR = Path("data/cache")
 _TICKS_DIR = CACHE_DIR / "ticks"
 _META_FILE = CACHE_DIR / "metadata.json"
 
+# Maximum candles to retain per symbol-timeframe bucket
+_MAX_CANDLES_PER_BUCKET: int = 1000
 # Seconds per candle interval — used to estimate how many candles are missing
 _INTERVAL_SECONDS: Dict[str, int] = {
     "1m": 60,
@@ -260,14 +262,11 @@ class HistoricalDataStore:
                     if not path.exists():
                         log.warning("Cache file missing: %s — skipping", path)
                         continue
-                    data = np.load(path)
-                    self.candles.setdefault(symbol, {})[interval] = {
-                        "open": data["open"],
-                        "high": data["high"],
-                        "low": data["low"],
-                        "close": data["close"],
-                        "volume": data["volume"],
-                    }
+                    with np.load(path, allow_pickle=False) as data:
+                        self.candles.setdefault(symbol, {})[interval] = {
+                            k: np.asarray(data[k], dtype=np.float64).ravel()
+                            for k in ("open", "high", "low", "close", "volume")
+                        }
                     loaded_count += 1
                 except Exception as exc:
                     log.warning("Failed to load cache for %s: %s — skipping", key, exc)
@@ -416,10 +415,14 @@ class HistoricalDataStore:
         """Append a single candle (from WebSocket) to the store."""
         bucket = self.candles.setdefault(symbol, {}).setdefault(
             interval,
-            {"open": np.array([]), "high": np.array([]), "low": np.array([]), "close": np.array([]), "volume": np.array([])},
+            {k: np.empty(0, dtype=np.float64) for k in ("open", "high", "low", "close", "volume")},
         )
         for key in ("open", "high", "low", "close", "volume"):
-            bucket[key] = np.append(bucket[key], candle.get(key, 0.0))
+            arr = bucket[key]
+            arr = np.append(arr, candle.get(key, 0.0))
+            if len(arr) > _MAX_CANDLES_PER_BUCKET:
+                arr = arr[-_MAX_CANDLES_PER_BUCKET:]
+            bucket[key] = arr
 
     def append_tick(self, symbol: str, tick: Dict[str, Any]) -> None:
         self.ticks.setdefault(symbol, []).append(tick)

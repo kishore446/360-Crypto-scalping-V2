@@ -17,7 +17,13 @@ QUEUE_MAXSIZE = 500
 
 
 class SignalQueue:
-    """Hybrid signal queue: uses Redis LIST when available, asyncio.Queue otherwise."""
+    """Hybrid signal queue with consistent full-queue semantics.
+
+    Uses a Redis LIST when available and an ``asyncio.Queue`` fallback otherwise.
+    :meth:`put` returns ``True`` only when the new signal is accepted and returns
+    ``False`` when the active backend queue is full; it does not silently evict
+    older queued items.
+    """
 
     def __init__(
         self,
@@ -72,9 +78,11 @@ class SignalQueue:
     async def put(self, signal: Signal) -> bool:
         if self._redis.available:
             try:
+                size = await self._redis.client.llen(QUEUE_KEY)  # type: ignore[union-attr,misc]
+                if size >= QUEUE_MAXSIZE:
+                    self._record_drop(signal, "redis_queue_full")
+                    return False
                 await self._redis.client.rpush(QUEUE_KEY, self._serialize(signal))  # type: ignore[union-attr,misc]
-                # Cap queue length
-                await self._redis.client.ltrim(QUEUE_KEY, -QUEUE_MAXSIZE, -1)  # type: ignore[union-attr,misc]
                 return True
             except Exception as exc:
                 self._redis.mark_unavailable("signal_queue.put", exc)

@@ -129,21 +129,34 @@ class Bootstrap:
             )
 
         # 5. Launch async tasks
-        engine._tasks = [
+        engine._tasks = self.launch_runtime_tasks()
+
+        await engine.telegram.send_admin_alert("✅ Engine booted successfully")
+        log.info("=== Engine RUNNING ===")
+
+    def launch_runtime_tasks(self) -> list[asyncio.Task]:
+        """Create the standard long-running tasks used after boot or restart.
+
+        This helper is shared by the initial boot path and the admin-triggered
+        restart flow so both launch the same runtime loops after one-time setup
+        such as pair loading, historical seeding, and WebSocket startup.
+
+        Returns
+        -------
+        list[asyncio.Task]
+            The running task objects for the engine's background loops.
+        """
+        engine = self._engine
+        return [
             asyncio.create_task(engine.router.start()),
             asyncio.create_task(engine.monitor.start()),
             asyncio.create_task(engine.telemetry.start()),
             asyncio.create_task(engine._pair_refresh_loop()),
             asyncio.create_task(engine._scanner.scan_loop()),
-            asyncio.create_task(
-                engine.telegram.poll_commands(engine._handle_command)
-            ),
+            asyncio.create_task(engine.telegram.poll_commands(engine._handle_command)),
             asyncio.create_task(engine._free_channel_loop()),
             asyncio.create_task(engine._snapshot_loop()),
         ]
-
-        await engine.telegram.send_admin_alert("✅ Engine booted successfully")
-        log.info("=== Engine RUNNING ===")
 
     async def shutdown(self) -> None:
         """Gracefully shut down all engine components."""

@@ -62,6 +62,7 @@ log = get_logger("main")
 
 # Interval between automatic disk snapshots of historical data (seconds)
 _SNAPSHOT_INTERVAL_SECONDS: int = 300  # 5 minutes
+_WS_SYMBOL_LIMIT: int = 50
 
 
 class CryptoSignalEngine:
@@ -139,6 +140,8 @@ class CryptoSignalEngine:
         self._ws_spot: Optional[WebSocketManager] = None
         self._ws_futures: Optional[WebSocketManager] = None
         self._tasks: List[asyncio.Task] = []
+        self._shutdown_started: bool = False
+        self._restart_lock = asyncio.Lock()
 
         # Command handler state
         self._paused_channels: Set[str] = set()
@@ -231,6 +234,9 @@ class CryptoSignalEngine:
         self._command_handler.ws_futures = self._ws_futures
 
     async def shutdown(self) -> None:
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
         await self._bootstrap.shutdown()
 
     # ------------------------------------------------------------------
@@ -292,11 +298,40 @@ class CryptoSignalEngine:
             except Exception as exc:
                 log.error("Free channel publish error: %s", exc)
 
+    def _current_ws_symbol_sets(self) -> tuple[set[str], set[str]]:
+        ws_limit = _WS_SYMBOL_LIMIT
+        return (
+            set(self.pair_mgr.spot_symbols[:ws_limit]),
+            set(self.pair_mgr.futures_symbols[:ws_limit]),
+        )
+
+    async def _restart_websockets_if_pair_universe_changed(
+        self,
+        old_spot: set[str],
+        old_futures: set[str],
+    ) -> None:
+        new_spot, new_futures = self._current_ws_symbol_sets()
+        if old_spot == new_spot and old_futures == new_futures:
+            return
+
+        log.info("Tracked pair universe changed; restarting WebSocket subscriptions")
+        if self._ws_spot:
+            await self._ws_spot.stop()
+            self._ws_spot = None
+        if self._ws_futures:
+            await self._ws_futures.stop()
+            self._ws_futures = None
+
+        await self._bootstrap.start_websockets()
+        self._command_handler.ws_spot = self._ws_spot
+        self._command_handler.ws_futures = self._ws_futures
+
     async def _pair_refresh_loop(self) -> None:
         """Periodically refresh pairs and seed any newly discovered symbols."""
         while True:
             await asyncio.sleep(PAIR_FETCH_INTERVAL_HOURS * 3600)
             try:
+                old_spot, old_futures = self._current_ws_symbol_sets()
                 new_symbols = await self.pair_mgr.refresh_pairs()
                 for sym in new_symbols:
                     info = self.pair_mgr.pairs.get(sym)
@@ -311,6 +346,9 @@ class CryptoSignalEngine:
                         log.info("Seeded new pair %s (%s)", sym, info.market)
                     except Exception as exc:
                         log.error("Failed to seed new pair %s: %s", sym, exc)
+                await self._restart_websockets_if_pair_universe_changed(
+                    old_spot, old_futures
+                )
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -337,28 +375,31 @@ class CryptoSignalEngine:
 
     async def _restart_tasks(self, chat_id: str) -> None:
         """Cancel and restart all async tasks (called by CommandHandler)."""
-        old_tasks = list(self._tasks)
-        for t in old_tasks:
-            t.cancel()
-        await asyncio.gather(*old_tasks, return_exceptions=True)
-        self._tasks = []
-        await self.router.stop()
-        await self.monitor.stop()
-        await self.telemetry.stop()
-        await self.telegram.stop()
-        self._tasks = [
-            asyncio.create_task(self.router.start()),
-            asyncio.create_task(self.monitor.start()),
-            asyncio.create_task(self.telemetry.start()),
-            asyncio.create_task(self._pair_refresh_loop()),
-            asyncio.create_task(self._scanner.scan_loop()),
-            asyncio.create_task(self.telegram.poll_commands(self._handle_command)),
-            asyncio.create_task(self._free_channel_loop()),
-            asyncio.create_task(self._snapshot_loop()),
-        ]
-        # Re-sync tasks list into command handler
-        self._command_handler._tasks = self._tasks
-        await self.telegram.send_message(chat_id, "✅ Engine tasks restarted.")
+        async with self._restart_lock:
+            old_tasks = list(self._tasks)
+            for t in old_tasks:
+                t.cancel()
+            await asyncio.gather(*old_tasks, return_exceptions=True)
+            self._tasks = []
+            await self.router.stop()
+            await self.monitor.stop()
+            await self.telemetry.stop()
+            await self.telegram.stop()
+            if self._ws_spot:
+                await self._ws_spot.stop()
+                self._ws_spot = None
+            if self._ws_futures:
+                await self._ws_futures.stop()
+                self._ws_futures = None
+            await self._bootstrap.start_websockets()
+            self._command_handler.ws_spot = self._ws_spot
+            self._command_handler.ws_futures = self._ws_futures
+            self._tasks = self._bootstrap.launch_runtime_tasks()
+            # Re-sync tasks list into command handler
+            self._command_handler._tasks = self._tasks
+            await self.telegram.send_message(
+                chat_id, "✅ Engine loops and WebSocket subscriptions restarted."
+            )
 
 
 # ---------------------------------------------------------------------------

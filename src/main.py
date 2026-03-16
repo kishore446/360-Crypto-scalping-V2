@@ -62,6 +62,7 @@ log = get_logger("main")
 
 # Interval between automatic disk snapshots of historical data (seconds)
 _SNAPSHOT_INTERVAL_SECONDS: int = 300  # 5 minutes
+_WS_SYMBOL_LIMIT: int = 50
 
 
 class CryptoSignalEngine:
@@ -299,8 +300,8 @@ class CryptoSignalEngine:
 
     def _current_ws_symbol_sets(self) -> tuple[set[str], set[str]]:
         return (
-            set(self.pair_mgr.spot_symbols[:50]),
-            set(self.pair_mgr.futures_symbols[:50]),
+            set(self.pair_mgr.spot_symbols[:_WS_SYMBOL_LIMIT]),
+            set(self.pair_mgr.futures_symbols[:_WS_SYMBOL_LIMIT]),
         )
 
     async def _restart_websockets_if_pair_universe_changed(

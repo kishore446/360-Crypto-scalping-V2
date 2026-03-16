@@ -135,7 +135,12 @@ class Bootstrap:
         log.info("=== Engine RUNNING ===")
 
     def launch_runtime_tasks(self) -> list[asyncio.Task]:
-        """Create the standard set of long-running engine tasks."""
+        """Create the standard long-running tasks used after boot or restart.
+
+        This helper is shared by the initial boot path and the admin-triggered
+        restart flow so both launch the same runtime loops after one-time setup
+        such as pair loading, historical seeding, and WebSocket startup.
+        """
         engine = self._engine
         return [
             asyncio.create_task(engine.router.start()),

@@ -373,6 +373,7 @@ class TestOutcomeRecording:
         assert call_kwargs["pnl_pct"] == pytest.approx(-0.5)
         assert sig.current_price == pytest.approx(30150.0)
         assert sig.status == "SL_HIT"
+        assert call_kwargs["outcome_label"] == "SL_HIT"
 
     @pytest.mark.asyncio
     async def test_short_tp3_uses_take_profit_price_for_realized_pnl(self):

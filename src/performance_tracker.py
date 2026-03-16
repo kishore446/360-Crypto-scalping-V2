@@ -225,12 +225,13 @@ class PerformanceTracker:
             return stats
 
         stats.total_signals = len(records)
-        wins = [r for r in records if r.pnl_pct > 0 and not is_breakeven_pnl(r.pnl_pct)]
-        losses = [r for r in records if r.pnl_pct < 0 and not is_breakeven_pnl(r.pnl_pct)]
-        breakevens = [r for r in records if is_breakeven_pnl(r.pnl_pct)]
-        stats.win_count = len(wins)
-        stats.loss_count = len(losses)
-        stats.breakeven_count = len(breakevens)
+        for record in records:
+            if is_breakeven_pnl(record.pnl_pct):
+                stats.breakeven_count += 1
+            elif record.pnl_pct > 0:
+                stats.win_count += 1
+            else:
+                stats.loss_count += 1
         total = stats.win_count + stats.loss_count
         stats.win_rate = (stats.win_count / total * 100.0) if total > 0 else 0.0
 

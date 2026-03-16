@@ -31,11 +31,11 @@ def classify_trade_outcome(pnl_pct: float, hit_tp: int = 0, hit_sl: bool = False
     if hit_tp >= 3 and not hit_sl:
         return "FULL_TP_HIT"
     if hit_sl:
-        if normalized_pnl < -_BREAKEVEN_PNL_THRESHOLD_PCT:
+        if is_breakeven_pnl(normalized_pnl):
+            return "BREAKEVEN_EXIT"
+        if normalized_pnl < 0.0:
             return "SL_HIT"
-        if normalized_pnl > _BREAKEVEN_PNL_THRESHOLD_PCT:
-            return "PROFIT_LOCKED"
-        return "BREAKEVEN_EXIT"
+        return "PROFIT_LOCKED"
     if hit_tp > 0:
         return f"TP{hit_tp}_HIT"
     return "CLOSED"

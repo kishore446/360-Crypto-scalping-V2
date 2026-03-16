@@ -121,14 +121,15 @@ class CircuitBreaker:
 
     def reset(self) -> None:
         """Manually reset the circuit breaker and clear all rolling state."""
+        resumed_at = time.monotonic()
         self._outcomes.clear()
         self._tripped = False
         self._trip_reason = ""
         self._trip_time = None
         self._consecutive_sl = 0
         self._status_mode = "resumed"
-        self._last_resume_time = time.monotonic()
-        self._monitoring_started_at = self._last_resume_time
+        self._last_resume_time = resumed_at
+        self._monitoring_started_at = resumed_at
         self._last_resume_reason = (
             "Manual reset cleared breaker history and restarted the monitoring window."
         )
@@ -256,13 +257,14 @@ class CircuitBreaker:
 
     def _resume(self, reason: str) -> None:
         """Resume signal generation after a successful recovery check."""
+        resumed_at = time.monotonic()
         self._tripped = False
         self._trip_reason = ""
         self._trip_time = None
         self._consecutive_sl = 0
         self._status_mode = "resumed"
-        self._last_resume_time = time.monotonic()
-        self._monitoring_started_at = self._last_resume_time
+        self._last_resume_time = resumed_at
+        self._monitoring_started_at = resumed_at
         self._last_resume_reason = reason
         log.info("Circuit breaker resumed automatically: %s", reason)
         self._emit_alert(

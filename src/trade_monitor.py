@@ -21,6 +21,11 @@ log = get_logger("trade_monitor")
 # Minimum absolute PnL (%) before SL/TP evaluation is allowed.
 # Prevents false stops from stale prices or floating-point noise.
 _ZERO_PNL_THRESHOLD_PCT = 0.01
+_STOP_OUTCOME_MESSAGES = {
+    "SL_HIT": "🔴 SL HIT",
+    "BREAKEVEN_EXIT": "⚪ BREAKEVEN EXIT",
+    "PROFIT_LOCKED": "🟢 PROFIT LOCKED",
+}
 
 
 class TradeMonitor:
@@ -215,11 +220,7 @@ class TradeMonitor:
         if is_long and price <= sig.stop_loss:
             self._set_realized_pnl(sig, sig.stop_loss)
             outcome_label = self._apply_final_outcome(sig, hit_tp=0, hit_sl=True)
-            outcome_event = {
-                "SL_HIT": "🔴 SL HIT",
-                "BREAKEVEN_EXIT": "⚪ BREAKEVEN EXIT",
-                "PROFIT_LOCKED": "🟢 PROFIT LOCKED",
-            }[outcome_label]
+            outcome_event = _STOP_OUTCOME_MESSAGES.get(outcome_label, "🔴 EXIT")
             await self._post_update(sig, outcome_event)
             self._record_outcome(sig, hit_tp=0, hit_sl=True)
             self._remove(sig.signal_id)
@@ -227,11 +228,7 @@ class TradeMonitor:
         if not is_long and price >= sig.stop_loss:
             self._set_realized_pnl(sig, sig.stop_loss)
             outcome_label = self._apply_final_outcome(sig, hit_tp=0, hit_sl=True)
-            outcome_event = {
-                "SL_HIT": "🔴 SL HIT",
-                "BREAKEVEN_EXIT": "⚪ BREAKEVEN EXIT",
-                "PROFIT_LOCKED": "🟢 PROFIT LOCKED",
-            }[outcome_label]
+            outcome_event = _STOP_OUTCOME_MESSAGES.get(outcome_label, "🔴 EXIT")
             await self._post_update(sig, outcome_event)
             self._record_outcome(sig, hit_tp=0, hit_sl=True)
             self._remove(sig.signal_id)

@@ -184,13 +184,13 @@ class Scanner:
                 for sym_info, result in zip(sorted_pairs, results):
                     if isinstance(result, Exception):
                         log.warning(
-                            "Scan error for %s (%s): %s",
+                            "Scan error for {} ({}): {}",
                             sym_info[0], type(result).__name__, result,
                         )
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                log.error("Scan loop error: %s", exc)
+                log.error("Scan loop error: {}", exc)
 
             elapsed_ms = (time.monotonic() - t0) * 1000
             self.telemetry.set_scan_latency(elapsed_ms)
@@ -199,7 +199,7 @@ class Scanner:
             try:
                 qsize = await self.signal_queue.qsize()
             except Exception as exc:
-                log.warning("Failed to read signal queue size: %s", exc)
+                log.warning("Failed to read signal queue size: {}", exc)
                 qsize = 0
             self.telemetry.set_queue_size(qsize)
             ws_conns = (
@@ -239,7 +239,7 @@ class Scanner:
             time.monotonic() + cooldown_s
         )
         log.debug(
-            "Cooldown set for %s %s (%.0fs)", symbol, channel_name, cooldown_s
+            "Cooldown set for {} {} ({:.0f}s)", symbol, channel_name, cooldown_s
         )
 
     async def _scan_symbol_bounded(self, sem: asyncio.Semaphore, symbol: str, volume_24h: float) -> None:
@@ -342,7 +342,7 @@ class Scanner:
                     timeout=3,
                 )
         except Exception as exc:
-            log.debug("On-chain fetch error for %s: %s", symbol, exc)
+            log.debug("On-chain fetch error for {}: {}", symbol, exc)
         return None
 
     async def _verify_cross_exchange(
@@ -356,9 +356,9 @@ class Scanner:
                 timeout=3,
             )
         except asyncio.TimeoutError:
-            log.debug("Cross-exchange verification timed out for %s", symbol)
+            log.debug("Cross-exchange verification timed out for {}", symbol)
         except Exception as exc:
-            log.debug("Cross-exchange verification error for %s: %s", symbol, exc)
+            log.debug("Cross-exchange verification error for {}: {}", symbol, exc)
         return None
 
     def _build_smc_summary(self, smc_result: Any) -> str:
@@ -385,7 +385,7 @@ class Scanner:
         regime_ind = indicators.get("5m", indicators.get("1m", {}))
         regime_candles = candles.get("5m", candles.get("1m"))
         regime_result = self.regime_detector.classify(regime_ind, regime_candles)
-        log.debug("%s regime: %s", symbol, regime_result.regime.value)
+        log.debug("{} regime: {}", symbol, regime_result.regime.value)
 
         ind_for_predict = indicators.get("5m", indicators.get("1m", {}))
         candle_total = sum(len(cd.get("close", [])) for cd in candles.values())
@@ -414,13 +414,13 @@ class Scanner:
         if chan_name in self.paused_channels:
             return True
         if self._is_in_cooldown(symbol, chan_name):
-            log.debug("Cooldown active: skipping %s %s", symbol, chan_name)
+            log.debug("Cooldown active: skipping {} {}", symbol, chan_name)
             return True
         if any(
             s.symbol == symbol and s.channel == chan_name
             for s in self.router.active_signals.values()
         ):
-            log.debug("Skipping %s %s – active signal already exists", symbol, chan_name)
+            log.debug("Skipping {} {} – active signal already exists", symbol, chan_name)
             return True
         if (
             chan_name == "360_SCALP"
@@ -428,7 +428,7 @@ class Scanner:
             and ctx.adx_val < _RANGING_ADX_SUPPRESS_THRESHOLD
         ):
             log.debug(
-                "Suppressing SCALP signal for %s (RANGING, ADX=%.1f)",
+                "Suppressing SCALP signal for {} (RANGING, ADX={:.1f})",
                 symbol,
                 ctx.adx_val,
             )
@@ -487,7 +487,7 @@ class Scanner:
         if chan_name == "360_RANGE" and ctx.is_ranging:
             sig.confidence += _RANGING_RANGE_CONF_BOOST
             log.debug(
-                "RANGE confidence boosted for %s (RANGING): %.1f",
+                "RANGE confidence boosted for {} (RANGING): {:.1f}",
                 symbol,
                 sig.confidence,
             )
@@ -505,7 +505,7 @@ class Scanner:
             self.predictive.adjust_tp_sl(sig, prediction)
             self.predictive.update_confidence(sig, prediction)
         except Exception as exc:
-            log.debug("Predictive AI error for %s: %s", symbol, exc)
+            log.debug("Predictive AI error for {}: {}", symbol, exc)
 
     async def _apply_openai_adjustments(
         self,
@@ -536,7 +536,7 @@ class Scanner:
             )
             if openai_eval and not openai_eval.recommended:
                 log.info(
-                    "OpenAI recommends SKIP for %s %s: %s",
+                    "OpenAI recommends SKIP for {} {}: {}",
                     symbol,
                     chan_name,
                     openai_eval.reasoning,
@@ -545,7 +545,7 @@ class Scanner:
             if openai_eval and openai_eval.adjustment != 0.0:
                 sig.confidence += openai_eval.adjustment
                 log.debug(
-                    "OpenAI adjusted confidence for %s %s by %+.1f → %.1f (%s)",
+                    "OpenAI adjusted confidence for {} {} by {:+.1f} → {:.1f} ({})",
                     symbol,
                     chan_name,
                     openai_eval.adjustment,
@@ -553,7 +553,7 @@ class Scanner:
                     openai_eval.reasoning,
                 )
         except Exception as exc:
-            log.debug("OpenAI evaluation error for %s: %s", symbol, exc)
+            log.debug("OpenAI evaluation error for {}: {}", symbol, exc)
         return True
 
     @staticmethod
@@ -576,13 +576,8 @@ class Scanner:
         sig.spread_pct = ctx.spread_pct
         sig.volume_24h_usd = volume_24h
 
-    def _enqueue_signal(self, sig: Any, select_copy: bool = False) -> None:
-        if not self.signal_queue.put_nowait(sig):
-            log.warning(
-                "Signal queue full – dropping %s%s",
-                "SELECT copy " if select_copy else "",
-                sig.signal_id,
-            )
+    async def _enqueue_signal(self, sig: Any) -> bool:
+        return await self.signal_queue.put(sig)
 
     async def _prepare_signal(
         self,
@@ -603,7 +598,7 @@ class Scanner:
                 volume_24h_usd=volume_24h,
             )
         except Exception as exc:
-            log.debug("Channel %s eval error for %s: %s", chan_name, symbol, exc)
+            log.debug("Channel {} eval error for {}: {}", chan_name, symbol, exc)
             return None
         if sig is None:
             return None
@@ -638,8 +633,11 @@ class Scanner:
             sig = await self._prepare_signal(symbol, volume_24h, chan, ctx)
             if sig is None:
                 continue
+            # Only start scan cooldown after the signal has been accepted by the
+            # queue; rejected/dropped signals must not suppress later scans.
+            if not await self._enqueue_signal(sig):
+                continue
             self._set_cooldown(symbol, chan_name)
-            self._enqueue_signal(sig)
 
             # Select-mode: if enabled and signal passes stricter filters,
             # also enqueue a copy to 360_SELECT channel.
@@ -662,15 +660,15 @@ class Scanner:
                     select_sig = copy.deepcopy(sig)
                     select_sig.channel = "360_SELECT"
                     select_sig.signal_id = f"SELECT-{sig.signal_id}"
-                    self._enqueue_signal(select_sig, select_copy=True)
-                    log.info(
-                        "SELECT copy enqueued for %s (%s)",
-                        sig.symbol,
-                        select_sig.signal_id,
-                    )
+                    if await self._enqueue_signal(select_sig):
+                        log.info(
+                            "SELECT copy enqueued for {} ({})",
+                            sig.symbol,
+                            select_sig.signal_id,
+                        )
                 else:
                     log.debug(
-                        "SELECT filter rejected %s %s: %s",
+                        "SELECT filter rejected {} {}: {}",
                         sig.symbol,
                         chan_name,
                         reason,

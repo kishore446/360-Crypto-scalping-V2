@@ -15,6 +15,7 @@ from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCALP_CHANNEL_ID,
 )
+from src.ai_engine import close_shared_session
 from src.binance import BinanceClient
 from src.utils import get_logger
 from src.websocket_manager import WebSocketManager
@@ -84,7 +85,7 @@ class Bootstrap:
             else:
                 log.info("Pre-flight: Binance REST ping OK")
         except Exception as exc:
-            log.warning("Pre-flight: Binance REST ping failed: %s", exc)
+            log.warning("Pre-flight: Binance REST ping failed: {}", exc)
 
         if ok:
             log.info("Pre-flight checks passed")
@@ -160,12 +161,21 @@ class Bootstrap:
         try:
             await engine.data_store.save_snapshot()
         except Exception as exc:
-            log.error("Failed to save snapshot on shutdown: %s", exc)
+            log.error("Failed to save snapshot on shutdown: {}", exc)
         await engine.data_store.close()
         await engine.pair_mgr.close()
         await engine._exchange_mgr.close()
         if engine._scanner.spot_client:
             await engine._scanner.spot_client.close()
+        try:
+            await close_shared_session()
+        except Exception as exc:
+            log.warning("Failed to close AI engine shared session: {}", exc)
+        if getattr(engine, "_openai_evaluator", None) is not None:
+            try:
+                await engine._openai_evaluator.close()
+            except Exception as exc:
+                log.warning("Failed to close OpenAI evaluator session: {}", exc)
         await engine._redis_client.close()
         await engine.telegram.stop()
         log.info("Shutdown complete.")

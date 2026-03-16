@@ -204,6 +204,57 @@ class TestSignalQueue:
         assert stats["overflow_events"] == 1
         assert stats["last_dropped_signal_id"] == "OVERFLOW-STATS"
 
+    @pytest.mark.asyncio
+    async def test_alert_callback_fires_at_tenth_drop(self):
+        redis_client = RedisClient(url="")
+        await redis_client.connect()
+        alerts: list[str] = []
+
+        async def alert_callback(message: str) -> None:
+            alerts.append(message)
+
+        queue = SignalQueue(redis_client, alert_callback=alert_callback)
+        for i in range(QUEUE_MAXSIZE):
+            sig = _make_signal()
+            sig.signal_id = f"FULL-{i}"
+            queue._fallback.put_nowait(sig)
+
+        scheduled_coroutines = []
+
+        def fake_create_task(coro):
+            scheduled_coroutines.append(coro)
+            return MagicMock()
+
+        with patch("src.signal_queue.asyncio.create_task", side_effect=fake_create_task):
+            for i in range(10):
+                overflow = _make_signal()
+                overflow.signal_id = f"OVERFLOW-{i}"
+                assert queue.put_nowait(overflow) is False
+
+        assert len(scheduled_coroutines) == 1
+        await scheduled_coroutines[0]
+        assert len(alerts) == 1
+        assert "10 total drops" in alerts[0]
+        assert "latest=OVERFLOW-9" in alerts[0]
+        stats = queue.stats()
+        assert stats["dropped_signals"] == 10
+        assert stats["overflow_events"] == 10
+        assert stats["last_dropped_signal_id"] == "OVERFLOW-9"
+
+    @pytest.mark.asyncio
+    async def test_put_nowait_returns_false_in_redis_mode_without_scheduling(self):
+        redis_client = RedisClient(url="redis://example")
+        redis_client._available = True
+        redis_client._redis = MagicMock()
+        queue = SignalQueue(redis_client)
+
+        with patch("src.signal_queue.asyncio.get_running_loop") as get_running_loop:
+            ok = queue.put_nowait(_make_signal())
+
+        assert ok is False
+        get_running_loop.assert_not_called()
+        assert queue._fallback.qsize() == 0
+
 
 # ---------------------------------------------------------------------------
 # StateCache tests (fallback mode)

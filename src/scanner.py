@@ -417,14 +417,14 @@ class Scanner:
 
         ind_for_predict = indicators.get("5m", indicators.get("1m", {}))
         candle_total = sum(len(cd.get("close", [])) for cd in candles.values())
+        market = (
+            self.pair_mgr.pairs[symbol].market
+            if symbol in self.pair_mgr.pairs
+            else "spot"
+        )
         ai, spread_pct, onchain_data = await asyncio.gather(
             self._fetch_ai_context(symbol),
-            self._get_spread_pct(
-                symbol,
-                market=self.pair_mgr.pairs[symbol].market
-                if symbol in self.pair_mgr.pairs
-                else "spot",
-            ),
+            self._get_spread_pct(symbol, market=market),
             self._fetch_onchain_data(symbol),
         )
         pair_quality = assess_pair_quality(

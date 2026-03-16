@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Optional, Union
+from typing import Any, Callable, Coroutine, Optional, Union
 
 from src.redis_client import RedisClient
 from src.channels.base import Signal
@@ -22,7 +22,7 @@ class SignalQueue:
     def __init__(
         self,
         redis_client: RedisClient,
-        alert_callback: Optional[Callable[[str], Awaitable[Any]]] = None,
+        alert_callback: Optional[Callable[[str], Coroutine[Any, Any, Any]]] = None,
     ) -> None:
         self._redis = redis_client
         self._fallback: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAXSIZE)

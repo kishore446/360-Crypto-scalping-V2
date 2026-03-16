@@ -268,6 +268,7 @@ class TestOutcomeRecording:
         assert call_kwargs["hit_tp"] == 3
         assert call_kwargs["pnl_pct"] == pytest.approx(1.5)
         assert call_kwargs["outcome_label"] == "FULL_TP_HIT"
+        assert sig.current_price == pytest.approx(30450.0)
 
     @pytest.mark.asyncio
     async def test_tp1_hit_does_not_call_record_outcome(self):

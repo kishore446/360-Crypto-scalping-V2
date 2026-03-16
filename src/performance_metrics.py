@@ -26,6 +26,7 @@ def classify_trade_outcome(pnl_pct: float, hit_tp: int = 0, hit_sl: bool = False
     - stop exits around flat are ``BREAKEVEN_EXIT``
     - stop exits with positive realized PnL become ``PROFIT_LOCKED``
     - a final TP completion is ``FULL_TP_HIT``
+    - exits that are neither stop nor TP completions fall back to ``CLOSED``
     """
     normalized_pnl = normalize_pnl_pct(pnl_pct)
     if hit_tp >= 3 and not hit_sl:

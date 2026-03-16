@@ -152,7 +152,8 @@ class CircuitBreaker:
                 "State: Cooling down\n"
                 f"Reason: {self._trip_reason}\n"
                 f"Cooldown remaining: {self._cooldown_remaining():.0f}s\n"
-                "Automatic resume is blocked until cooldown ends and rolling losses normalize."
+                "Automatic resume is blocked until the cooldown period completes "
+                "and rolling losses normalize."
             )
         if self._status_mode == "recovery_pending":
             return (

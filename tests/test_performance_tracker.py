@@ -157,6 +157,7 @@ class TestPerformanceTrackerStats:
         assert stats.loss_count == 1
         assert stats.breakeven_count == 1
         # 2 wins (P1, T1) / 3 non-breakeven trades (L1, P1, T1) = 66.67%
+        # because breakeven exits are excluded from the win-rate denominator.
         assert stats.win_rate == pytest.approx(66.67, abs=0.01)
 
     def test_unrealistic_losses_are_clamped(self, tmp_path):

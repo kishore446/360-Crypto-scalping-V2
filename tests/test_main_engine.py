@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from unittest.mock import patch
+
+import pytest
 
 
 from src.commands import CommandHandler
@@ -124,6 +128,36 @@ class TestBootstrapInterface:
 
     def test_bootstrap_has_start_websockets(self):
         assert hasattr(Bootstrap, "start_websockets")
+
+    @pytest.mark.asyncio
+    @patch("src.bootstrap.close_shared_session", new_callable=AsyncMock)
+    async def test_shutdown_closes_shared_ai_sessions(self, close_shared_session_mock):
+        engine = SimpleNamespace(
+            _tasks=[],
+            router=SimpleNamespace(stop=AsyncMock()),
+            monitor=SimpleNamespace(stop=AsyncMock()),
+            telemetry=SimpleNamespace(stop=AsyncMock()),
+            _ws_spot=None,
+            _ws_futures=None,
+            data_store=SimpleNamespace(
+                save_snapshot=AsyncMock(),
+                close=AsyncMock(),
+            ),
+            pair_mgr=SimpleNamespace(close=AsyncMock()),
+            _exchange_mgr=SimpleNamespace(close=AsyncMock()),
+            _scanner=SimpleNamespace(spot_client=None),
+            _openai_evaluator=SimpleNamespace(close=AsyncMock()),
+            _redis_client=SimpleNamespace(close=AsyncMock()),
+            telegram=SimpleNamespace(stop=AsyncMock()),
+        )
+
+        bootstrap = Bootstrap(engine)
+        await bootstrap.shutdown()
+
+        close_shared_session_mock.assert_awaited_once()
+        engine._openai_evaluator.close.assert_awaited_once()
+        engine._redis_client.close.assert_awaited_once()
+        engine.telegram.stop.assert_awaited_once()
 
 
 class TestScannerInterface:

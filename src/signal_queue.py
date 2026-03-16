@@ -47,7 +47,7 @@ class SignalQueue:
         self._overflow_events += 1
         self._last_dropped_signal_id = signal.signal_id
         log.warning(
-            "Signal queue drop (%s): %s [drops=%d]",
+            "Signal queue drop ({}): {} [drops={}]",
             reason,
             signal.signal_id,
             self._dropped_signals,
@@ -112,15 +112,18 @@ class SignalQueue:
         return self._fallback.qsize()
 
     def put_nowait(self, signal: Signal) -> bool:
-        """Sync put — enqueues to fallback queue. For Redis, use async put()."""
+        """Best-effort synchronous put.
+
+        In Redis mode, enqueue success cannot be confirmed synchronously, so this
+        method returns ``False`` instead of reporting a misleading success.
+        Callers that need confirmed acceptance must use :meth:`put`.
+        """
         if self._redis.available:
-            # Schedule async push without blocking
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.put(signal))
-                return True
-            except RuntimeError:
-                pass
+            log.debug(
+                "SignalQueue.put_nowait cannot confirm Redis enqueue for {}; use await put()",
+                signal.signal_id,
+            )
+            return False
         try:
             self._fallback.put_nowait(signal)
             return True

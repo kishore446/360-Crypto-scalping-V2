@@ -71,6 +71,47 @@ class TestSignalRouter:
         assert sig.signal_id in router.active_signals
 
     @pytest.mark.asyncio
+    async def test_send_exception_cleans_up_and_router_continues(self, monkeypatch):
+        for channel in ("360_SCALP", "360_RANGE", "360_SWING", "360_THE_TAPE", "360_SELECT"):
+            monkeypatch.setitem(signal_router_module.CHANNEL_TELEGRAM_MAP, channel, "premium")
+
+        queue = asyncio.Queue()
+        send_results = [RuntimeError("telegram down"), True]
+
+        async def flaky_send(chat_id: str, text: str):
+            result = send_results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        router = SignalRouter(
+            queue=queue,
+            send_telegram=flaky_send,
+            format_signal=lambda sig: f"Signal: {sig.channel} {sig.symbol} {sig.direction.value}",
+        )
+
+        failed = _make_signal(symbol="BTCUSDT", confidence=90)
+        failed.signal_id = "TEST-BTC-FAIL"
+        succeeded = _make_signal(symbol="ETHUSDT", confidence=90)
+        succeeded.signal_id = "TEST-ETH-OK"
+        await queue.put(failed)
+        await queue.put(succeeded)
+
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.3)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-BTC-FAIL" not in router.active_signals
+        assert failed.symbol not in router._position_lock
+        assert "TEST-ETH-OK" in router.active_signals
+        assert router._position_lock[succeeded.symbol] == succeeded.direction
+
+    @pytest.mark.asyncio
     async def test_low_confidence_filtered(self, queue, router, sent_messages):
         sig = _make_signal(confidence=30)  # below min 70
         await queue.put(sig)

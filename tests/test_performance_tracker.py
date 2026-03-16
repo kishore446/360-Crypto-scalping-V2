@@ -271,3 +271,37 @@ class TestPerformanceTrackerAnalyticsFields:
             "PROFIT_LOCKED",
             "SL_HIT",
         ]
+
+
+class TestPerformanceTrackerReset:
+    def test_reset_all(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0)
+        pt.record_outcome("S2", "360_SWING", "ETH", "LONG", 200.0, 1, False, 3.0)
+        assert pt.get_stats().total_signals == 2
+        cleared = pt.reset_stats()
+        assert cleared == 2
+        assert pt.get_stats().total_signals == 0
+
+    def test_reset_specific_channel(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0)
+        pt.record_outcome("S2", "360_SWING", "ETH", "LONG", 200.0, 1, False, 3.0)
+        cleared = pt.reset_stats(channel="360_SCALP")
+        assert cleared == 1
+        stats = pt.get_stats()
+        assert stats.total_signals == 1  # only 360_SWING remains
+
+    def test_reset_persists_to_disk(self, tmp_path):
+        path = str(tmp_path / "perf.json")
+        pt = PerformanceTracker(storage_path=path)
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 2.0)
+        pt.reset_stats()
+        # Reload from disk
+        pt2 = PerformanceTracker(storage_path=path)
+        assert pt2.get_stats().total_signals == 0
+
+    def test_reset_empty_tracker(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        cleared = pt.reset_stats()
+        assert cleared == 0

@@ -147,7 +147,7 @@ class CommandHandler:
             "/set_free_channel_limit", "/force_update_ai", "/view_active_signals",
             "/view_logs", "/update_code", "/restart_engine", "/rollback_code",
             "/circuit_breaker_status", "/reset_circuit_breaker",
-            "/select_mode", "/select_config",
+            "/select_mode", "/select_config", "/reset_stats",
         }
         if cmd in admin_cmds and not is_admin:
             await self._telegram.send_message(
@@ -437,6 +437,20 @@ class CommandHandler:
                 )
                 await self._telegram.send_message(chat_id, msg)
 
+        elif cmd == "/reset_stats":
+            if self._performance_tracker is None:
+                await self._telegram.send_message(
+                    chat_id, "ℹ️ Performance tracker is not enabled."
+                )
+            else:
+                channel_arg = parts[1] if len(parts) >= 2 else None
+                cleared = self._performance_tracker.reset_stats(channel=channel_arg)
+                label = channel_arg or "all channels"
+                await self._telegram.send_message(
+                    chat_id,
+                    f"🗑 Performance stats reset: {cleared} records cleared for {label}.",
+                )
+
         # --- User commands ---
 
         elif cmd == "/signals":
@@ -600,6 +614,7 @@ class CommandHandler:
                 "/circuit\\_breaker\\_status\n"
                 "/reset\\_circuit\\_breaker\n"
                 "/stats [channel]\n"
+                "/reset\\_stats [channel]\n"
                 "/select\\_mode [on|off|status]\n"
                 "/select\\_config <key> <value>\n\n"
                 "*User:*\n"

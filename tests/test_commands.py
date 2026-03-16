@@ -222,6 +222,37 @@ class TestCircuitBreakerCommands:
         await handler._handle_command("/stats", USER_CHAT_ID)
         tracker.format_stats_message.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_reset_stats_no_tracker(self):
+        handler = _make_handler()
+        with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
+            await handler._handle_command("/reset_stats", ADMIN_CHAT_ID)
+        call_args = handler._telegram.send_message.call_args[0]
+        assert "not enabled" in call_args[1].lower()
+
+    @pytest.mark.asyncio
+    async def test_reset_stats_all(self):
+        tracker = MagicMock()
+        tracker.reset_stats.return_value = 5
+        handler = _make_handler(performance_tracker=tracker)
+        with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
+            await handler._handle_command("/reset_stats", ADMIN_CHAT_ID)
+        tracker.reset_stats.assert_called_once_with(channel=None)
+        call_args = handler._telegram.send_message.call_args[0]
+        assert "5 records cleared" in call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_reset_stats_channel(self):
+        tracker = MagicMock()
+        tracker.reset_stats.return_value = 3
+        handler = _make_handler(performance_tracker=tracker)
+        with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
+            await handler._handle_command("/reset_stats 360_SCALP", ADMIN_CHAT_ID)
+        tracker.reset_stats.assert_called_once_with(channel="360_SCALP")
+        call_args = handler._telegram.send_message.call_args[0]
+        assert "3 records cleared" in call_args[1]
+        assert "360_SCALP" in call_args[1]
+
 
 class TestCommandAliases:
     @pytest.mark.asyncio

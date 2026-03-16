@@ -255,6 +255,8 @@ class TestScannerConfidencePipeline:
         predictive.update_confidence = MagicMock()
 
         def _update_confidence(signal, _prediction):
+            # Base confidence (55) plus the RANGE ranging boost (+5) must be in
+            # place before predictive adjustments run.
             assert signal.confidence == 60.0
             signal.confidence += 7.0
 
@@ -287,6 +289,7 @@ class TestScannerConfidencePipeline:
         queued_signal = signal_queue.put.await_args.args[0]
         assert queued_signal.confidence == 100.0
         openai_evaluator.evaluate.assert_awaited_once()
+        # OpenAI should see base (55) + regime boost (5) + predictive boost (7).
         assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] == 67.0
 
     @pytest.mark.asyncio

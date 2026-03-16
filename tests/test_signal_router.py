@@ -98,6 +98,7 @@ class TestSignalRouter:
         await queue.put(succeeded)
 
         task = asyncio.create_task(router.start())
+        # Allow enough time for both queued signals to be processed sequentially.
         await asyncio.sleep(0.3)
         await router.stop()
         task.cancel()

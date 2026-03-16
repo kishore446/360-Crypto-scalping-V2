@@ -633,6 +633,8 @@ class Scanner:
             sig = await self._prepare_signal(symbol, volume_24h, chan, ctx)
             if sig is None:
                 continue
+            # Only start scan cooldown after the signal has been accepted by the
+            # queue; rejected/dropped signals must not suppress later scans.
             if not await self._enqueue_signal(sig):
                 continue
             self._set_cooldown(symbol, chan_name)

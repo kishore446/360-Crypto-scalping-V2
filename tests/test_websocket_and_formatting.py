@@ -302,7 +302,10 @@ class TestAdminAlertRateLimiting:
             alerted.append(msg)
 
         ws = WebSocketManager(lambda data: None, market="futures", admin_alert_callback=alert)
-        ws._last_alert_time = 0.0  # ensure cooldown is not active
+        # Set last_alert_time to 301 seconds ago so the cooldown is always expired,
+        # regardless of how long the system has been running (avoids false failures
+        # on freshly booted CI containers where time.monotonic() < 300).
+        ws._last_alert_time = time.monotonic() - 301
 
         # Simulate the alert logic directly
         now = time.monotonic()

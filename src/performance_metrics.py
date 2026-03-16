@@ -1,15 +1,44 @@
-"""Shared PnL and drawdown helpers for signal-performance tracking."""
+"""Shared PnL, drawdown, and outcome classification helpers."""
 
 from __future__ import annotations
 
 from typing import Iterable, Tuple
 
 _MIN_PNL_PCT = -99.99
+_BREAKEVEN_PNL_THRESHOLD_PCT = 0.01
 
 
 def normalize_pnl_pct(pnl_pct: float) -> float:
     """Clamp realized PnL to a sane lower bound."""
     return max(float(pnl_pct), _MIN_PNL_PCT)
+
+
+def is_breakeven_pnl(pnl_pct: float) -> bool:
+    """Return True when realized PnL is close enough to treat as breakeven."""
+    return abs(normalize_pnl_pct(pnl_pct)) < _BREAKEVEN_PNL_THRESHOLD_PCT
+
+
+def classify_trade_outcome(pnl_pct: float, hit_tp: int = 0, hit_sl: bool = False) -> str:
+    """Classify the final realized trade outcome.
+
+    The classification is semantic rather than purely mechanical:
+    - stop exits with negative realized PnL remain ``SL_HIT``
+    - stop exits around flat are ``BREAKEVEN_EXIT``
+    - stop exits with positive realized PnL become ``PROFIT_LOCKED``
+    - a final TP completion is ``FULL_TP_HIT``
+    """
+    normalized_pnl = normalize_pnl_pct(pnl_pct)
+    if hit_tp >= 3 and not hit_sl:
+        return "FULL_TP_HIT"
+    if hit_sl:
+        if normalized_pnl < -_BREAKEVEN_PNL_THRESHOLD_PCT:
+            return "SL_HIT"
+        if normalized_pnl > _BREAKEVEN_PNL_THRESHOLD_PCT:
+            return "PROFIT_LOCKED"
+        return "BREAKEVEN_EXIT"
+    if hit_tp > 0:
+        return f"TP{hit_tp}_HIT"
+    return "CLOSED"
 
 
 def calculate_trade_pnl_pct(entry_price: float, exit_price: float, direction: str) -> float:

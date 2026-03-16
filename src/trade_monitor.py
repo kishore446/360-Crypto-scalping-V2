@@ -155,18 +155,18 @@ class TradeMonitor:
             return
 
         # SL direction sanity check – catch misconfigured signals
-        if is_long and sig.stop_loss >= sig.entry:
+        if is_long and sig.stop_loss > sig.entry:
             log.warning(
-                "Signal %s %s has invalid SL (LONG SL %.8f >= entry %.8f) – cancelling",
+                "Signal %s %s has invalid SL (LONG SL %.8f > entry %.8f) – cancelling",
                 sig.symbol, sig.signal_id, sig.stop_loss, sig.entry,
             )
             sig.status = "CANCELLED"
             await self._post_update(sig, "⚠️ CANCELLED (invalid SL)")
             self._remove(sig.signal_id)
             return
-        if not is_long and sig.stop_loss <= sig.entry:
+        if not is_long and sig.stop_loss < sig.entry:
             log.warning(
-                "Signal %s %s has invalid SL (SHORT SL %.8f <= entry %.8f) – cancelling",
+                "Signal %s %s has invalid SL (SHORT SL %.8f < entry %.8f) – cancelling",
                 sig.symbol, sig.signal_id, sig.stop_loss, sig.entry,
             )
             sig.status = "CANCELLED"

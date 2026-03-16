@@ -152,3 +152,59 @@ class TestFVG:
         close = np.ones(n) * 100
         zones = detect_fvg(high, low, close, lookback=10)
         assert zones == []
+
+
+# ---------------------------------------------------------------------------
+# 2-D array robustness (Issue 1: ValueError ambiguous truth value)
+# ---------------------------------------------------------------------------
+
+
+class TestNonFlatArrayInputs:
+    """All detection functions must handle 2-D (non-flat) input arrays
+    without raising ``ValueError: truth value of an array``."""
+
+    def _make_2d(self, n=60):
+        """Return synthetic candle data wrapped as 2-D column vectors."""
+        np.random.seed(42)
+        close = np.cumsum(np.random.randn(n) * 0.5) + 100
+        high = close + 0.5
+        low = close - 0.5
+        # Reshape to (n, 1) – simulates data loaded with an extra dimension
+        return high.reshape(-1, 1), low.reshape(-1, 1), close.reshape(-1, 1)
+
+    def test_detect_liquidity_sweeps_2d_input(self):
+        high, low, close = self._make_2d()
+        sweeps = detect_liquidity_sweeps(high, low, close, lookback=50)
+        assert isinstance(sweeps, list)
+
+    def test_detect_fvg_2d_input(self):
+        high, low, close = self._make_2d(20)
+        zones = detect_fvg(high, low, close, lookback=10)
+        assert isinstance(zones, list)
+
+    def test_detect_mss_2d_ltf_close(self):
+        sweep = LiquiditySweep(
+            index=59,
+            direction=Direction.LONG,
+            sweep_level=95,
+            close_price=95.04,
+            wick_high=105,
+            wick_low=93,
+        )
+        # Midpoint = 99; pass last_close > 99 as a 2-D array
+        ltf_close = np.array([[94.0], [95.0], [100.0]])
+        mss = detect_mss(sweep, ltf_close)
+        assert mss is not None
+        assert mss.direction == Direction.LONG
+
+    def test_detect_liquidity_sweeps_bearish_2d(self):
+        """Bearish sweep still detected when arrays are 2-D."""
+        n = 60
+        high = np.ones((n, 1)) * 105.0
+        low = np.ones((n, 1)) * 95.0
+        close = np.ones((n, 1)) * 100.0
+        high[-1] = 107.0
+        low[-1] = 95.0
+        close[-1] = 105.04
+        sweeps = detect_liquidity_sweeps(high, low, close, lookback=50)
+        assert any(s.direction == Direction.SHORT for s in sweeps)

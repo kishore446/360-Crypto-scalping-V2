@@ -62,9 +62,9 @@ def detect_liquidity_sweeps(
     tolerance_pct: float = 0.05,
 ) -> List[LiquiditySweep]:
     """Detect liquidity sweeps on the last candle relative to recent range."""
-    h = np.asarray(high, dtype=np.float64)
-    l = np.asarray(low, dtype=np.float64)
-    c = np.asarray(close, dtype=np.float64)
+    h = np.asarray(high, dtype=np.float64).ravel()
+    l = np.asarray(low, dtype=np.float64).ravel()
+    c = np.asarray(close, dtype=np.float64).ravel()
 
     sweeps: List[LiquiditySweep] = []
     n = len(c)
@@ -115,7 +115,7 @@ def detect_mss(
 
     MSS = close beyond 50 % midpoint of the sweep candle.
     """
-    c = np.asarray(ltf_close, dtype=np.float64)
+    c = np.asarray(ltf_close, dtype=np.float64).ravel()
     if len(c) < 2:
         return None
 
@@ -156,8 +156,8 @@ def detect_fvg(
     Bullish FVG: low[i+2] > high[i]  (gap up)
     Bearish FVG: high[i+2] < low[i]  (gap down)
     """
-    h = np.asarray(high, dtype=np.float64)
-    l = np.asarray(low, dtype=np.float64)
+    h = np.asarray(high, dtype=np.float64).ravel()
+    l = np.asarray(low, dtype=np.float64).ravel()
     n = len(h)
 
     zones: List[FVGZone] = []

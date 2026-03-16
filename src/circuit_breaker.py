@@ -92,7 +92,7 @@ class CircuitBreaker:
         hit_sl:
             ``True`` if the stop-loss was triggered (a loss).
         pnl_pct:
-            Realised PnL as a percentage (negative for losses).
+            Realized PnL as a percentage (negative for losses).
         """
         self._prune_outcomes()
         normalized_pnl = normalize_pnl_pct(pnl_pct)

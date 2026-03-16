@@ -129,6 +129,8 @@ class TestPerformanceTrackerStats:
         ]
         pt = self._make_tracker(tmp_path, records)
         stats = pt.get_stats(channel="360_SCALP")
+        # Equity curve: 1.00 -> 1.05 -> 1.0185 -> 0.987945, so max drawdown
+        # is (1.05 - 0.987945) / 1.05 = 5.91%.
         assert stats.max_drawdown == pytest.approx(5.91, abs=0.01)
 
     def test_break_even_exit_is_not_counted_as_loss(self, tmp_path):

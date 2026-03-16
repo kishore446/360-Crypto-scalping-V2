@@ -8,12 +8,12 @@ _MIN_PNL_PCT = -99.99
 
 
 def normalize_pnl_pct(pnl_pct: float) -> float:
-    """Clamp realised PnL to a sane lower bound."""
+    """Clamp realized PnL to a sane lower bound."""
     return max(float(pnl_pct), _MIN_PNL_PCT)
 
 
 def calculate_trade_pnl_pct(entry_price: float, exit_price: float, direction: str) -> float:
-    """Calculate realised PnL % for a long or short trade."""
+    """Calculate realized PnL % for a long or short trade."""
     if entry_price <= 0 or exit_price <= 0:
         return 0.0
 

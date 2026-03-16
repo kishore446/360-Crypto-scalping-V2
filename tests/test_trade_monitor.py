@@ -190,6 +190,13 @@ class TestOutcomeRecording:
             stop_loss=29850.0,
             age_seconds=35.0,
         )
+        sig.setup_class = "BREAKOUT_RETEST"
+        sig.market_phase = "STRONG_TREND"
+        sig.quality_tier = "A"
+        sig.pre_ai_confidence = 78.0
+        sig.post_ai_confidence = 84.0
+        sig.spread_pct = 0.008
+        sig.volume_24h_usd = 12_000_000.0
         sig.current_price = 29800.0  # below SL
 
         active = {sig.signal_id: sig}
@@ -203,6 +210,11 @@ class TestOutcomeRecording:
         assert call_kwargs["hit_sl"] is True
         assert call_kwargs["hit_tp"] == 0
         assert call_kwargs["signal_id"] == sig.signal_id
+        assert call_kwargs["setup_class"] == "BREAKOUT_RETEST"
+        assert call_kwargs["market_phase"] == "STRONG_TREND"
+        assert call_kwargs["quality_tier"] == "A"
+        assert call_kwargs["pre_ai_confidence"] == 78.0
+        assert call_kwargs["post_ai_confidence"] == 84.0
 
     @pytest.mark.asyncio
     async def test_sl_hit_calls_circuit_breaker(self):

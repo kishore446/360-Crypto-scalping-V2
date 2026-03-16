@@ -32,6 +32,19 @@ from src.confidence import (
 from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi
 from src.onchain import score_onchain
 from src.regime import MarketRegime
+from src.signal_quality import (
+    ExecutionAssessment,
+    MarketState,
+    PairQualityAssessment,
+    RiskAssessment,
+    SetupAssessment,
+    assess_pair_quality,
+    build_risk_plan,
+    classify_market_state,
+    classify_setup,
+    execution_quality_check,
+    score_signal_components,
+)
 from src.utils import get_logger
 
 log = get_logger("scanner")
@@ -64,6 +77,8 @@ class ScanContext:
     adx_val: float
     onchain_data: Any
     candle_total: int
+    pair_quality: PairQualityAssessment
+    market_state: MarketState
 
 
 class Scanner:
@@ -393,6 +408,18 @@ class Scanner:
             self._get_spread_pct(symbol),
             self._fetch_onchain_data(symbol),
         )
+        pair_quality = assess_pair_quality(
+            volume_24h=volume_24h,
+            spread_pct=spread_pct,
+            indicators=regime_ind,
+            candles=regime_candles,
+        )
+        market_state = classify_market_state(
+            regime_result=regime_result,
+            indicators=regime_ind,
+            candles=regime_candles,
+            spread_pct=spread_pct,
+        )
         return ScanContext(
             candles=candles,
             indicators=indicators,
@@ -406,9 +433,26 @@ class Scanner:
             adx_val=regime_ind.get("adx_last") or 0,
             onchain_data=onchain_data,
             candle_total=candle_total,
+            pair_quality=pair_quality,
+            market_state=market_state,
         )
 
     def _should_skip_channel(self, symbol: str, chan_name: str, ctx: ScanContext) -> bool:
+        if not ctx.pair_quality.passed:
+            log.debug(
+                "Skipping {} {} – pair quality gate failed: {}",
+                symbol,
+                chan_name,
+                ctx.pair_quality.reason,
+            )
+            return True
+        if ctx.market_state == MarketState.VOLATILE_UNSUITABLE:
+            log.debug(
+                "Skipping {} {} – volatile/unsuitable market state",
+                symbol,
+                chan_name,
+            )
+            return True
         if chan_name in self.paused_channels:
             return True
         if self._is_in_cooldown(symbol, chan_name):
@@ -432,6 +476,60 @@ class Scanner:
             )
             return True
         return False
+
+    def _evaluate_setup(
+        self,
+        chan_name: str,
+        sig: Any,
+        ctx: ScanContext,
+    ) -> SetupAssessment:
+        return classify_setup(
+            channel_name=chan_name,
+            signal=sig,
+            indicators=ctx.indicators,
+            smc_data=ctx.smc_data,
+            market_state=ctx.market_state,
+        )
+
+    def _evaluate_execution(
+        self,
+        sig: Any,
+        ctx: ScanContext,
+        setup: SetupAssessment,
+    ) -> ExecutionAssessment:
+        return execution_quality_check(
+            signal=sig,
+            indicators=ctx.indicators,
+            smc_data=ctx.smc_data,
+            setup=setup.setup_class,
+            market_state=ctx.market_state,
+        )
+
+    def _evaluate_risk(
+        self,
+        sig: Any,
+        ctx: ScanContext,
+        setup: SetupAssessment,
+    ) -> RiskAssessment:
+        return build_risk_plan(
+            signal=sig,
+            indicators=ctx.indicators,
+            candles=ctx.candles,
+            smc_data=ctx.smc_data,
+            setup=setup.setup_class,
+            spread_pct=ctx.spread_pct,
+        )
+
+    def _apply_risk_plan_to_signal(
+        self,
+        sig: Any,
+        risk: RiskAssessment,
+    ) -> None:
+        sig.stop_loss = risk.stop_loss
+        sig.tp1 = risk.tp1
+        sig.tp2 = risk.tp2
+        sig.tp3 = risk.tp3
+        sig.invalidation_summary = risk.invalidation_summary
 
     def _compute_base_confidence(
         self,
@@ -560,7 +658,7 @@ class Scanner:
         return max(0.0, min(100.0, round(value, 2)))
 
     def _populate_signal_context(self, sig: Any, volume_24h: float, ctx: ScanContext) -> None:
-        sig.market_phase = ctx.regime_result.regime.value
+        sig.market_phase = ctx.market_state.value
         liq_parts = []
         if ctx.smc_result.sweeps:
             sweep = ctx.smc_result.sweeps[0]
@@ -574,6 +672,22 @@ class Scanner:
             sig.liquidity_info = " | ".join(liq_parts)
         sig.spread_pct = ctx.spread_pct
         sig.volume_24h_usd = volume_24h
+        sig.pair_quality_score = ctx.pair_quality.score
+        sig.pair_quality_label = ctx.pair_quality.label
+
+    @staticmethod
+    def _has_higher_timeframe_alignment(sig: Any, indicators: Dict[str, Dict[str, Any]]) -> bool:
+        for tf in ("15m", "1h", "4h"):
+            ind = indicators.get(tf, {})
+            ema9 = ind.get("ema9_last")
+            ema21 = ind.get("ema21_last")
+            if ema9 is None or ema21 is None:
+                continue
+            if sig.direction.value == "LONG" and ema9 < ema21:
+                return False
+            if sig.direction.value == "SHORT" and ema9 > ema21:
+                return False
+        return True
 
     async def _enqueue_signal(self, sig: Any) -> bool:
         return await self.signal_queue.put(sig)
@@ -602,26 +716,64 @@ class Scanner:
         if sig is None:
             return None, None
 
+        setup = self._evaluate_setup(chan_name, sig, ctx)
+        if not setup.channel_compatible or not setup.regime_compatible:
+            log.debug("Rejected {} {} setup: {}", symbol, chan_name, setup.reason)
+            return None, None
+
+        execution = self._evaluate_execution(sig, ctx, setup)
+        if not execution.passed:
+            log.debug("Rejected {} {} execution: {}", symbol, chan_name, execution.reason)
+            return None, None
+
+        risk = self._evaluate_risk(sig, ctx, setup)
+        if not risk.passed:
+            log.debug("Rejected {} {} risk: {}", symbol, chan_name, risk.reason)
+            return None, None
+        self._apply_risk_plan_to_signal(sig, risk)
+
         cross_verified = await self._verify_cross_exchange(
             symbol, sig.direction.value, sig.entry
         )
-        base_confidence = self._compute_base_confidence(
+        legacy_confidence = self._compute_base_confidence(
             symbol,
             volume_24h,
             sig,
             ctx,
             cross_verified,
         )
-        if base_confidence is None:
+        if legacy_confidence is None:
             return None, cross_verified
-        sig.confidence = base_confidence
+        sig.confidence = legacy_confidence
         self._apply_regime_channel_adjustments(symbol, chan_name, sig, ctx)
         await self._apply_predictive_adjustments(symbol, sig, ctx)
+        setup_score = score_signal_components(
+            pair_quality=ctx.pair_quality,
+            setup=setup,
+            execution=execution,
+            risk=risk,
+            legacy_confidence=sig.confidence,
+            cross_verified=cross_verified,
+        )
+        sig.setup_class = setup.setup_class.value
+        sig.analyst_reason = setup.thesis
+        sig.execution_note = execution.execution_note
+        sig.entry_zone = execution.entry_zone
+        sig.component_scores = setup_score.components
+        sig.quality_tier = setup_score.quality_tier.value
+        sig.pre_ai_confidence = setup_score.total
+        sig.confidence = setup_score.total
         if not await self._apply_openai_adjustments(symbol, chan_name, sig, ctx):
             return None, cross_verified
         sig.confidence = self._clamp_confidence(sig.confidence)
+        sig.post_ai_confidence = sig.confidence
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)
-        if sig.confidence < min_conf:
+        if (
+            sig.confidence < min_conf
+            or sig.component_scores.get("market", 0.0) < 12.0
+            or sig.component_scores.get("execution", 0.0) < 10.0
+            or sig.component_scores.get("risk", 0.0) < 10.0
+        ):
             return None, cross_verified
         self._populate_signal_context(sig, volume_24h, ctx)
         return sig, cross_verified
@@ -660,6 +812,13 @@ class Scanner:
                     cross_exchange_verified=cross_verified,
                     volume_24h=volume_24h,
                     spread_pct=ctx.spread_pct,
+                    setup_class=sig.setup_class,
+                    market_state=sig.market_phase,
+                    quality_tier=sig.quality_tier,
+                    component_scores=sig.component_scores,
+                    pair_quality_score=sig.pair_quality_score,
+                    r_multiple=sig.r_multiple,
+                    higher_timeframe_aligned=self._has_higher_timeframe_alignment(sig, ctx.indicators),
                 )
                 if allowed:
                     select_sig = copy.deepcopy(sig)

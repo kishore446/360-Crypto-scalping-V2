@@ -28,12 +28,31 @@ class TestPerformanceTrackerRecording:
     def test_persists_to_file(self, tmp_path):
         path = tmp_path / "perf.json"
         pt = PerformanceTracker(storage_path=str(path))
-        pt.record_outcome("S1", "360_SCALP", "BTCUSDT", "LONG", 50000, 1, False, 1.5)
+        pt.record_outcome(
+            "S1",
+            "360_SCALP",
+            "BTCUSDT",
+            "LONG",
+            50000,
+            1,
+            False,
+            1.5,
+            pre_ai_confidence=78.0,
+            post_ai_confidence=82.0,
+            setup_class="BREAKOUT_RETEST",
+            market_phase="STRONG_TREND",
+            quality_tier="A",
+            spread_pct=0.008,
+            volume_24h_usd=15_000_000.0,
+            hold_duration_sec=3600.0,
+        )
         assert path.exists()
         with open(path) as f:
             data = json.load(f)
         assert len(data) == 1
         assert data[0]["signal_id"] == "S1"
+        assert data[0]["setup_class"] == "BREAKOUT_RETEST"
+        assert data[0]["quality_tier"] == "A"
 
     def test_loads_from_file(self, tmp_path):
         path = tmp_path / "perf.json"
@@ -166,3 +185,38 @@ class TestPerformanceTrackerFormatting:
         pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
         msg = pt.format_stats_message()
         assert "All Channels" in msg
+
+
+class TestPerformanceTrackerAnalyticsFields:
+    def test_records_extended_analytics_fields(self, tmp_path):
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome(
+            signal_id="SIGA",
+            channel="360_SELECT",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry=100.0,
+            hit_tp=3,
+            hit_sl=False,
+            pnl_pct=4.2,
+            confidence=91.0,
+            pre_ai_confidence=88.0,
+            post_ai_confidence=91.0,
+            setup_class="TREND_PULLBACK_CONTINUATION",
+            market_phase="STRONG_TREND",
+            quality_tier="A+",
+            spread_pct=0.007,
+            volume_24h_usd=22_000_000.0,
+            hold_duration_sec=5400.0,
+            max_favorable_excursion_pct=5.0,
+            max_adverse_excursion_pct=-0.8,
+        )
+        record = pt._records[0]
+        assert record.pre_ai_confidence == 88.0
+        assert record.post_ai_confidence == 91.0
+        assert record.setup_class == "TREND_PULLBACK_CONTINUATION"
+        assert record.market_phase == "STRONG_TREND"
+        assert record.quality_tier == "A+"
+        assert record.hold_duration_sec == 5400.0
+        assert record.max_favorable_excursion_pct == 5.0
+        assert record.max_adverse_excursion_pct == -0.8

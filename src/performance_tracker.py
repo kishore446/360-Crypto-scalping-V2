@@ -32,6 +32,16 @@ class SignalRecord:
     hit_sl: bool
     pnl_pct: float
     confidence: float
+    pre_ai_confidence: float = 0.0
+    post_ai_confidence: float = 0.0
+    setup_class: str = ""
+    market_phase: str = ""
+    quality_tier: str = ""
+    spread_pct: float = 0.0
+    volume_24h_usd: float = 0.0
+    hold_duration_sec: float = 0.0
+    max_favorable_excursion_pct: float = 0.0
+    max_adverse_excursion_pct: float = 0.0
     timestamp: float = field(default_factory=time.time)
 
 
@@ -79,6 +89,16 @@ class PerformanceTracker:
         hit_sl: bool,
         pnl_pct: float,
         confidence: float = 0.0,
+        pre_ai_confidence: float = 0.0,
+        post_ai_confidence: float = 0.0,
+        setup_class: str = "",
+        market_phase: str = "",
+        quality_tier: str = "",
+        spread_pct: float = 0.0,
+        volume_24h_usd: float = 0.0,
+        hold_duration_sec: float = 0.0,
+        max_favorable_excursion_pct: float = 0.0,
+        max_adverse_excursion_pct: float = 0.0,
     ) -> None:
         """Record the outcome of a completed signal."""
         record = SignalRecord(
@@ -91,6 +111,16 @@ class PerformanceTracker:
             hit_sl=hit_sl,
             pnl_pct=pnl_pct,
             confidence=confidence,
+            pre_ai_confidence=pre_ai_confidence,
+            post_ai_confidence=post_ai_confidence,
+            setup_class=setup_class,
+            market_phase=market_phase,
+            quality_tier=quality_tier,
+            spread_pct=spread_pct,
+            volume_24h_usd=volume_24h_usd,
+            hold_duration_sec=hold_duration_sec,
+            max_favorable_excursion_pct=max_favorable_excursion_pct,
+            max_adverse_excursion_pct=max_adverse_excursion_pct,
         )
         self._records.append(record)
         self._save()

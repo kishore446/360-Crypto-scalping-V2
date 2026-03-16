@@ -30,12 +30,25 @@ class Signal:
     risk_label: str = ""
     market_phase: str = "N/A"
     liquidity_info: str = "Standard"
+    setup_class: str = "UNCLASSIFIED"
+    quality_tier: str = "B"
+    entry_zone: str = ""
+    invalidation_summary: str = ""
+    analyst_reason: str = ""
+    execution_note: str = ""
+    component_scores: Dict[str, float] = field(default_factory=dict)
+    pair_quality_score: float = 0.0
+    pair_quality_label: str = "UNRATED"
+    pre_ai_confidence: float = 0.0
+    post_ai_confidence: float = 0.0
     timestamp: datetime = field(default_factory=utcnow)
     # State for monitoring
     signal_id: str = ""
     status: str = "ACTIVE"  # ACTIVE, TP1_HIT, TP2_HIT, TP3_HIT, SL_HIT, CANCELLED
     current_price: float = 0.0
     pnl_pct: float = 0.0
+    max_favorable_excursion_pct: float = 0.0
+    max_adverse_excursion_pct: float = 0.0
     # Scanner-enriched market context (set before enqueuing)
     spread_pct: float = 0.0
     volume_24h_usd: float = 0.0

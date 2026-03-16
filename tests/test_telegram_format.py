@@ -27,6 +27,13 @@ class TestFormatSignal:
             ai_sentiment_label="Positive",
             ai_sentiment_summary="Whale Activity",
             risk_label="Aggressive",
+            setup_class="BREAKOUT_RETEST",
+            quality_tier="A",
+            entry_zone="32,120 - 32,150",
+            invalidation_summary="Below reclaim low + ATR buffer",
+            analyst_reason="Breakout retest holding above value.",
+            execution_note="Retest confirmed; do not chase.",
+            component_scores={"market": 19.0, "setup": 21.0, "execution": 16.0, "risk": 15.0, "context": 8.0},
             timestamp=utcnow(),
         )
         text = TelegramBot.format_signal(sig)
@@ -39,6 +46,10 @@ class TestFormatSignal:
         assert "Whale Activity" in text
         assert "Aggressive" in text
         assert "Trailing Active" in text
+        assert "Breakout Retest" in text
+        assert "A" in text
+        assert "Thesis" in text
+        assert "Execution" in text
 
     def test_swing_short_format(self):
         sig = Signal(
@@ -233,6 +244,33 @@ class TestFormatSignalEscaping:
         )
         text = TelegramBot.format_signal(sig)
         assert "1.5\\*ATR" in text
+
+    def test_premium_fields_render_markdown_safe(self):
+        sig = Signal(
+            channel="360_SELECT",
+            symbol="BTCUSDT",
+            direction=Direction.LONG,
+            entry=32000,
+            stop_loss=31900,
+            tp1=32150,
+            tp2=32300,
+            confidence=91,
+            quality_tier="A+",
+            setup_class="LIQUIDITY_SWEEP_REVERSAL",
+            entry_zone="31_980 - 32_020",
+            invalidation_summary="Below sweep_low *with* buffer",
+            analyst_reason="Sweep reclaim [confirmed]",
+            execution_note="Reclaim only; don't chase _extension_.",
+            component_scores={"market": 22.0, "setup": 22.0, "execution": 17.0, "risk": 17.0, "context": 9.0},
+            timestamp=utcnow(),
+        )
+        text = TelegramBot.format_signal(sig)
+        assert "A+" in text
+        assert "31\\_980 - 32\\_020" in text
+        assert "\\*with\\*" in text
+        assert "\\[confirmed]" in text
+        assert "don't" in text
+        assert "\\_extension\\_" in text
 
 
 class TestSendMessageFallback:

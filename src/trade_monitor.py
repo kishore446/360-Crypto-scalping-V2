@@ -61,6 +61,7 @@ class TradeMonitor:
             ``True`` when the stop-loss was triggered.
         """
         if self._performance_tracker is not None:
+            hold_duration_sec = max((utcnow() - sig.timestamp).total_seconds(), 0.0)
             self._performance_tracker.record_outcome(
                 signal_id=sig.signal_id,
                 channel=sig.channel,
@@ -71,6 +72,16 @@ class TradeMonitor:
                 hit_sl=hit_sl,
                 pnl_pct=sig.pnl_pct,
                 confidence=sig.confidence,
+                pre_ai_confidence=sig.pre_ai_confidence,
+                post_ai_confidence=sig.post_ai_confidence,
+                setup_class=sig.setup_class,
+                market_phase=sig.market_phase,
+                quality_tier=sig.quality_tier,
+                spread_pct=sig.spread_pct,
+                volume_24h_usd=sig.volume_24h_usd,
+                hold_duration_sec=hold_duration_sec,
+                max_favorable_excursion_pct=sig.max_favorable_excursion_pct,
+                max_adverse_excursion_pct=sig.max_adverse_excursion_pct,
             )
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_outcome(
@@ -158,6 +169,8 @@ class TradeMonitor:
                 sig.pnl_pct = (price - sig.entry) / sig.entry * 100
             else:
                 sig.pnl_pct = (sig.entry - price) / sig.entry * 100
+        sig.max_favorable_excursion_pct = max(sig.max_favorable_excursion_pct, sig.pnl_pct)
+        sig.max_adverse_excursion_pct = min(sig.max_adverse_excursion_pct, sig.pnl_pct)
 
         # Zero-PnL guard – don't trigger SL when price hasn't moved from entry
         # This prevents false stops from stale prices or floating-point noise

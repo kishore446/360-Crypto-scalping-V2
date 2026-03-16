@@ -12,6 +12,12 @@ import pytest
 from src.channels.base import Signal
 from src.regime import MarketRegime
 from src.scanner import Scanner, _RANGING_ADX_SUPPRESS_THRESHOLD
+from src.signal_quality import (
+    ExecutionAssessment,
+    RiskAssessment,
+    SetupAssessment,
+    SetupClass,
+)
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -76,10 +82,14 @@ def _make_scan_ready_scanner(
     regime: MarketRegime = MarketRegime.TRENDING_UP,
 ) -> Scanner:
     smc_result = SimpleNamespace(
-        sweeps=[],
+        sweeps=[SimpleNamespace(direction=Direction.LONG, sweep_level=95.0)],
         fvg=[],
-        mss=None,
-        as_dict=lambda: {"sweeps": [], "fvg": [], "mss": None},
+        mss=SimpleNamespace(direction=Direction.LONG, midpoint=98.0),
+        as_dict=lambda: {
+            "sweeps": [SimpleNamespace(direction=Direction.LONG, sweep_level=95.0)],
+            "fvg": [],
+            "mss": SimpleNamespace(direction=Direction.LONG, midpoint=98.0),
+        },
     )
     if predictive is None:
         predictive = MagicMock(
@@ -110,10 +120,47 @@ def _make_scan_ready_scanner(
         exchange_mgr=MagicMock(
             verify_signal_cross_exchange=AsyncMock(return_value=True)
         ),
+        spot_client=MagicMock(
+            fetch_order_book=AsyncMock(
+                return_value={"bids": [["100.0", "1"]], "asks": [["100.01", "1"]]}
+            )
+        ),
         signal_queue=signal_queue,
         router=MagicMock(active_signals={}),
         openai_evaluator=openai_evaluator,
         onchain_client=MagicMock(get_exchange_flow=AsyncMock(return_value=None)),
+    )
+
+
+def _setup_pass() -> SetupAssessment:
+    return SetupAssessment(
+        setup_class=SetupClass.BREAKOUT_RETEST,
+        thesis="Breakout Retest",
+        channel_compatible=True,
+        regime_compatible=True,
+    )
+
+
+def _execution_pass() -> ExecutionAssessment:
+    return ExecutionAssessment(
+        passed=True,
+        trigger_confirmed=True,
+        extension_ratio=0.6,
+        anchor_price=99.0,
+        entry_zone="99.0000 – 100.0000",
+        execution_note="Retest hold confirmed.",
+    )
+
+
+def _risk_pass() -> RiskAssessment:
+    return RiskAssessment(
+        passed=True,
+        stop_loss=95.0,
+        tp1=106.5,
+        tp2=111.5,
+        tp3=117.0,
+        r_multiple=1.3,
+        invalidation_summary="Below 96.0000 structure + volatility buffer",
     )
 
 
@@ -283,19 +330,25 @@ class TestScannerConfidencePipeline:
         )
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
-             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)):
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         queued_signal = signal_queue.put.await_args.args[0]
         assert queued_signal.confidence == 100.0
         openai_evaluator.evaluate.assert_awaited_once()
-        # OpenAI should see base (55) + regime boost (5) + predictive boost (7).
-        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] == 67.0
+        assert predictive.adjust_tp_sl.called
+        assert predictive.update_confidence.called
+        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] == queued_signal.pre_ai_confidence
+        assert queued_signal.post_ai_confidence == 100.0
+        assert queued_signal.setup_class == SetupClass.BREAKOUT_RETEST.value
 
     @pytest.mark.asyncio
     async def test_signals_below_final_min_confidence_are_rejected_after_all_adjustments(self):
         channel = MagicMock()
-        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=40.0)
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=80.0)
         channel.evaluate.return_value = _make_signal(channel="360_SCALP", signal_id="SIG-LOW")
 
         predictive = MagicMock(
@@ -334,10 +387,13 @@ class TestScannerConfidencePipeline:
         )
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
-             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=50.0, blocked=False)):
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=50.0, blocked=False)), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] == 45.0
+        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] > 70.0
         signal_queue.put.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -363,7 +419,10 @@ class TestScannerConfidencePipeline:
         )
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
-             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)):
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         scanner.signal_queue.put.assert_not_awaited()
@@ -380,7 +439,10 @@ class TestScannerEnqueueSemantics:
         scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
-             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)):
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         assert ("BTCUSDT", "360_SCALP") not in scanner._cooldown_until
@@ -398,7 +460,10 @@ class TestScannerEnqueueSemantics:
         scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
-             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)):
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 

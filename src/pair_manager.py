@@ -21,6 +21,14 @@ from src.utils import get_logger
 
 log = get_logger("pair_manager")
 
+# Stablecoin-vs-stablecoin pairs produce no tradeable signal: the spread
+# alone exceeds the entire TP range.  These pairs appear near the top of
+# volume rankings so they must be explicitly excluded.
+_STABLECOIN_BLACKLIST: frozenset = frozenset({
+    "USDCUSDT", "BUSDUSDT", "TUSDUSDT", "USDPUSDT", "FDUSDUSDT",
+    "USD1USDT", "DAIUSDT", "EURUSDT", "USDCBUSD", "USDTDAI",
+})
+
 
 @dataclass
 class PairInfo:
@@ -86,6 +94,7 @@ class PairManager:
             usdt_pairs = [
                 t for t in data
                 if t.get("symbol", "").endswith("USDT")
+                and t.get("symbol", "") not in _STABLECOIN_BLACKLIST
                 and float(t.get("quoteVolume", 0)) > 0
             ]
             usdt_pairs.sort(key=lambda t: float(t["quoteVolume"]), reverse=True)
@@ -116,6 +125,7 @@ class PairManager:
             usdt_pairs = [
                 t for t in data
                 if t.get("symbol", "").endswith("USDT")
+                and t.get("symbol", "") not in _STABLECOIN_BLACKLIST
                 and float(t.get("quoteVolume", 0)) > 0
             ]
             usdt_pairs.sort(key=lambda t: float(t["quoteVolume"]), reverse=True)

@@ -120,12 +120,15 @@ def score_trend(
     return min(s, 20.0)
 
 
-def score_ai_sentiment(sentiment_value: float) -> float:
+def score_ai_sentiment(sentiment_value: float, direction: str = "LONG") -> float:
     """AI sentiment component (max 15).
 
     *sentiment_value* expected in [-1, 1].
+    For SHORT signals, bearish sentiment supports the trade and should score
+    high, so the sentiment value is inverted before scoring.
     """
-    normalised = (sentiment_value + 1.0) / 2.0  # map to [0, 1]
+    effective = sentiment_value if direction.upper() != "SHORT" else -sentiment_value
+    normalised = (effective + 1.0) / 2.0  # map to [0, 1]
     return round(min(max(normalised * 15.0, 0.0), 15.0), 2)
 
 

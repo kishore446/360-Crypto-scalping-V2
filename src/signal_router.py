@@ -190,6 +190,7 @@ class SignalRouter:
     async def start(self) -> None:
         self._running = True
         log.info("Signal router started")
+        _cleanup_counter = 0
         while self._running:
             try:
                 if self._queue_has_timeout:
@@ -199,6 +200,10 @@ class SignalRouter:
                 else:
                     signal = await asyncio.wait_for(self._queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
+                _cleanup_counter += 1
+                if _cleanup_counter >= 60:  # roughly every 60 seconds
+                    self.cleanup_expired()
+                    _cleanup_counter = 0
                 continue
             except asyncio.CancelledError:
                 break

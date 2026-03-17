@@ -863,3 +863,287 @@ class TestATRBasedTrailing:
 
         # The SL must be above entry and above original stop
         assert sl_after > 29850.0
+
+
+class TestSignalQualityPnL:
+    """TradeMonitor must correctly compute signal_quality_pnl when TP1/TP2 is hit before SL."""
+
+    def _build_monitor_with_mocks(self, active: Dict[str, Signal]):
+        """Build a TradeMonitor wired with mock performance_tracker and circuit_breaker."""
+        removed = []
+        sent = []
+
+        async def mock_send(chat_id, text):
+            sent.append((chat_id, text))
+
+        data_store = MagicMock()
+        data_store.get_candles.return_value = None
+        data_store.ticks = {}
+
+        performance_tracker = MagicMock()
+        circuit_breaker = MagicMock()
+
+        monitor = TradeMonitor(
+            data_store=data_store,
+            send_telegram=mock_send,
+            get_active_signals=lambda: dict(active),
+            remove_signal=lambda sid: removed.append(sid),
+            update_signal=MagicMock(),
+            performance_tracker=performance_tracker,
+            circuit_breaker=circuit_breaker,
+        )
+        return monitor, removed, sent, performance_tracker, circuit_breaker
+
+    @pytest.mark.asyncio
+    async def test_tp1_then_sl_signal_quality_uses_tp1_pnl(self):
+        """TP1 hit followed by SL: signal_quality_pnl_pct uses TP1 price, pnl_pct uses SL price."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Simulate TP1 having been hit previously
+        sig.best_tp_hit = 1
+        sig.best_tp_pnl_pct = 0.5  # (30150 - 30000) / 30000 * 100
+        sig.status = "TP1_HIT"
+        sig.stop_loss = 29850.0  # SL not yet moved
+        sig.current_price = 29800.0  # below SL
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Actual PnL = SL price
+        assert call_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        assert call_kwargs["hit_sl"] is True
+        # Signal quality PnL = TP1 price
+        assert call_kwargs["signal_quality_pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["signal_quality_hit_tp"] == 1
+        # Circuit breaker must use actual (SL) PnL
+        cb_kwargs = cb.record_outcome.call_args.kwargs
+        assert cb_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        assert cb_kwargs["hit_sl"] is True
+
+    @pytest.mark.asyncio
+    async def test_tp2_then_sl_signal_quality_uses_tp2_pnl(self):
+        """TP2 hit followed by SL: signal_quality_pnl_pct uses TP2 price."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=30000.0,  # break-even after TP2
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Simulate TP2 having been hit previously
+        sig.best_tp_hit = 2
+        sig.best_tp_pnl_pct = 1.0  # (30300 - 30000) / 30000 * 100
+        sig.status = "TP2_HIT"
+        sig.current_price = 29900.0  # below break-even SL
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "BREAKEVEN_EXIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Actual PnL = 0 (break-even at entry)
+        assert call_kwargs["pnl_pct"] == pytest.approx(0.0, abs=0.05)
+        # Signal quality PnL = TP2 price
+        assert call_kwargs["signal_quality_pnl_pct"] == pytest.approx(1.0)
+        assert call_kwargs["signal_quality_hit_tp"] == 2
+        # Circuit breaker uses actual PnL (not signal quality)
+        cb_kwargs = cb.record_outcome.call_args.kwargs
+        assert cb_kwargs["pnl_pct"] == pytest.approx(0.0, abs=0.05)
+
+    @pytest.mark.asyncio
+    async def test_no_tp_hit_then_sl_signal_quality_equals_actual(self):
+        """No TP hit, then SL: signal_quality_pnl_pct equals actual pnl_pct."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        sig.current_price = 29800.0  # below SL
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Both actual and signal quality should be the SL PnL
+        assert call_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        assert call_kwargs["signal_quality_pnl_pct"] == pytest.approx(-0.5)
+        assert call_kwargs["signal_quality_hit_tp"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tp1_hit_snapshots_best_tp_fields(self):
+        """When TP1 is hit, best_tp_hit and best_tp_pnl_pct must be set on the signal."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        sig.current_price = 30200.0  # above TP1 but below TP2
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "TP1_HIT"
+        assert sig.best_tp_hit == 1
+        assert sig.best_tp_pnl_pct == pytest.approx(0.5)  # (30150 - 30000) / 30000 * 100
+
+    @pytest.mark.asyncio
+    async def test_tp2_hit_upgrades_best_tp_fields(self):
+        """When TP2 is hit, best_tp_hit upgrades to 2 and best_tp_pnl_pct uses TP2 price."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        sig.current_price = 30350.0  # above TP2 but below TP3
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "TP2_HIT"
+        assert sig.best_tp_hit == 2
+        assert sig.best_tp_pnl_pct == pytest.approx(1.0)  # (30300 - 30000) / 30000 * 100
+
+    @pytest.mark.asyncio
+    async def test_tp1_expiry_signal_quality_uses_tp1_pnl(self):
+        """TP1 hit then signal expires: signal quality uses TP1 PnL, actual uses market price."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=3700.0,  # expired
+        )
+        # TP1 was hit before expiry
+        sig.best_tp_hit = 1
+        sig.best_tp_pnl_pct = 0.5
+        sig.status = "TP1_HIT"
+        market_price = 30050.0  # price at expiry (lower than TP1)
+        sig.current_price = market_price
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "EXPIRED"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Actual PnL = market price at expiry
+        expected_actual = (market_price - 30000.0) / 30000.0 * 100.0
+        assert call_kwargs["pnl_pct"] == pytest.approx(expected_actual, rel=1e-4)
+        # Signal quality PnL = TP1 price (best TP reached)
+        assert call_kwargs["signal_quality_pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["signal_quality_hit_tp"] == 1
+
+    @pytest.mark.asyncio
+    async def test_short_tp1_then_sl_signal_quality_uses_tp1_pnl(self):
+        """SHORT: TP1 hit followed by SL uses TP1 for signal quality PnL."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.SHORT,
+            entry=30000.0,
+            stop_loss=30150.0,
+            tp1=29850.0,
+            tp2=29700.0,
+            tp3=29550.0,
+            age_seconds=35.0,
+        )
+        # Simulate TP1 having been hit
+        sig.best_tp_hit = 1
+        sig.best_tp_pnl_pct = 0.5  # (30000 - 29850) / 30000 * 100
+        sig.status = "TP1_HIT"
+        sig.current_price = 30250.0  # above SL for SHORT
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Actual PnL = SL price (30150) for SHORT: (30000 - 30150) / 30000 * 100 = -0.5%
+        assert call_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        # Signal quality PnL = TP1 price
+        assert call_kwargs["signal_quality_pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["signal_quality_hit_tp"] == 1
+        # Circuit breaker uses actual PnL
+        cb_kwargs = cb.record_outcome.call_args.kwargs
+        assert cb_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        assert cb_kwargs["hit_sl"] is True
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_always_uses_actual_pnl(self):
+        """Circuit breaker must always receive the real exit PnL regardless of signal quality."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Simulate TP2 having been hit (signal quality would be +1%)
+        sig.best_tp_hit = 2
+        sig.best_tp_pnl_pct = 1.0
+        sig.status = "TP2_HIT"
+        sig.stop_loss = 30000.0  # break-even after TP2
+        sig.current_price = 29900.0  # below break-even
+
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        # Signal quality shows positive, but circuit breaker sees the actual (breakeven/loss)
+        cb_kwargs = cb.record_outcome.call_args.kwargs
+        assert cb_kwargs["pnl_pct"] == pytest.approx(0.0, abs=0.05)
+        # Not a loss from circuit breaker's perspective (break-even)
+        assert cb_kwargs["hit_sl"] is True

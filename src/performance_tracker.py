@@ -50,6 +50,8 @@ class SignalRecord:
     max_favorable_excursion_pct: float = 0.0
     max_adverse_excursion_pct: float = 0.0
     timestamp: float = field(default_factory=time.time)
+    signal_quality_pnl_pct: float = 0.0   # TP-based PnL for signal quality stats
+    signal_quality_hit_tp: int = 0         # highest TP reached (for signal quality classification)
 
 
 @dataclass
@@ -108,8 +110,13 @@ class PerformanceTracker:
         hold_duration_sec: float = 0.0,
         max_favorable_excursion_pct: float = 0.0,
         max_adverse_excursion_pct: float = 0.0,
+        signal_quality_pnl_pct: Optional[float] = None,
+        signal_quality_hit_tp: Optional[int] = None,
     ) -> None:
         """Record the outcome of a completed signal."""
+        # Default signal quality fields to the actual PnL values when not provided
+        sq_pnl = signal_quality_pnl_pct if signal_quality_pnl_pct is not None else pnl_pct
+        sq_hit_tp = signal_quality_hit_tp if signal_quality_hit_tp is not None else hit_tp
         record = SignalRecord(
             signal_id=signal_id,
             channel=channel,
@@ -134,6 +141,8 @@ class PerformanceTracker:
             hold_duration_sec=hold_duration_sec,
             max_favorable_excursion_pct=max_favorable_excursion_pct,
             max_adverse_excursion_pct=max_adverse_excursion_pct,
+            signal_quality_pnl_pct=normalize_pnl_pct(sq_pnl),
+            signal_quality_hit_tp=sq_hit_tp,
         )
         self._records.append(record)
         self._save()
@@ -166,7 +175,7 @@ class PerformanceTracker:
         channel: Optional[str] = None,
         window_days: Optional[int] = None,
     ) -> str:
-        """Return a Telegram-ready performance summary.
+        """Return a Telegram-ready account PnL performance summary.
 
         Parameters
         ----------
@@ -180,7 +189,38 @@ class PerformanceTracker:
         stats = self.get_stats(channel=channel, window_days=window_days)
 
         return (
-            f"📊 *Performance Stats – {label}{window_label}*\n"
+            f"📊 *Account PnL Stats – {label}{window_label}*\n"
+            f"Total signals: {stats.total_signals}\n"
+            f"Wins: {stats.win_count} | Losses: {stats.loss_count} | "
+            f"Breakeven: {stats.breakeven_count}\n"
+            f"Win rate: {stats.win_rate:.1f}%\n"
+            f"Avg PnL: {stats.avg_pnl_pct:+.2f}%\n"
+            f"Best trade: {stats.best_trade:+.2f}%\n"
+            f"Worst trade: {stats.worst_trade:+.2f}%\n"
+            f"Max drawdown: {stats.max_drawdown:.2f}%"
+        )
+
+    def format_signal_quality_stats_message(
+        self,
+        channel: Optional[str] = None,
+        window_days: Optional[int] = None,
+    ) -> str:
+        """Return a Telegram-ready signal quality (TP-based PnL) summary.
+
+        Parameters
+        ----------
+        channel:
+            Optional channel name filter.
+        window_days:
+            Optional rolling window (7 or 30 days).
+        """
+        label = channel or "All Channels"
+        window_label = f" (last {window_days}d)" if window_days else " (all time)"
+        records = self._filter(channel=channel, window_days=window_days)
+        stats = self._compute_signal_quality_stats(channel or "ALL", records)
+
+        return (
+            f"🎯 *Signal Quality Stats – {label}{window_label}*\n"
             f"Total signals: {stats.total_signals}\n"
             f"Wins: {stats.win_count} | Losses: {stats.loss_count} | "
             f"Breakeven: {stats.breakeven_count}\n"
@@ -268,6 +308,34 @@ class PerformanceTracker:
 
         return stats
 
+    @staticmethod
+    def _compute_signal_quality_stats(channel: str, records: List[SignalRecord]) -> ChannelStats:
+        """Compute aggregate stats using signal quality (TP-based) PnL."""
+        stats = ChannelStats(channel=channel)
+        if not records:
+            return stats
+
+        stats.total_signals = len(records)
+        for record in records:
+            sq_pnl = record.signal_quality_pnl_pct
+            if is_breakeven_pnl(sq_pnl):
+                stats.breakeven_count += 1
+            elif sq_pnl > 0:
+                stats.win_count += 1
+            else:
+                stats.loss_count += 1
+        total = stats.win_count + stats.loss_count
+        stats.win_rate = (stats.win_count / total * 100.0) if total > 0 else 0.0
+
+        pnls = [r.signal_quality_pnl_pct for r in records]
+        stats.avg_pnl_pct = sum(pnls) / len(pnls) if pnls else 0.0
+        stats.best_trade = max(pnls) if pnls else 0.0
+        stats.worst_trade = min(pnls) if pnls else 0.0
+
+        _, stats.max_drawdown = calculate_drawdown_metrics(pnls)
+
+        return stats
+
     def _save(self) -> None:
         """Persist records to disk."""
         try:
@@ -285,9 +353,18 @@ class PerformanceTracker:
         try:
             with open(self._path, "r", encoding="utf-8") as fh:
                 data: List[Dict[str, Any]] = json.load(fh)
-            self._records = [SignalRecord(**item) for item in data]
+            self._records = []
+            for item in data:
+                # Backward compatibility: old records without signal quality fields
+                # default signal_quality_pnl_pct to pnl_pct and signal_quality_hit_tp to hit_tp
+                if "signal_quality_pnl_pct" not in item:
+                    item["signal_quality_pnl_pct"] = item.get("pnl_pct", 0.0)
+                if "signal_quality_hit_tp" not in item:
+                    item["signal_quality_hit_tp"] = item.get("hit_tp", 0)
+                self._records.append(SignalRecord(**item))
             for record in self._records:
                 record.pnl_pct = normalize_pnl_pct(record.pnl_pct)
+                record.signal_quality_pnl_pct = normalize_pnl_pct(record.signal_quality_pnl_pct)
                 if not record.outcome_label:
                     record.outcome_label = classify_trade_outcome(
                         pnl_pct=record.pnl_pct,

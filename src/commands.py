@@ -148,6 +148,7 @@ class CommandHandler:
             "/view_logs", "/update_code", "/restart_engine", "/rollback_code",
             "/circuit_breaker_status", "/reset_circuit_breaker",
             "/select_mode", "/select_config", "/reset_stats",
+            "/real_stats", "/stats",
         }
         if cmd in admin_cmds and not is_admin:
             await self._telegram.send_message(
@@ -437,6 +438,18 @@ class CommandHandler:
                 )
                 await self._telegram.send_message(chat_id, msg)
 
+        elif cmd == "/real_stats":
+            if self._performance_tracker is None:
+                await self._telegram.send_message(
+                    chat_id, "ℹ️ Performance tracker is not enabled."
+                )
+            else:
+                channel_arg = parts[1] if len(parts) >= 2 else None
+                msg = self._performance_tracker.format_stats_message(
+                    channel=channel_arg
+                )
+                await self._telegram.send_message(chat_id, msg)
+
         elif cmd == "/reset_stats":
             if self._performance_tracker is None:
                 await self._telegram.send_message(
@@ -589,6 +602,18 @@ class CommandHandler:
                 success, msg = self._select_mode.update_config(key, cfg_value)
                 await self._telegram.send_message(chat_id, msg)
 
+        elif cmd == "/signal_stats":
+            if self._performance_tracker is None:
+                await self._telegram.send_message(
+                    chat_id, "ℹ️ Performance tracker is not enabled."
+                )
+            else:
+                channel_arg = parts[1] if len(parts) >= 2 else None
+                msg = self._performance_tracker.format_signal_quality_stats_message(
+                    channel=channel_arg
+                )
+                await self._telegram.send_message(chat_id, msg)
+
         else:
             await self._telegram.send_message(
                 chat_id,
@@ -614,6 +639,7 @@ class CommandHandler:
                 "/circuit\\_breaker\\_status\n"
                 "/reset\\_circuit\\_breaker\n"
                 "/stats [channel]\n"
+                "/real\\_stats [channel]\n"
                 "/reset\\_stats [channel]\n"
                 "/select\\_mode [on|off|status]\n"
                 "/select\\_config <key> <value>\n\n"
@@ -624,5 +650,6 @@ class CommandHandler:
                 "/last\\_update\n"
                 "/subscribe\n"
                 "/unsubscribe\n"
-                "/signal\\_history",
+                "/signal\\_history\n"
+                "/signal\\_stats [channel]",
             )

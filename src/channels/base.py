@@ -55,6 +55,10 @@ class Signal:
     # Scanner-enriched market context (set before enqueuing)
     spread_pct: float = 0.0
     volume_24h_usd: float = 0.0
+    # Best TP level reached during this signal's lifetime (0 = none, 1 = TP1, 2 = TP2)
+    best_tp_hit: int = 0
+    # PnL % frozen at the moment the highest TP was hit (used for signal quality stats)
+    best_tp_pnl_pct: float = 0.0
 
     @property
     def r_multiple(self) -> float:

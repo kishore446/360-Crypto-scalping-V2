@@ -71,6 +71,10 @@ class TestScoreTrend:
         # momentum_strength=1.0 → mom_bonus=3, ema=8, adx=3 (no adx_value), mom=2+3=5 → 16
         assert score_trend(True, True, True, momentum_strength=1.0) == pytest.approx(16.0)
 
+    def test_negative_momentum_strength_same_bonus(self):
+        # abs(-1.0) = 1.0 → same bonus as +1.0 (useful for SHORT signals)
+        assert score_trend(True, True, True, momentum_strength=-1.0) == pytest.approx(16.0)
+
     def test_all_max_gradient(self):
         # ema=8, adx=3+4=7, mom=2+3=5 → 20
         assert score_trend(True, True, True, adx_value=40.0, momentum_strength=1.0) == pytest.approx(20.0)

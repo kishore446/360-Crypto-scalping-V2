@@ -607,7 +607,8 @@ class Scanner:
         if ctx.smc_data["sweeps"]:
             sweep = ctx.smc_data["sweeps"][0]
             if hasattr(sweep, "sweep_level") and hasattr(sweep, "close_price"):
-                sweep_depth_pct = abs(sweep.sweep_level - sweep.close_price) / max(sig.entry, 1e-8) * 100.0
+                ref_price = sweep.close_price if sweep.close_price > 0 else max(sig.entry, 1e-8)
+                sweep_depth_pct = abs(sweep.sweep_level - sweep.close_price) / ref_price * 100.0
 
         # Compute FVG size relative to ATR for gradient SMC scoring
         fvg_atr_ratio = 0.0

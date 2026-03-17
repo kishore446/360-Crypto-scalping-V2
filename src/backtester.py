@@ -355,7 +355,7 @@ class Backtester:
             # Proper avg R:R: average win / average loss magnitude
             if result.wins > 0 and result.losses > 0:
                 avg_win = sum(p for p in pnl_history if p > 0) / result.wins
-                avg_loss = abs(sum(p for p in pnl_history if p <= 0) / result.losses)
+                avg_loss = sum(abs(p) for p in pnl_history if p <= 0) / result.losses
                 result.avg_rr = avg_win / avg_loss if avg_loss > 0 else 0.0
             elif result.wins > 0:
                 result.avg_rr = float("inf")

@@ -79,9 +79,19 @@ class TradeMonitor:
         hit_sl:
             ``True`` when the stop-loss was triggered.
         """
+        # If a TP was previously hit during this trade, use that TP's PnL for the
+        # performance tracker instead of the actual exit PnL.  The highest TP reached
+        # is the "real" profit — a signal that hit TP1 (+1%) but later got stopped at
+        # -0.5% should be recorded as a +1% profitable trade, not a -0.5% loss.
+        stats_pnl = sig.pnl_pct
+        stats_hit_tp = hit_tp
+        if sig.best_tp_hit > 0 and sig.best_tp_hit > hit_tp:
+            stats_pnl = sig.best_tp_pnl_pct
+            stats_hit_tp = sig.best_tp_hit
+
         outcome_label = classify_trade_outcome(
-            pnl_pct=sig.pnl_pct,
-            hit_tp=hit_tp,
+            pnl_pct=stats_pnl,
+            hit_tp=stats_hit_tp,
             hit_sl=hit_sl,
         )
         if self._performance_tracker is not None:
@@ -92,9 +102,9 @@ class TradeMonitor:
                 symbol=sig.symbol,
                 direction=sig.direction.value,
                 entry=sig.entry,
-                hit_tp=hit_tp,
+                hit_tp=stats_hit_tp,
                 hit_sl=hit_sl,
-                pnl_pct=sig.pnl_pct,
+                pnl_pct=stats_pnl,
                 outcome_label=outcome_label,
                 confidence=sig.confidence,
                 pre_ai_confidence=sig.pre_ai_confidence,
@@ -108,6 +118,8 @@ class TradeMonitor:
                 max_favorable_excursion_pct=sig.max_favorable_excursion_pct,
                 max_adverse_excursion_pct=sig.max_adverse_excursion_pct,
             )
+        # Circuit breaker always uses the actual exit PnL and hit_sl so that
+        # real stop-loss events are tracked for risk management purposes.
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_outcome(
                 signal_id=sig.signal_id,
@@ -275,9 +287,19 @@ class TradeMonitor:
                 await self._post_update(sig, "🎯🎯 TP2 HIT")
                 # Trailing: move SL to entry (break-even)
                 sig.stop_loss = sig.entry
+                # Upgrade snapshot to TP2 profit for stats
+                sig.best_tp_hit = 2
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
+                )
             if price >= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
                 sig.status = "TP1_HIT"
                 await self._post_update(sig, "🎯 TP1 HIT ✅")
+                # Snapshot TP1 profit for stats
+                sig.best_tp_hit = 1
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
+                )
         else:
             if sig.tp3 and price <= sig.tp3 and sig.status != "TP3_HIT":
                 self._set_realized_pnl(sig, sig.tp3)
@@ -290,9 +312,19 @@ class TradeMonitor:
                 sig.status = "TP2_HIT"
                 await self._post_update(sig, "🎯🎯 TP2 HIT")
                 sig.stop_loss = sig.entry
+                # Upgrade snapshot to TP2 profit for stats
+                sig.best_tp_hit = 2
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
+                )
             if price <= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
                 sig.status = "TP1_HIT"
                 await self._post_update(sig, "🎯 TP1 HIT ✅")
+                # Snapshot TP1 profit for stats
+                sig.best_tp_hit = 1
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
+                )
 
         # Trailing stop adjustment
         if sig.trailing_active and sig.status in ("TP1_HIT", "TP2_HIT"):

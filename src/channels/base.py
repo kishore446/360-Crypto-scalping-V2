@@ -52,6 +52,12 @@ class Signal:
     # Original SL distance at signal creation (used by trailing stop logic so that
     # the trailing buffer doesn't collapse to zero after TP2 moves SL to break-even)
     original_sl_distance: float = 0.0
+    # Highest TP level reached during this signal's lifetime (0 = none, 1 = TP1, 2 = TP2).
+    # Used at trade close to determine the PnL that gets recorded in stats.
+    best_tp_hit: int = 0
+    # PnL % frozen at the moment the highest TP was hit.
+    # When the trade closes, this value is used for stats instead of the SL exit PnL.
+    best_tp_pnl_pct: float = 0.0
     # Scanner-enriched market context (set before enqueuing)
     spread_pct: float = 0.0
     volume_24h_usd: float = 0.0

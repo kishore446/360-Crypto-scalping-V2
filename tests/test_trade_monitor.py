@@ -451,6 +451,256 @@ class TestOutcomeRecording:
         assert sig.status == "PROFIT_LOCKED"
 
 
+class TestBestTPPnlForStats:
+    """When a TP is hit and then the trade closes via SL or expiry,
+    performance_tracker must record the highest-TP PnL, not the exit PnL.
+    Circuit breaker must always receive the actual exit PnL."""
+
+    def _build_monitor_with_mocks(self, active: Dict[str, Signal]):
+        removed = []
+        sent = []
+
+        async def mock_send(chat_id, text):
+            sent.append((chat_id, text))
+
+        data_store = MagicMock()
+        data_store.get_candles.return_value = None
+        data_store.ticks = {}
+
+        performance_tracker = MagicMock()
+        circuit_breaker = MagicMock()
+
+        monitor = TradeMonitor(
+            data_store=data_store,
+            send_telegram=mock_send,
+            get_active_signals=lambda: dict(active),
+            remove_signal=lambda sid: removed.append(sid),
+            update_signal=MagicMock(),
+            performance_tracker=performance_tracker,
+            circuit_breaker=circuit_breaker,
+        )
+        return monitor, removed, sent, performance_tracker, circuit_breaker
+
+    @pytest.mark.asyncio
+    async def test_tp1_hit_then_sl_stats_record_tp1_pnl(self):
+        """TP1 hit (+0.5%), then SL hit → stats must record TP1 PnL (+0.5%), not SL PnL."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Disable trailing stop so the original SL stays at 29850 for a clean -0.5% SL exit
+        sig.trailing_active = False
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        # Step 1: price reaches TP1 → TP1_HIT fires, best_tp_hit=1 snapshot taken
+        sig.current_price = 30200.0
+        await monitor._evaluate_signal(sig)
+        assert sig.status == "TP1_HIT"
+        assert sig.best_tp_hit == 1
+        assert sig.best_tp_pnl_pct == pytest.approx(0.5)
+        pt.record_outcome.assert_not_called()
+
+        # Step 2: price reverses below original SL → SL_HIT at -0.5%
+        sig.current_price = 29700.0
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Stats must use TP1's PnL, not the SL exit PnL
+        assert call_kwargs["pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["hit_tp"] == 1
+        assert call_kwargs["hit_sl"] is True
+        assert call_kwargs["outcome_label"] == "PROFIT_LOCKED"
+
+    @pytest.mark.asyncio
+    async def test_tp2_hit_then_sl_stats_record_tp2_pnl(self):
+        """TP2 hit (+1%), then SL at break-even → stats must record TP2 PnL (+1%), not 0%."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Disable trailing stop so SL stays at break-even (entry) after TP2, not further advanced
+        sig.trailing_active = False
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        # Step 1: price reaches TP2 (also passes TP1 on same candle)
+        sig.current_price = 30350.0
+        await monitor._evaluate_signal(sig)
+        assert sig.status == "TP2_HIT"
+        assert sig.best_tp_hit == 2
+        assert sig.best_tp_pnl_pct == pytest.approx(1.0)
+        pt.record_outcome.assert_not_called()
+
+        # Step 2: price reverses back to entry (break-even SL), BREAKEVEN_EXIT at 0%
+        sig.current_price = 29990.0
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "BREAKEVEN_EXIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Stats must use TP2's PnL (+1%), not the break-even exit PnL (0%)
+        assert call_kwargs["pnl_pct"] == pytest.approx(1.0)
+        assert call_kwargs["hit_tp"] == 2
+        assert call_kwargs["hit_sl"] is True
+        assert call_kwargs["outcome_label"] == "PROFIT_LOCKED"
+
+    @pytest.mark.asyncio
+    async def test_no_tp_hit_sl_hit_records_sl_pnl_unchanged(self):
+        """No TP hit before SL → stats record actual SL PnL (unchanged behavior)."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        sig.current_price = 29700.0  # below SL, no TP hit
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        assert call_kwargs["pnl_pct"] == pytest.approx(-0.5)
+        assert call_kwargs["hit_tp"] == 0
+        assert call_kwargs["hit_sl"] is True
+        assert call_kwargs["outcome_label"] == "SL_HIT"
+
+    @pytest.mark.asyncio
+    async def test_tp1_hit_then_expired_stats_record_tp1_pnl(self):
+        """TP1 hit, then signal expires → stats must record TP1 PnL, not the market exit PnL."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Disable trailing to keep the test focused on the expiry + best_tp_hit feature
+        sig.trailing_active = False
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        # Step 1: price reaches TP1
+        sig.current_price = 30200.0
+        await monitor._evaluate_signal(sig)
+        assert sig.status == "TP1_HIT"
+        assert sig.best_tp_hit == 1
+        assert sig.best_tp_pnl_pct == pytest.approx(0.5)
+
+        # Step 2: backdate the signal to trigger expiry, price has since retraced
+        sig.timestamp = sig.timestamp - timedelta(seconds=4000)
+        sig.current_price = 30050.0  # market price at expiry is below TP1
+
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "EXPIRED"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        # Stats must use TP1's PnL, not the market price at expiry
+        assert call_kwargs["pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["hit_tp"] == 1
+        assert call_kwargs["hit_sl"] is False
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_receives_actual_sl_pnl_not_tp_pnl(self):
+        """Circuit breaker must always receive actual exit PnL (for real risk management),
+        even when best_tp_hit overrides the performance tracker's recorded PnL."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=30000.0,
+            stop_loss=29850.0,
+            tp1=30150.0,
+            tp2=30300.0,
+            tp3=30450.0,
+            age_seconds=35.0,
+        )
+        # Disable trailing so the original SL at 29850 is still in force during step 2
+        sig.trailing_active = False
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        # Step 1: TP1 hit
+        sig.current_price = 30200.0
+        await monitor._evaluate_signal(sig)
+        assert sig.best_tp_hit == 1
+
+        # Step 2: SL hit at -0.5%
+        sig.current_price = 29700.0
+        await monitor._evaluate_signal(sig)
+
+        # Performance tracker sees TP1 PnL (+0.5%)
+        pt_kwargs = pt.record_outcome.call_args.kwargs
+        assert pt_kwargs["pnl_pct"] == pytest.approx(0.5)
+
+        # Circuit breaker sees actual SL PnL (-0.5%)
+        cb.record_outcome.assert_called_once()
+        cb_kwargs = cb.record_outcome.call_args.kwargs
+        assert cb_kwargs["hit_sl"] is True
+        assert cb_kwargs["pnl_pct"] == pytest.approx(-0.5)
+
+    @pytest.mark.asyncio
+    async def test_short_tp1_hit_then_sl_stats_record_tp1_pnl(self):
+        """SHORT: TP1 hit, then SL hit → stats record TP1 PnL as profit."""
+        sig = _make_signal(
+            channel="360_SCALP",
+            direction=Direction.SHORT,
+            entry=30000.0,
+            stop_loss=30150.0,
+            tp1=29850.0,
+            tp2=29700.0,
+            tp3=29550.0,
+            age_seconds=35.0,
+        )
+        # Disable trailing so the original SL at 30150 is still in force during step 2
+        sig.trailing_active = False
+        active = {sig.signal_id: sig}
+        monitor, removed, sent, pt, cb = self._build_monitor_with_mocks(active)
+
+        # Step 1: price drops to TP1
+        sig.current_price = 29800.0
+        await monitor._evaluate_signal(sig)
+        assert sig.status == "TP1_HIT"
+        assert sig.best_tp_hit == 1
+        assert sig.best_tp_pnl_pct == pytest.approx(0.5)
+
+        # Step 2: price reverses back above original SL
+        sig.current_price = 30250.0
+        await monitor._evaluate_signal(sig)
+
+        assert sig.status == "SL_HIT"
+        pt.record_outcome.assert_called_once()
+        call_kwargs = pt.record_outcome.call_args.kwargs
+        assert call_kwargs["pnl_pct"] == pytest.approx(0.5)
+        assert call_kwargs["hit_tp"] == 1
+        assert call_kwargs["hit_sl"] is True
+        assert call_kwargs["outcome_label"] == "PROFIT_LOCKED"
+
+
 class TestTrailingStopAfterTP2:
     """Trailing stop must continue to advance after TP2 moves SL to break-even."""
 

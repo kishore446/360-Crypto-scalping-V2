@@ -103,6 +103,8 @@ class SignalRouter:
             return
         try:
             client = self._redis.client
+            if client is None:
+                return
             # Restore active signals
             raw = await client.get(_REDIS_KEY_SIGNALS)
             if raw:
@@ -153,6 +155,8 @@ class SignalRouter:
             return
         try:
             client = self._redis.client
+            if client is None:
+                return
             # Persist active signals
             signals_payload = {
                 sid: _signal_to_dict(sig)

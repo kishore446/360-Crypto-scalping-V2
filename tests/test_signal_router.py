@@ -591,9 +591,6 @@ class TestRedisPersistence:
         router._active_signals[sig.signal_id] = sig
         router._position_lock[sig.symbol] = sig.direction
 
-        # Run in a real event loop so the create_task fires
-        loop = asyncio.get_event_loop()
-
         router.remove_signal(sig.signal_id)
         # Flush pending tasks
         await asyncio.sleep(0)

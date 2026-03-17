@@ -831,9 +831,6 @@ class TestATRBasedTrailing:
 
     def test_channel_atr_multiplier_used(self):
         """The trailing distance should reflect the channel's trailing_atr_mult config."""
-        from unittest.mock import patch
-        from config import ALL_CHANNELS
-
         candles = self._make_candles_with_atr(n=50)
         sig = _make_signal(
             channel="360_SCALP",

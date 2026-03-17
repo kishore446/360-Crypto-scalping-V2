@@ -337,19 +337,19 @@ class TestSignalStatsCommands:
         assert "restricted" in call_args[1].lower()
 
     @pytest.mark.asyncio
-    async def test_help_includes_signal_stats(self):
-        """Help text must include /signal_stats in the User section."""
+    async def test_unknown_command_help_includes_signal_stats(self):
+        """Unknown command fallback help text must include /signal_stats in the User section."""
         handler = _make_handler()
         with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
-            await handler._handle_command("/help_xyz_unknown", USER_CHAT_ID)
+            await handler._handle_command("/unknown_xyz", USER_CHAT_ID)
         call_args = handler._telegram.send_message.call_args[0]
         assert "signal\\_stats" in call_args[1]
 
     @pytest.mark.asyncio
-    async def test_help_includes_real_stats(self):
-        """Help text must include /real_stats in the Admin section."""
+    async def test_unknown_command_help_includes_real_stats(self):
+        """Unknown command fallback help text must include /real_stats in the Admin section."""
         handler = _make_handler()
         with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
-            await handler._handle_command("/help_xyz_unknown", USER_CHAT_ID)
+            await handler._handle_command("/unknown_xyz", USER_CHAT_ID)
         call_args = handler._telegram.send_message.call_args[0]
         assert "real\\_stats" in call_args[1]

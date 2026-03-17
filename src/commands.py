@@ -12,7 +12,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import psutil
 
@@ -825,6 +825,7 @@ class CommandHandler:
                     )
                     return
                 try:
+                    parsed: Union[int, float]
                     if key in ("lookahead", "min_window"):
                         parsed = int(val_str)
                         if parsed < 1:
@@ -849,12 +850,12 @@ class CommandHandler:
                         chat_id, f"✅ Backtest slippage updated to {self._bt_slippage_pct:.2f}%"
                     )
                 elif key == "lookahead":
-                    self._bt_lookahead = parsed
+                    self._bt_lookahead = int(parsed)
                     await self._telegram.send_message(
                         chat_id, f"✅ Backtest lookahead updated to {self._bt_lookahead} candles"
                     )
                 elif key == "min_window":
-                    self._bt_min_window = parsed
+                    self._bt_min_window = int(parsed)
                     await self._telegram.send_message(
                         chat_id, f"✅ Backtest min\\_window updated to {self._bt_min_window} candles"
                     )

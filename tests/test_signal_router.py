@@ -749,8 +749,6 @@ class TestStartLoopCallsCleanup:
 
         timeout_count = 0
 
-        original_wait_for = asyncio.wait_for
-
         async def fast_wait_for(coro, timeout):
             nonlocal timeout_count
             timeout_count += 1

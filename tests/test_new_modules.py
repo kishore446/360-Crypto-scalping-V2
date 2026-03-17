@@ -365,7 +365,7 @@ class TestStablecoinBlacklist:
     @pytest.mark.asyncio
     async def test_fetch_spot_filters_stablecoins(self, monkeypatch):
         """fetch_top_spot_pairs must exclude blacklisted stablecoin pairs."""
-        from src.pair_manager import PairManager, _STABLECOIN_BLACKLIST
+        from src.pair_manager import PairManager
 
         ticker_data = [
             {"symbol": "BTCUSDT", "quoteVolume": "1000000"},

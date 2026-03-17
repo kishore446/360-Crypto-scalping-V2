@@ -305,3 +305,137 @@ class TestPerformanceTrackerReset:
         pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
         cleared = pt.reset_stats()
         assert cleared == 0
+
+
+class TestSignalQualityStats:
+    """Tests for signal quality (TP-based) PnL tracking."""
+
+    def test_signal_quality_fields_stored(self, tmp_path):
+        """signal_quality_pnl_pct and signal_quality_hit_tp are stored correctly."""
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome(
+            signal_id="S1",
+            channel="360_SCALP",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry=100.0,
+            hit_tp=0,
+            hit_sl=True,
+            pnl_pct=-0.5,
+            signal_quality_pnl_pct=0.5,
+            signal_quality_hit_tp=1,
+        )
+        record = pt._records[0]
+        assert record.pnl_pct == pytest.approx(-0.5)
+        assert record.signal_quality_pnl_pct == pytest.approx(0.5)
+        assert record.signal_quality_hit_tp == 1
+
+    def test_signal_quality_defaults_to_actual_pnl_when_not_provided(self, tmp_path):
+        """When signal_quality_pnl_pct is not provided, it defaults to pnl_pct."""
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome(
+            signal_id="S1",
+            channel="360_SCALP",
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry=100.0,
+            hit_tp=0,
+            hit_sl=True,
+            pnl_pct=-1.5,
+        )
+        record = pt._records[0]
+        assert record.pnl_pct == pytest.approx(-1.5)
+        assert record.signal_quality_pnl_pct == pytest.approx(-1.5)
+        assert record.signal_quality_hit_tp == 0
+
+    def test_signal_quality_stats_uses_sq_pnl(self, tmp_path):
+        """_compute_signal_quality_stats uses signal_quality_pnl_pct, not pnl_pct."""
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        # Trade 1: TP1 hit (+0.5%) then SL (-0.5%) → quality=win, actual=loss
+        pt.record_outcome(
+            "S1", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -0.5,
+            signal_quality_pnl_pct=0.5, signal_quality_hit_tp=1,
+        )
+        # Trade 2: Straight SL → quality=loss, actual=loss
+        pt.record_outcome(
+            "S2", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -1.0,
+        )
+        # Trade 3: TP2 (+1%) then SL → quality=win, actual=loss
+        pt.record_outcome(
+            "S3", "360_SCALP", "BTC", "LONG", 100.0, 0, True, -0.5,
+            signal_quality_pnl_pct=1.0, signal_quality_hit_tp=2,
+        )
+
+        records = pt._filter(channel="360_SCALP")
+        sq_stats = PerformanceTracker._compute_signal_quality_stats("360_SCALP", records)
+        actual_stats = PerformanceTracker._compute_stats("360_SCALP", records)
+
+        # Signal quality: 2 wins (S1, S3) out of 3
+        assert sq_stats.win_count == 2
+        assert sq_stats.loss_count == 1
+        assert sq_stats.win_rate == pytest.approx(66.67, abs=0.01)
+
+        # Actual: 0 wins, 3 losses
+        assert actual_stats.win_count == 0
+        assert actual_stats.loss_count == 3
+        assert actual_stats.win_rate == 0.0
+
+    def test_format_signal_quality_stats_message_header(self, tmp_path):
+        """format_signal_quality_stats_message must use 🎯 emoji and 'Signal Quality Stats' header."""
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 0.5)
+        msg = pt.format_signal_quality_stats_message(channel="360_SCALP")
+        assert "🎯" in msg
+        assert "Signal Quality Stats" in msg
+        assert "Win rate" in msg
+
+    def test_format_stats_message_has_account_pnl_header(self, tmp_path):
+        """format_stats_message must say 'Account PnL Stats'."""
+        pt = PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+        pt.record_outcome("S1", "360_SCALP", "BTC", "LONG", 100.0, 1, False, 1.0)
+        msg = pt.format_stats_message(channel="360_SCALP")
+        assert "Account PnL Stats" in msg
+        assert "📊" in msg
+
+    def test_backward_compat_load_old_records(self, tmp_path):
+        """Old records without signal_quality fields should load with defaults from pnl_pct."""
+        import json
+        path = tmp_path / "perf.json"
+        # Write an old-format record (no signal_quality fields)
+        old_record = {
+            "signal_id": "OLD001",
+            "channel": "360_SCALP",
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "entry": 50000.0,
+            "hit_tp": 0,
+            "hit_sl": True,
+            "pnl_pct": -1.0,
+            "confidence": 75.0,
+            "outcome_label": "SL_HIT",
+            "pre_ai_confidence": 0.0,
+            "post_ai_confidence": 0.0,
+            "setup_class": "",
+            "market_phase": "",
+            "quality_tier": "",
+            "spread_pct": 0.0,
+            "volume_24h_usd": 0.0,
+            "hold_duration_sec": 0.0,
+            "max_favorable_excursion_pct": 0.0,
+            "max_adverse_excursion_pct": 0.0,
+            "timestamp": 1700000000.0,
+        }
+        with open(path, "w") as f:
+            json.dump([old_record], f)
+
+        pt = PerformanceTracker(storage_path=str(path))
+        assert len(pt._records) == 1
+        record = pt._records[0]
+        assert record.signal_quality_pnl_pct == pytest.approx(-1.0)
+        assert record.signal_quality_hit_tp == 0
+
+    def test_signal_quality_stats_empty_returns_zero(self, tmp_path):
+        """_compute_signal_quality_stats on empty list returns zero stats."""
+        stats = PerformanceTracker._compute_signal_quality_stats("360_SCALP", [])
+        assert stats.total_signals == 0
+        assert stats.win_rate == 0.0

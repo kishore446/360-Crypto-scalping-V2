@@ -79,8 +79,19 @@ class TradeMonitor:
         hit_sl:
             ``True`` when the stop-loss was triggered.
         """
+        # Actual PnL = the real exit price PnL (used for circuit breaker)
+        actual_pnl = sig.pnl_pct
+
+        # Signal quality PnL = best TP PnL if a TP was previously reached and is
+        # better than the final outcome; otherwise same as actual PnL
+        signal_quality_pnl = actual_pnl
+        signal_quality_hit_tp = hit_tp
+        if sig.best_tp_hit > 0 and sig.best_tp_hit > hit_tp:
+            signal_quality_pnl = sig.best_tp_pnl_pct
+            signal_quality_hit_tp = sig.best_tp_hit
+
         outcome_label = classify_trade_outcome(
-            pnl_pct=sig.pnl_pct,
+            pnl_pct=actual_pnl,
             hit_tp=hit_tp,
             hit_sl=hit_sl,
         )
@@ -94,7 +105,7 @@ class TradeMonitor:
                 entry=sig.entry,
                 hit_tp=hit_tp,
                 hit_sl=hit_sl,
-                pnl_pct=sig.pnl_pct,
+                pnl_pct=actual_pnl,
                 outcome_label=outcome_label,
                 confidence=sig.confidence,
                 pre_ai_confidence=sig.pre_ai_confidence,
@@ -107,12 +118,15 @@ class TradeMonitor:
                 hold_duration_sec=hold_duration_sec,
                 max_favorable_excursion_pct=sig.max_favorable_excursion_pct,
                 max_adverse_excursion_pct=sig.max_adverse_excursion_pct,
+                signal_quality_pnl_pct=signal_quality_pnl,
+                signal_quality_hit_tp=signal_quality_hit_tp,
             )
+        # Circuit breaker ALWAYS uses actual PnL (real exit price)
         if self._circuit_breaker is not None:
             self._circuit_breaker.record_outcome(
                 signal_id=sig.signal_id,
                 hit_sl=hit_sl,
-                pnl_pct=sig.pnl_pct,
+                pnl_pct=actual_pnl,
             )
         # Notify the scanner to apply a short per-symbol cooldown so no other
         # channel fires on the same symbol immediately after a stop-loss.
@@ -273,11 +287,22 @@ class TradeMonitor:
             if price >= sig.tp2 and sig.status not in ("TP2_HIT", "TP3_HIT"):
                 sig.status = "TP2_HIT"
                 await self._post_update(sig, "🎯🎯 TP2 HIT")
+                # Snapshot best-TP PnL for signal quality stats
+                sig.best_tp_hit = 2
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
+                )
                 # Trailing: move SL to entry (break-even)
                 sig.stop_loss = sig.entry
             if price >= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
                 sig.status = "TP1_HIT"
                 await self._post_update(sig, "🎯 TP1 HIT ✅")
+                # Snapshot best-TP PnL for signal quality stats (only if TP2 not already hit)
+                if sig.best_tp_hit < 1:
+                    sig.best_tp_hit = 1
+                    sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                        entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
+                    )
         else:
             if sig.tp3 and price <= sig.tp3 and sig.status != "TP3_HIT":
                 self._set_realized_pnl(sig, sig.tp3)
@@ -289,10 +314,21 @@ class TradeMonitor:
             if price <= sig.tp2 and sig.status not in ("TP2_HIT", "TP3_HIT"):
                 sig.status = "TP2_HIT"
                 await self._post_update(sig, "🎯🎯 TP2 HIT")
+                # Snapshot best-TP PnL for signal quality stats
+                sig.best_tp_hit = 2
+                sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
+                )
                 sig.stop_loss = sig.entry
             if price <= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
                 sig.status = "TP1_HIT"
                 await self._post_update(sig, "🎯 TP1 HIT ✅")
+                # Snapshot best-TP PnL for signal quality stats (only if TP2 not already hit)
+                if sig.best_tp_hit < 1:
+                    sig.best_tp_hit = 1
+                    sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
+                        entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
+                    )
 
         # Trailing stop adjustment
         if sig.trailing_active and sig.status in ("TP1_HIT", "TP2_HIT"):

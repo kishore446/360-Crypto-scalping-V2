@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, List, Optional, Set
@@ -24,10 +25,15 @@ from config import (
     BINANCE_FUTURES_WS_BASE,
     BINANCE_REST_BASE,
     BINANCE_WS_BASE,
+    WS_ALERT_COOLDOWN,
+    WS_FALLBACK_BULK_LIMIT,
+    WS_FALLBACK_POLL_INTERVALS,
+    WS_FALLBACK_TIMEFRAMES,
     WS_HEARTBEAT_INTERVAL,
     WS_MAX_STREAMS_PER_CONN,
     WS_RECONNECT_BASE_DELAY,
     WS_RECONNECT_MAX_DELAY,
+    WS_SESSION_RECYCLE_ATTEMPTS,
 )
 from src.utils import get_logger
 
@@ -50,7 +56,7 @@ class WSConnection:
 class WebSocketManager:
     """Manages multiple Binance WebSocket connections with resilience."""
 
-    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None) -> None:
+    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None, data_store=None) -> None:
         self._on_message = on_message
         self._market = market
         self._base_url = BINANCE_WS_BASE if market == "spot" else BINANCE_FUTURES_WS_BASE
@@ -65,6 +71,7 @@ class WebSocketManager:
         self._watchdog_task: Optional[asyncio.Task] = None
         self._admin_alert = admin_alert_callback
         self._last_alert_time: float = 0.0
+        self._data_store = data_store
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -130,44 +137,66 @@ class WebSocketManager:
         """Poll REST klines for critical pairs while WS is down."""
         assert self._session is not None
         if self._market == "futures":
-            url_tpl = f"{self._rest_base_url}/fapi/v1/klines?symbol={{symbol}}&interval=1m&limit=1"
+            url_tpl = f"{self._rest_base_url}/fapi/v1/klines?symbol={{symbol}}&interval={{interval}}&limit=1"
         else:
-            url_tpl = f"{self._rest_base_url}/api/v3/klines?symbol={{symbol}}&interval=1m&limit=1"
+            url_tpl = f"{self._rest_base_url}/api/v3/klines?symbol={{symbol}}&interval={{interval}}&limit=1"
 
         log.info("REST fallback loop started for {} critical pairs", len(self._critical_pairs))
+
+        # One-time bulk backfill to warm indicator pipelines (200 candles per
+        # symbol × timeframe) so scanners can produce signals immediately after
+        # a WS outage rather than waiting for candle-by-candle accumulation.
+        if self._data_store is not None:
+            for symbol in list(self._critical_pairs):
+                for interval in WS_FALLBACK_TIMEFRAMES:
+                    try:
+                        await self._data_store.fetch_and_store_fallback(
+                            symbol, interval=interval, limit=WS_FALLBACK_BULK_LIMIT, market=self._market
+                        )
+                        log.info(
+                            "REST fallback: bulk-seeded {} {} candles for {}",
+                            WS_FALLBACK_BULK_LIMIT, interval, symbol,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "REST fallback bulk seed failed for {} {}: {}", symbol, interval, exc
+                        )
+                    await asyncio.sleep(0.2)  # ~5 req/s well within Binance's 1200 req/min weight limit
+
         try:
             while self._running and self._rest_fallback_active:
                 for symbol in list(self._critical_pairs):
-                    try:
-                        url = url_tpl.format(symbol=symbol)
-                        async with self._session.get(
-                            url, timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            if resp.status != 200:
-                                log.debug("REST fallback {} status {}", symbol, resp.status)
+                    for interval in WS_FALLBACK_POLL_INTERVALS:
+                        try:
+                            url = url_tpl.format(symbol=symbol, interval=interval)
+                            async with self._session.get(
+                                url, timeout=aiohttp.ClientTimeout(total=10),
+                            ) as resp:
+                                if resp.status != 200:
+                                    log.debug("REST fallback {} {} status {}", symbol, interval, resp.status)
+                                    continue
+                                raw = await resp.json()
+                            if not raw:
                                 continue
-                            raw = await resp.json()
-                        if not raw:
-                            continue
-                        k = raw[0]
-                        msg: dict = {
-                            "e": "kline",
-                            "s": symbol,
-                            "k": {
-                                "i": "1m",
-                                "o": str(k[1]),
-                                "h": str(k[2]),
-                                "l": str(k[3]),
-                                "c": str(k[4]),
-                                "v": str(k[5]),
-                                "x": True,
-                            },
-                        }
-                        await self._on_message(msg)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        log.debug("REST fallback error for {}: {}", symbol, exc)
+                            k = raw[0]
+                            msg: dict = {
+                                "e": "kline",
+                                "s": symbol,
+                                "k": {
+                                    "i": interval,
+                                    "o": str(k[1]),
+                                    "h": str(k[2]),
+                                    "l": str(k[3]),
+                                    "c": str(k[4]),
+                                    "v": str(k[5]),
+                                    "x": True,
+                                },
+                            }
+                            await self._on_message(msg)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            log.debug("REST fallback error for {} {}: {}", symbol, interval, exc)
                 await asyncio.sleep(5)
         except asyncio.CancelledError:
             pass
@@ -237,24 +266,37 @@ class WebSocketManager:
                 self._set_connection_degraded(conn, True)
                 if self._admin_alert:
                     now = time.monotonic()
-                    if now - self._last_alert_time > 300:
+                    if now - self._last_alert_time > WS_ALERT_COOLDOWN:
                         self._last_alert_time = now
                         asyncio.create_task(
                             self._admin_alert(
-                                f"⚠️ WebSocket connection lost ({self._market}). Reconnecting…"
+                                f"⚠️ WebSocket connection lost ({self._market}, "
+                                f"attempt {conn.reconnect_attempts + 1}). Reconnecting…"
                             )
                         )
                 delay = min(
                     WS_RECONNECT_BASE_DELAY * (2 ** conn.reconnect_attempts),
                     WS_RECONNECT_MAX_DELAY,
                 )
+                # Add ±25% jitter to prevent thundering-herd reconnects when
+                # multiple connections drop simultaneously.
+                jitter = delay * random.uniform(-0.25, 0.25)
+                actual_delay = max(0.5, delay + jitter)
                 conn.reconnect_attempts += 1
                 log.info(
                     "Reconnecting in {:.1f}s (attempt {}) …",
-                    delay,
+                    actual_delay,
                     conn.reconnect_attempts,
                 )
-                await asyncio.sleep(delay)
+                # Recycle the aiohttp session periodically to clear stale TCP
+                # connection pools and DNS caches after extended outages.
+                if conn.reconnect_attempts % WS_SESSION_RECYCLE_ATTEMPTS == 0:
+                    log.warning(
+                        "Recycling HTTP session after {} consecutive failures ({})",
+                        conn.reconnect_attempts, self._market,
+                    )
+                    await self._recreate_session()
+                await asyncio.sleep(actual_delay)
 
     async def _connect(self, conn: WSConnection) -> None:
         assert self._session is not None
@@ -309,6 +351,15 @@ class WebSocketManager:
     # ------------------------------------------------------------------
     # Dynamic subscription helpers
     # ------------------------------------------------------------------
+
+    async def _recreate_session(self) -> None:
+        """Close and recreate the aiohttp session to clear stale connections."""
+        if self._session and not self._session.closed:
+            try:
+                await self._session.close()
+            except Exception as exc:
+                log.debug("Error closing stale session ({}): {}", self._market, exc)
+        self._session = aiohttp.ClientSession()
 
     def build_kline_stream(self, symbol: str, interval: str) -> str:
         return f"{symbol.lower()}@kline_{interval}"

@@ -224,11 +224,13 @@ class Bootstrap:
             engine._on_ws_message,
             market="spot",
             admin_alert_callback=engine.telegram.send_admin_alert,
+            data_store=engine.data_store,
         )
         engine._ws_futures = WebSocketManager(
             engine._on_ws_message,
             market="futures",
             admin_alert_callback=engine.telegram.send_admin_alert,
+            data_store=engine.data_store,
         )
 
         if spot_streams:

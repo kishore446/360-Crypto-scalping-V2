@@ -192,6 +192,19 @@ WS_MAX_STREAMS_PER_CONN: int = 5
 WS_HEARTBEAT_INTERVAL: int = 30  # seconds
 WS_RECONNECT_BASE_DELAY: float = 1.0
 WS_RECONNECT_MAX_DELAY: float = 60.0
+# Admin alert dedup window (seconds) — alerts are throttled to at most one
+# per this interval per manager to avoid Telegram spam during prolonged outages.
+WS_ALERT_COOLDOWN: int = int(os.getenv("WS_ALERT_COOLDOWN", "60"))
+# How many consecutive failed reconnection attempts before the aiohttp session
+# is recycled (clears stale TCP connection pool and DNS cache).
+WS_SESSION_RECYCLE_ATTEMPTS: int = int(os.getenv("WS_SESSION_RECYCLE_ATTEMPTS", "5"))
+# REST fallback — number of historical candles fetched in the one-time bulk
+# backfill that warms indicator pipelines when a WS outage begins.
+WS_FALLBACK_BULK_LIMIT: int = int(os.getenv("WS_FALLBACK_BULK_LIMIT", "200"))
+# Timeframes fetched in the bulk backfill (covers all channel strategies).
+WS_FALLBACK_TIMEFRAMES: List[str] = ["1m", "5m", "15m", "1h"]
+# Timeframes polled in the ongoing limit=1 REST loop (most frequently needed).
+WS_FALLBACK_POLL_INTERVALS: List[str] = ["1m", "5m"]
 
 # ---------------------------------------------------------------------------
 # Trade monitoring

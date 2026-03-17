@@ -437,15 +437,14 @@ class SignalRouter:
                 expired_ids.append(signal_id)
 
         for signal_id in expired_ids:
-            sig = self._active_signals.pop(signal_id, None)
-            if sig is not None:
-                self._position_lock.pop(sig.symbol, None)
-                # Record cooldown timestamp so rapid re-entry is suppressed
-                self._cooldown_timestamps[(sig.symbol, sig.channel)] = now
-                log.info(
-                    "Auto-expired signal {} {} {} (exceeded max hold)",
-                    signal_id, sig.symbol, sig.channel,
-                )
+            sig = self._active_signals.pop(signal_id)
+            self._position_lock.pop(sig.symbol, None)
+            # Record cooldown timestamp so rapid re-entry is suppressed
+            self._cooldown_timestamps[(sig.symbol, sig.channel)] = now
+            log.info(
+                "Auto-expired signal {} {} {} (exceeded max hold)",
+                signal_id, sig.symbol, sig.channel,
+            )
 
         if expired_ids:
             self._schedule_persist()

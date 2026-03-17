@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import numpy as np
+import pytest
 
 from src.detector import SMCDetector, SMCResult
+from src.exchange import ExchangeManager
 from src.filters import (
     check_adx,
     check_ema_alignment,
@@ -261,12 +265,6 @@ class TestRiskManager:
 # ---------------------------------------------------------------------------
 # Fix 3: Cross-exchange direction verification
 # ---------------------------------------------------------------------------
-
-
-import pytest
-from unittest.mock import AsyncMock, patch
-
-from src.exchange import ExchangeManager
 
 
 class TestCrossExchangeDirectionVerification:

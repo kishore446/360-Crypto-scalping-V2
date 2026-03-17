@@ -382,6 +382,30 @@ class HistoricalDataStore:
             self.candles.setdefault(symbol, {})[interval] = data
             log.debug("Full-seeded (no cache) %s %s: %d candles", symbol, interval, len(data["close"]))
 
+    async def fetch_and_store_fallback(
+        self, symbol: str, interval: str, limit: int, market: str
+    ) -> None:
+        """Fetch *limit* candles via REST and merge them into the store.
+
+        Used by the WebSocket REST fallback to warm indicator pipelines after a
+        WS outage so scanners can generate signals without waiting for candles to
+        accumulate one-by-one.
+        """
+        data = await self.fetch_candles(symbol, interval, limit, market)
+        if not data:
+            return
+        existing = self.candles.get(symbol, {}).get(interval)
+        if existing and len(existing.get("close", [])) > 0:
+            self.candles.setdefault(symbol, {})[interval] = self._merge_candles(
+                existing, data, _MAX_CANDLES_PER_BUCKET
+            )
+        else:
+            self.candles.setdefault(symbol, {})[interval] = data
+        log.info(
+            "Fallback seeded %s %s: %d candles",
+            symbol, interval, len(data.get("close", [])),
+        )
+
     async def _gap_fetch_and_merge(
         self, symbol: str, interval: str, gap: int, limit: int, market: str
     ) -> None:

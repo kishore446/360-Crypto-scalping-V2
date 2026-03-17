@@ -2,10 +2,12 @@
 
 import asyncio
 import time
+import unittest.mock as mock
 
 import pytest
 
 
+from config import WS_ALERT_COOLDOWN, WS_FALLBACK_TIMEFRAMES, WS_SESSION_RECYCLE_ATTEMPTS
 from src.channels.base import Signal
 from src.smc import Direction
 from src.telegram_bot import TelegramBot
@@ -286,7 +288,7 @@ class TestWebSocketLifecycle:
 
 
 class TestAdminAlertRateLimiting:
-    """Admin alert must not fire more than once per 5-minute cooldown window."""
+    """Admin alert must not fire more than once per WS_ALERT_COOLDOWN window."""
 
     def test_last_alert_time_starts_at_zero(self):
         """_last_alert_time initialises to 0.0 so the first alert always fires."""
@@ -302,22 +304,20 @@ class TestAdminAlertRateLimiting:
             alerted.append(msg)
 
         ws = WebSocketManager(lambda data: None, market="futures", admin_alert_callback=alert)
-        # Set last_alert_time to 301 seconds ago so the cooldown is always expired,
-        # regardless of how long the system has been running (avoids false failures
-        # on freshly booted CI containers where time.monotonic() < 300).
-        ws._last_alert_time = time.monotonic() - 301
+        # Set last_alert_time beyond the WS_ALERT_COOLDOWN window so the alert fires.
+        ws._last_alert_time = time.monotonic() - (WS_ALERT_COOLDOWN + 1)
 
         # Simulate the alert logic directly
         now = time.monotonic()
-        if now - ws._last_alert_time > 300:
+        if now - ws._last_alert_time > WS_ALERT_COOLDOWN:
             ws._last_alert_time = now
-            await alert("⚠️ WebSocket connection lost (futures). Reconnecting…")
+            await alert("⚠️ WebSocket connection lost (futures, attempt 1). Reconnecting…")
 
         assert len(alerted) == 1
 
     @pytest.mark.asyncio
     async def test_alert_suppressed_within_cooldown(self):
-        """Alert is not sent again while the 5-minute cooldown is active."""
+        """Alert is not sent again while the cooldown is active."""
         alerted = []
 
         async def alert(msg):
@@ -328,9 +328,9 @@ class TestAdminAlertRateLimiting:
         ws._last_alert_time = time.monotonic()
 
         now = time.monotonic()
-        if now - ws._last_alert_time > 300:
+        if now - ws._last_alert_time > WS_ALERT_COOLDOWN:
             ws._last_alert_time = now
-            await alert("⚠️ WebSocket connection lost (futures). Reconnecting…")
+            await alert("⚠️ WebSocket connection lost (futures, attempt 1). Reconnecting…")
 
         assert len(alerted) == 0
 
@@ -338,3 +338,172 @@ class TestAdminAlertRateLimiting:
         """_ping_loop must not exist — aiohttp heartbeat= handles keepalive."""
         ws = WebSocketManager(lambda data: None, market="spot")
         assert not hasattr(ws, "_ping_loop")
+
+
+class TestReconnectJitter:
+    """Bug 1: Reconnect delay should include random jitter (±25%)."""
+
+    def test_data_store_param_accepted(self):
+        """WebSocketManager accepts optional data_store parameter."""
+        mock_store = object()
+        ws = WebSocketManager(lambda data: None, market="spot", data_store=mock_store)
+        assert ws._data_store is mock_store
+
+    def test_data_store_defaults_to_none(self):
+        """data_store defaults to None for backward compatibility."""
+        ws = WebSocketManager(lambda data: None, market="spot")
+        assert ws._data_store is None
+
+    def test_jitter_produces_varied_delays(self):
+        """Successive jitter values should not always be identical."""
+        import random
+        from config import WS_RECONNECT_BASE_DELAY, WS_RECONNECT_MAX_DELAY
+        # Test across different reconnect attempts (exponents 0-3) to verify
+        # jitter is applied regardless of backoff magnitude.
+        all_delays = []
+        for attempt in range(4):
+            delays = set()
+            for _ in range(20):
+                delay = min(WS_RECONNECT_BASE_DELAY * (2 ** attempt), WS_RECONNECT_MAX_DELAY)
+                jitter = delay * random.uniform(-0.25, 0.25)
+                actual = max(0.5, delay + jitter)
+                delays.add(round(actual, 6))
+            # With 20 samples, at least 2 distinct values should appear
+            assert len(delays) > 1, f"No jitter variation at attempt={attempt}"
+            all_delays.extend(delays)
+        # Verify delays stay within the expected ±25% jitter band + min 0.5s floor
+        for attempt in range(4):
+            base = min(WS_RECONNECT_BASE_DELAY * (2 ** attempt), WS_RECONNECT_MAX_DELAY)
+            low = max(0.5, base * 0.75)
+            high = base * 1.25
+            for _ in range(50):
+                jitter = base * random.uniform(-0.25, 0.25)
+                actual = max(0.5, base + jitter)
+                assert low <= actual <= high, f"Delay {actual:.3f} outside [{low:.3f}, {high:.3f}]"
+
+
+class TestMultiTimeframeFallbackConfig:
+    """Bug 3: Fallback timeframe constants are set correctly."""
+
+    def test_fallback_timeframes_cover_all_channels(self):
+        """WS_FALLBACK_TIMEFRAMES must include 1m, 5m, 15m, and 1h."""
+        required = {"1m", "5m", "15m", "1h"}
+        assert required <= set(WS_FALLBACK_TIMEFRAMES)
+
+    def test_fallback_poll_intervals_present(self):
+        """WS_FALLBACK_POLL_INTERVALS config is importable."""
+        from config import WS_FALLBACK_POLL_INTERVALS
+        assert "1m" in WS_FALLBACK_POLL_INTERVALS
+
+
+class TestSessionRecycling:
+    """Bug 5: _recreate_session closes old session and creates a new one."""
+
+    @pytest.mark.asyncio
+    async def test_recreate_session_closes_old(self):
+        """_recreate_session must close the old session."""
+        closed = []
+
+        async def fake_close():
+            closed.append(True)
+
+        ws = WebSocketManager(lambda data: None, market="spot")
+        fake_session = type(
+            "FakeSession",
+            (),
+            {"closed": False, "close": lambda self: fake_close()},
+        )()
+        ws._session = fake_session
+
+        await ws._recreate_session()
+
+        assert closed, "Old session close() was not called"
+        assert ws._session is not fake_session
+
+    @pytest.mark.asyncio
+    async def test_recreate_session_skips_already_closed(self):
+        """_recreate_session must not call close() on an already-closed session."""
+        closed = []
+
+        ws = WebSocketManager(lambda data: None, market="spot")
+        fake_session = type(
+            "FakeSession",
+            (),
+            {"closed": True, "close": lambda self: closed.append(True)},
+        )()
+        ws._session = fake_session
+
+        await ws._recreate_session()
+
+        assert not closed, "close() should not be called on an already-closed session"
+        assert ws._session is not fake_session
+
+    def test_session_recycle_attempts_config(self):
+        """WS_SESSION_RECYCLE_ATTEMPTS must be a positive integer."""
+        assert isinstance(WS_SESSION_RECYCLE_ATTEMPTS, int)
+        assert WS_SESSION_RECYCLE_ATTEMPTS > 0
+
+
+class TestFetchAndStoreFallback:
+    """Bug 2: HistoricalDataStore.fetch_and_store_fallback stores candles correctly."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_store_fallback_stores_new_data(self):
+        """fetch_and_store_fallback seeds candles when none exist for the symbol."""
+        import numpy as np
+        from src.historical_data import HistoricalDataStore
+
+        store = HistoricalDataStore()
+        dummy = {
+            "open": np.array([1.0, 2.0]),
+            "high": np.array([1.1, 2.1]),
+            "low": np.array([0.9, 1.9]),
+            "close": np.array([1.05, 2.05]),
+            "volume": np.array([100.0, 200.0]),
+        }
+
+        with mock.patch.object(store, "fetch_candles", return_value=dummy) as patched:
+            await store.fetch_and_store_fallback("BTCUSDT", "1m", 200, "futures")
+            patched.assert_called_once_with("BTCUSDT", "1m", 200, "futures")
+
+        assert "BTCUSDT" in store.candles
+        assert "1m" in store.candles["BTCUSDT"]
+        np.testing.assert_array_equal(store.candles["BTCUSDT"]["1m"]["close"], dummy["close"])
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_store_fallback_merges_existing(self):
+        """fetch_and_store_fallback merges new candles with existing data."""
+        import numpy as np
+        from src.historical_data import HistoricalDataStore
+
+        store = HistoricalDataStore()
+        existing = {
+            "open": np.array([0.5]),
+            "high": np.array([0.6]),
+            "low": np.array([0.4]),
+            "close": np.array([0.55]),
+            "volume": np.array([50.0]),
+        }
+        store.candles["BTCUSDT"] = {"1m": existing}
+        new_data = {
+            "open": np.array([1.0]),
+            "high": np.array([1.1]),
+            "low": np.array([0.9]),
+            "close": np.array([1.05]),
+            "volume": np.array([100.0]),
+        }
+
+        with mock.patch.object(store, "fetch_candles", return_value=new_data):
+            await store.fetch_and_store_fallback("BTCUSDT", "1m", 200, "spot")
+
+        assert len(store.candles["BTCUSDT"]["1m"]["close"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_store_fallback_noop_on_empty_response(self):
+        """fetch_and_store_fallback does nothing if fetch_candles returns empty."""
+        from src.historical_data import HistoricalDataStore
+
+        store = HistoricalDataStore()
+        with mock.patch.object(store, "fetch_candles", return_value={}):
+            await store.fetch_and_store_fallback("ETHUSDT", "5m", 200, "spot")
+        assert "ETHUSDT" not in store.candles

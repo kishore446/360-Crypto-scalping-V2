@@ -651,7 +651,7 @@ class Scanner:
                 adx_value=ctx.ind_for_predict.get("adx_last") or 0.0,
                 momentum_strength=ctx.ind_for_predict.get("momentum_last") or 0.0,
             ),
-            ai_sentiment_score=score_ai_sentiment(ctx.ai.get("score", 0)),
+            ai_sentiment_score=score_ai_sentiment(ctx.ai.get("score", 0), sig.direction.value),
             liquidity_score=score_liquidity(volume_24h),
             spread_score=score_spread(ctx.spread_pct),
             data_sufficiency=score_data_sufficiency(ctx.candle_total),

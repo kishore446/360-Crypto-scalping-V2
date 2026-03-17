@@ -701,3 +701,75 @@ class TestCleanupExpired:
     def test_cleanup_returns_zero_on_empty_router(self, router):
         """cleanup_expired with no active signals must return 0."""
         assert router.cleanup_expired() == 0
+
+
+# ---------------------------------------------------------------------------
+# BUG 4: cleanup_expired is wired into start() loop
+# ---------------------------------------------------------------------------
+
+
+class TestStartLoopCallsCleanup:
+    """start() must call cleanup_expired() periodically via the timeout path."""
+
+    @pytest.mark.asyncio
+    async def test_cleanup_called_on_timeout_counter_overflow(self, queue):
+        """Simulate 60 timeout ticks – cleanup_expired must be called exactly once."""
+        cleanup_calls = []
+
+        async def mock_send(chat_id: str, text: str):
+            return True
+
+        router = SignalRouter(
+            queue=queue,
+            send_telegram=mock_send,
+            format_signal=lambda sig: "",
+        )
+        # Monkey-patch cleanup_expired to record calls
+        original = router.cleanup_expired
+
+        def tracking_cleanup():
+            result = original()
+            cleanup_calls.append(True)
+            return result
+
+        router.cleanup_expired = tracking_cleanup
+
+        # Seed one expired signal so cleanup has something to do
+        sig = _make_signal(channel="360_SCALP")
+        sig.timestamp = datetime.now(timezone.utc) - timedelta(hours=5)
+        router._active_signals[sig.signal_id] = sig
+        router._position_lock[sig.symbol] = sig.direction
+
+        # Drive the start() loop with a very short timeout so it fires quickly.
+        # We put None in the queue to create a fast timeout-style loop.
+        # Instead, run the loop just long enough for at least 60 iterations.
+        # We do this by draining timeouts: with timeout=1.0 that would need 60s.
+        # Instead, we test the counter logic directly by patching asyncio.wait_for
+        # to always raise TimeoutError — simulating 60 rapid timeout ticks.
+
+        timeout_count = 0
+
+        original_wait_for = asyncio.wait_for
+
+        async def fast_wait_for(coro, timeout):
+            nonlocal timeout_count
+            timeout_count += 1
+            # On the 60th tick, stop the router so the test finishes
+            if timeout_count >= 60:
+                router._running = False
+            coro.close()
+            raise asyncio.TimeoutError
+
+        router._queue_has_timeout = False  # force the asyncio.wait_for code path
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+
+        try:
+            await router.start()
+        finally:
+            monkeypatch.undo()
+
+        # After 60 simulated timeout ticks, cleanup must have been called
+        assert len(cleanup_calls) >= 1, "cleanup_expired was never called from the start() loop"
+        # The expired signal must have been removed
+        assert sig.signal_id not in router._active_signals

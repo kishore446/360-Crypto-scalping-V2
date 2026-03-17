@@ -309,10 +309,10 @@ class TestOnChainClientEnabled:
 
 
 class TestUnsupportedAssetSkip:
-    """Non-BTC/ETH assets must immediately return 0.0 without any API call."""
+    """Non-BTC/ETH assets must immediately return neutral score without any API call."""
 
     @pytest.mark.asyncio
-    async def test_sol_returns_zero_score(self):
+    async def test_sol_returns_neutral_score(self):
         client = OnChainClient(api_key="test_key")
         # Patch _fetch_glassnode so we can verify it's NOT called
         called = []
@@ -323,7 +323,7 @@ class TestUnsupportedAssetSkip:
 
         client._fetch_glassnode = _fake_fetch
         result = await client.get_exchange_flow("SOLUSDT")
-        assert result.score == 0.0
+        assert result.score == _NEUTRAL_SCORE
         assert called == [], "Glassnode must NOT be called for unsupported assets"
 
     @pytest.mark.asyncio
@@ -358,8 +358,8 @@ class TestUnsupportedAssetSkip:
 
     @pytest.mark.asyncio
     async def test_unsupported_returns_source_unsupported(self):
-        """Unsupported assets should have source='unsupported'."""
+        """Unsupported assets should have source='unsupported' and neutral score."""
         client = OnChainClient(api_key="test_key")
         result = await client.get_exchange_flow("DOGEUSDT")
         assert result.source == "unsupported"
-        assert result.score == 0.0
+        assert result.score == _NEUTRAL_SCORE

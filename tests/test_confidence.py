@@ -96,6 +96,26 @@ class TestScoreAISentiment:
     def test_bearish(self):
         assert score_ai_sentiment(-1.0) == 0.0
 
+    def test_long_direction_default(self):
+        # LONG is the default – behavior unchanged from before
+        assert score_ai_sentiment(1.0, "LONG") == 15.0
+        assert score_ai_sentiment(-1.0, "LONG") == 0.0
+
+    def test_short_bearish_sentiment_scores_high(self):
+        # For SHORT signals, bearish sentiment supports the trade → high score
+        assert score_ai_sentiment(-1.0, "SHORT") == 15.0
+
+    def test_short_bullish_sentiment_scores_low(self):
+        # For SHORT signals, bullish sentiment is against the trade → low score
+        assert score_ai_sentiment(1.0, "SHORT") == 0.0
+
+    def test_short_neutral_is_still_neutral(self):
+        # Neutral sentiment is neutral for both directions
+        assert score_ai_sentiment(0.0, "SHORT") == pytest.approx(7.5)
+
+    def test_direction_case_insensitive(self):
+        assert score_ai_sentiment(-0.8, "short") == score_ai_sentiment(-0.8, "SHORT")
+
 
 class TestScoreLiquidity:
     def test_high_volume(self):

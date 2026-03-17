@@ -336,3 +336,76 @@ class TestRegimeEMAFallback:
         indicators = {}
         result = detector.classify(indicators, candles=None)
         assert result.regime is not None
+
+
+
+# ---------------------------------------------------------------------------
+# BUG 1: Stablecoin blacklist in PairManager
+# ---------------------------------------------------------------------------
+
+
+class TestStablecoinBlacklist:
+    """Stablecoin-vs-stablecoin pairs must never enter the scanning pipeline."""
+
+    def test_blacklist_contains_known_stablecoins(self):
+        from src.pair_manager import _STABLECOIN_BLACKLIST
+        assert "USDCUSDT" in _STABLECOIN_BLACKLIST
+        assert "BUSDUSDT" in _STABLECOIN_BLACKLIST
+        assert "USD1USDT" in _STABLECOIN_BLACKLIST
+        assert "FDUSDUSDT" in _STABLECOIN_BLACKLIST
+
+    def test_btcusdt_not_in_blacklist(self):
+        from src.pair_manager import _STABLECOIN_BLACKLIST
+        assert "BTCUSDT" not in _STABLECOIN_BLACKLIST
+
+    def test_ethusdt_not_in_blacklist(self):
+        from src.pair_manager import _STABLECOIN_BLACKLIST
+        assert "ETHUSDT" not in _STABLECOIN_BLACKLIST
+
+    @pytest.mark.asyncio
+    async def test_fetch_spot_filters_stablecoins(self, monkeypatch):
+        """fetch_top_spot_pairs must exclude blacklisted stablecoin pairs."""
+        from src.pair_manager import PairManager, _STABLECOIN_BLACKLIST
+
+        ticker_data = [
+            {"symbol": "BTCUSDT", "quoteVolume": "1000000"},
+            {"symbol": "USDCUSDT", "quoteVolume": "2000000"},   # blacklisted
+            {"symbol": "ETHUSDT", "quoteVolume": "900000"},
+            {"symbol": "BUSDUSDT", "quoteVolume": "800000"},    # blacklisted
+        ]
+
+        pm = PairManager.__new__(PairManager)
+        pm._spot_client = AsyncMock()
+        pm._spot_client._get = AsyncMock(return_value=ticker_data)
+        pm._futures_client = AsyncMock()
+
+        pairs = await pm.fetch_top_spot_pairs(limit=10)
+        symbols = [p.symbol for p in pairs]
+
+        assert "BTCUSDT" in symbols
+        assert "ETHUSDT" in symbols
+        assert "USDCUSDT" not in symbols
+        assert "BUSDUSDT" not in symbols
+
+    @pytest.mark.asyncio
+    async def test_fetch_futures_filters_stablecoins(self, monkeypatch):
+        """fetch_top_futures_pairs must exclude blacklisted stablecoin pairs."""
+        from src.pair_manager import PairManager
+
+        ticker_data = [
+            {"symbol": "BTCUSDT", "quoteVolume": "5000000"},
+            {"symbol": "USD1USDT", "quoteVolume": "9000000"},   # blacklisted
+            {"symbol": "SOLUSDT", "quoteVolume": "3000000"},
+        ]
+
+        pm = PairManager.__new__(PairManager)
+        pm._futures_client = AsyncMock()
+        pm._futures_client._get = AsyncMock(return_value=ticker_data)
+        pm._spot_client = AsyncMock()
+
+        pairs = await pm.fetch_top_futures_pairs(limit=10)
+        symbols = [p.symbol for p in pairs]
+
+        assert "BTCUSDT" in symbols
+        assert "SOLUSDT" in symbols
+        assert "USD1USDT" not in symbols

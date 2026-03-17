@@ -94,7 +94,7 @@ class OnChainClient:
         # Skip the API call entirely for other assets to avoid errors and latency.
         if coin.upper() not in _SUPPORTED_ONCHAIN_ASSETS:
             log.debug("On-chain data not supported for %s – returning neutral score", coin)
-            return OnChainData(symbol=coin, source="unsupported", score=0.0)
+            return OnChainData(symbol=coin, source="unsupported", score=_NEUTRAL_SCORE)
 
         cached = self._cache.get(coin)
         if cached is not None and (time.monotonic() - cached[0]) < _CACHE_TTL:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.correlation import check_correlation_limit, get_correlation_groups
 
 

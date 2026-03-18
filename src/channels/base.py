@@ -60,6 +60,21 @@ class Signal:
     # PnL % frozen at the moment the highest TP was hit (used for signal quality stats)
     best_tp_pnl_pct: float = 0.0
 
+    # ---- DCA (Double Entry) fields ----
+    entry_2: Optional[float] = None           # 2nd entry price
+    entry_2_filled: bool = False              # Whether 2nd entry was taken
+    avg_entry: float = 0.0                    # Weighted average entry
+    position_weight_1: float = 0.6            # Weight of Entry 1 (default 60%)
+    position_weight_2: float = 0.4            # Weight of Entry 2 (default 40%)
+    dca_zone_lower: float = 0.0               # Lower bound of DCA zone
+    dca_zone_upper: float = 0.0               # Upper bound of DCA zone
+
+    # ---- Original TP/Entry values (before DCA recalc) ----
+    original_entry: float = 0.0               # Entry 1 price before averaging
+    original_tp1: float = 0.0
+    original_tp2: float = 0.0
+    original_tp3: Optional[float] = None
+
     @property
     def r_multiple(self) -> float:
         risk = abs(self.entry - self.stop_loss)

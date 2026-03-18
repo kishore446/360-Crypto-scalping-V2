@@ -35,7 +35,7 @@ _TICKS_DIR = CACHE_DIR / "ticks"
 _META_FILE = CACHE_DIR / "metadata.json"
 
 # Maximum candles to retain per symbol-timeframe bucket
-_MAX_CANDLES_PER_BUCKET: int = 1000
+_MAX_CANDLES_PER_BUCKET: int = 500
 # Seconds per candle interval — used to estimate how many candles are missing
 _INTERVAL_SECONDS: Dict[str, int] = {
     "1m": 60,
@@ -148,6 +148,10 @@ class HistoricalDataStore:
         for tf in SEED_TIMEFRAMES:
             data = await self.fetch_candles(symbol, tf.interval, tf.limit, market)
             if data:
+                # Prune to the bucket limit immediately so seeded data never
+                # exceeds the same cap enforced by update_candle().
+                if len(data.get("close", [])) > _MAX_CANDLES_PER_BUCKET:
+                    data = {k: v[-_MAX_CANDLES_PER_BUCKET:] for k, v in data.items()}
                 self.candles[symbol][tf.interval] = data
                 log.debug("Seeded %s %s: %d candles", symbol, tf.interval, len(data["close"]))
             await asyncio.sleep(BATCH_REQUEST_DELAY)

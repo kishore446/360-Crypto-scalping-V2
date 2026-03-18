@@ -91,6 +91,7 @@ class CryptoSignalEngine:
             queue=self._signal_queue,
             send_telegram=self.telegram.send_message,
             format_signal=TelegramBot.format_signal,
+            redis_client=self._redis_client,
         )
 
         # Circuit breaker (must be created before TradeMonitor)

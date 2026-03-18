@@ -46,6 +46,13 @@ _STOP_OUTCOME_MESSAGES = {
 _DCA_GRACE_SECONDS = 300
 
 
+def _escape_md(text: str) -> str:
+    """Escape Telegram MarkdownV1 special characters in dynamic text fields."""
+    for ch in ("\\", "*", "_", "`", "["):
+        text = text.replace(ch, f"\\{ch}")
+    return text
+
+
 class TradeMonitor:
     """Watches active signals and emits updates."""
 
@@ -554,7 +561,7 @@ class TradeMonitor:
 
         lines = [
             "📊 DCA ENTRY 2",
-            f"{chan_emoji} *{sig.channel}* | {sig.symbol} *{sig.direction.value}* {dir_emoji}",
+            f"{chan_emoji} *{_escape_md(sig.channel)}* | {_escape_md(sig.symbol)} *{sig.direction.value}* {dir_emoji}",
             f"💰 Entry 1: `{fmt_price(sig.original_entry)}` → Entry 2: `{fmt_price(sig.entry_2 if sig.entry_2 is not None else 0.0)}`",
             f"📊 Avg Entry: `{fmt_price(sig.avg_entry)}`",
             f"🎯 New TP1: `{fmt_price(sig.tp1)}` | TP2: `{fmt_price(sig.tp2)}`"
@@ -585,14 +592,14 @@ class TradeMonitor:
 
         lines = [
             f"{event}",
-            f"{chan_emoji} *{sig.channel}* | {sig.symbol} *{sig.direction.value}* {dir_emoji}",
+            f"{chan_emoji} *{_escape_md(sig.channel)}* | {_escape_md(sig.symbol)} *{sig.direction.value}* {dir_emoji}",
             f"💰 Entry: `{fmt_price(sig.entry)}` → Current: `{fmt_price(sig.current_price)}`",
             f"📊 PnL: *{sig.pnl_pct:+.2f}%*",
             f"🛡️ SL: `{fmt_price(sig.stop_loss)}`",
             f"🤖 Confidence: *{sig.confidence:.0f}%*",
         ]
         if sig.trailing_active and sig.trailing_desc:
-            lines.append(f"💹 Trailing Active ({sig.trailing_desc})")
+            lines.append(f"💹 Trailing Active ({_escape_md(sig.trailing_desc)})")
         lines.append(f"⏰ {fmt_ts()}")
 
         text = "\n".join(lines)

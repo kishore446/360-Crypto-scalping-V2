@@ -323,7 +323,9 @@ class WebSocketManager:
                     await self._on_message(data)
                 except Exception as exc:
                     log.debug("Message parse error: {}", exc)
-            elif msg.type == aiohttp.WSMsgType.PONG:
+            elif msg.type in (aiohttp.WSMsgType.PING, aiohttp.WSMsgType.PONG):
+                # Binance sends PING frames every ~3 minutes; aiohttp auto-replies
+                # with PONG.  Treat both as proof that the connection is alive.
                 conn.last_pong = time.monotonic()
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                 log.warning("WS closed/error, will reconnect")
@@ -341,7 +343,7 @@ class WebSocketManager:
                 now = time.monotonic()
                 for conn in self._connections:
                     if conn.ws and not conn.ws.closed:
-                        if (now - conn.last_pong) >= self._heartbeat_interval * 6:
+                        if (now - conn.last_pong) >= self._heartbeat_interval * 10:
                             log.warning(
                                 "Watchdog: stale WS connection ({:.0f}s since last data) — force-closing to trigger reconnect",
                                 now - conn.last_pong,
@@ -385,6 +387,6 @@ class WebSocketManager:
         if not open_connections or len(open_connections) != len(self._connections):
             return False
         return all(
-            (now - c.last_pong) < self._heartbeat_interval * 6
+            (now - c.last_pong) < self._heartbeat_interval * 10
             for c in open_connections
         )

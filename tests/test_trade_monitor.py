@@ -1288,7 +1288,7 @@ class TestSignalInvalidation:
 
     def test_momentum_loss_invalidates_after_min_age(self):
         """Signal with flat momentum invalidated after INVALIDATION_MIN_AGE_SECONDS."""
-        from config import INVALIDATION_MIN_AGE_SECONDS, INVALIDATION_MOMENTUM_THRESHOLD
+        from config import INVALIDATION_MIN_AGE_SECONDS
         channel = "360_SCALP"
         min_age = INVALIDATION_MIN_AGE_SECONDS[channel]
         sig = _make_signal(channel=channel, age_seconds=min_age + 10)

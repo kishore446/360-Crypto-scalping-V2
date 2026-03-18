@@ -522,8 +522,6 @@ class TestDcaTimestamp:
 
     def test_dca_timestamp_not_overwritten_on_second_call(self):
         """dca_timestamp is updated on each DCA call (recalculate stamps with current time)."""
-        from datetime import timedelta
-        from src.utils import utcnow
         sig = _make_long_signal(entry=2300.0, stop_loss=2280.0)
         recalculate_after_dca(sig, 2294.0, list(CHANNEL_SWING.tp_ratios))
         first_ts = sig.dca_timestamp

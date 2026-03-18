@@ -18,8 +18,6 @@ from config import CHANNEL_SWING, CHANNEL_SCALP
 from src.channels.base import Signal
 from src.dca import check_dca_entry, compute_dca_zone, recalculate_after_dca
 from src.smc import Direction
-from src.utils import utcnow
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -10,6 +10,7 @@ import numpy as np
 
 from src.regime import MarketRegime
 from src.smc import Direction
+from src.utils import price_decimal_fmt
 
 
 class SetupClass(str, Enum):
@@ -415,13 +416,7 @@ def execution_quality_check(
     zone_low = min(anchor, signal.entry)
     zone_high = max(anchor, signal.entry)
     # Use dynamic decimal places based on price magnitude for micro-cap tokens
-    _ref = max(zone_low, zone_high, 1e-12)
-    if _ref >= 1.0:
-        _zone_fmt = ".4f"
-    elif _ref >= 0.001:
-        _zone_fmt = ".6f"
-    else:
-        _zone_fmt = ".8f"
+    _zone_fmt = price_decimal_fmt(max(zone_low, zone_high, 1e-12))
     entry_zone = f"{zone_low:{_zone_fmt}} – {zone_high:{_zone_fmt}}"
     reason = ""
     if not trigger_confirmed:
@@ -520,12 +515,7 @@ def build_risk_plan(
         passed = False
         reason = f"SL distance {sl_pct:.1%} exceeds 5% of entry (risk plan rejected)"
     # Dynamic decimal places for invalidation message (micro-cap tokens)
-    if structure >= 1.0:
-        _struct_fmt = ".4f"
-    elif structure >= 0.001:
-        _struct_fmt = ".6f"
-    else:
-        _struct_fmt = ".8f"
+    _struct_fmt = price_decimal_fmt(structure)
     invalidation = f"{'Below' if signal.direction == Direction.LONG else 'Above'} {structure:{_struct_fmt}} structure + volatility buffer"
 
     return RiskAssessment(

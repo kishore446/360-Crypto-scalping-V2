@@ -45,7 +45,7 @@ from src.signal_quality import (
     execution_quality_check,
     score_signal_components,
 )
-from src.utils import get_logger
+from src.utils import get_logger, price_decimal_fmt
 
 log = get_logger("scanner")
 
@@ -457,15 +457,13 @@ class Scanner:
         smc_parts = []
         if smc_result.sweeps:
             sweep = smc_result.sweeps[0]
-            lv = sweep.sweep_level
-            fmt = ".8f" if lv < 0.001 else ".6f" if lv < 1.0 else ".4f"
+            fmt = price_decimal_fmt(sweep.sweep_level)
             smc_parts.append(
-                f"Sweep {sweep.direction.value} at {lv:{fmt}}"
+                f"Sweep {sweep.direction.value} at {sweep.sweep_level:{fmt}}"
             )
         if smc_result.fvg:
             fvg = smc_result.fvg[0]
-            lv = max(fvg.gap_high, fvg.gap_low)
-            fmt = ".8f" if lv < 0.001 else ".6f" if lv < 1.0 else ".4f"
+            fmt = price_decimal_fmt(max(fvg.gap_high, fvg.gap_low))
             smc_parts.append(f"FVG {fvg.gap_high:{fmt}}-{fvg.gap_low:{fmt}}")
         return " | ".join(smc_parts) if smc_parts else "None detected"
 
@@ -863,7 +861,7 @@ class Scanner:
         if inv_expiry is not None:
             if time.monotonic() < inv_expiry:
                 log.debug(
-                    "Post-invalidation cooldown: skipping {} {} {} ",
+                    "Post-invalidation cooldown: skipping {} {} {}",
                     symbol, chan_name, sig.direction.value,
                 )
                 return None, None

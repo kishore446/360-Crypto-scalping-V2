@@ -106,6 +106,24 @@ def fmt_price(price: float) -> str:
     return f"{price:.8f}"
 
 
+def price_decimal_fmt(price: float) -> str:
+    """Return a Python format spec string for adaptive decimal precision.
+
+    Used for inline f-string formatting of raw prices where commas and
+    the ``fmt_price`` full formatter are not desired (e.g. zone labels,
+    invalidation messages). Consistent with the tiers in :func:`fmt_price`.
+
+    Examples::
+
+        f"{zone_low:{price_decimal_fmt(zone_low)}}"
+    """
+    if price >= 1.0:
+        return ".4f"
+    if price >= 0.001:
+        return ".6f"
+    return ".8f"
+
+
 def fmt_ts(dt: Optional[datetime] = None) -> str:
     """Produce ``YYYY-MM-DD HH:MM:SS`` string."""
     dt = dt or utcnow()

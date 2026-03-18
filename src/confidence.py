@@ -19,6 +19,14 @@ from typing import Dict, Optional
 
 from config import NEW_PAIR_MIN_CONFIDENCE
 
+# Fear & Greed index thresholds and modifiers for AI sentiment scoring
+_FG_EXTREME_FEAR_THRESHOLD: int = 25   # below this → extreme fear zone
+_FG_EXTREME_GREED_THRESHOLD: int = 75  # above this → extreme greed zone
+_FG_LONG_PENALTY: float = -3.0   # applied to LONG confidence in extreme fear
+_FG_SHORT_BOOST: float = 2.0     # applied to SHORT confidence in extreme fear
+_FG_LONG_BOOST: float = 2.0      # applied to LONG confidence in extreme greed
+_FG_SHORT_PENALTY: float = -3.0  # applied to SHORT confidence in extreme greed
+
 
 @dataclass
 class ConfidenceInput:
@@ -143,10 +151,10 @@ def score_ai_sentiment(
     # Fear & Greed modifier
     is_long = direction.upper() != "SHORT"
     fg_modifier = 0.0
-    if fear_greed_value < 25:  # Extreme Fear – contrarian boost for SHORT
-        fg_modifier = -3.0 if is_long else 2.0
-    elif fear_greed_value > 75:  # Extreme Greed – contrarian boost for LONG
-        fg_modifier = 2.0 if is_long else -3.0
+    if fear_greed_value < _FG_EXTREME_FEAR_THRESHOLD:  # Extreme Fear – contrarian boost for SHORT
+        fg_modifier = _FG_LONG_PENALTY if is_long else _FG_SHORT_BOOST
+    elif fear_greed_value > _FG_EXTREME_GREED_THRESHOLD:  # Extreme Greed – contrarian boost for LONG
+        fg_modifier = _FG_LONG_BOOST if is_long else _FG_SHORT_PENALTY
 
     return round(min(max(base + fg_modifier, 0.0), 15.0), 2)
 

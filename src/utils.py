@@ -92,7 +92,8 @@ def fmt_price(price: float) -> str:
       ≥ $1,000 → 0 decimals  (e.g. BTC, ETH)
       ≥ $100   → 2 decimals  (e.g. SOL, BNB)
       ≥ $1     → 4 decimals  (e.g. DOT, UNI – avoids identical TP display)
-      < $1     → 6 decimals  (e.g. DOGE, SHIB)
+      ≥ $0.001 → 6 decimals  (e.g. DOGE, SHIB)
+      < $0.001 → 8 decimals  (e.g. BONK, SHIB micro-cap tokens)
     """
     if price >= 1_000:
         return f"{price:,.0f}"
@@ -100,7 +101,9 @@ def fmt_price(price: float) -> str:
         return f"{price:,.2f}"
     if price >= 1:
         return f"{price:,.4f}"
-    return f"{price:.6f}"
+    if price >= 0.001:
+        return f"{price:.6f}"
+    return f"{price:.8f}"
 
 
 def fmt_ts(dt: Optional[datetime] = None) -> str:

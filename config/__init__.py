@@ -97,6 +97,12 @@ class ChannelConfig:
     spread_max: float
     min_confidence: float
     min_volume: float = 1_000_000.0  # minimum 24h USD volume
+    # DCA (Double Entry / Dollar-Cost Averaging) config
+    dca_enabled: bool = False                  # Whether DCA is enabled for this channel
+    dca_zone_range: tuple = (0.30, 0.70)       # DCA zone as fraction of SL distance
+    dca_weight_1: float = 0.6                  # Position weight for Entry 1
+    dca_weight_2: float = 0.4                  # Position weight for Entry 2
+    dca_min_momentum: float = 0.2              # Minimum |momentum| for DCA validation
 
 
 CHANNEL_SCALP = ChannelConfig(
@@ -111,6 +117,7 @@ CHANNEL_SCALP = ChannelConfig(
     spread_max=0.02,
     min_confidence=70,
     min_volume=5_000_000.0,
+    dca_enabled=True,
 )
 
 CHANNEL_SWING = ChannelConfig(
@@ -125,6 +132,7 @@ CHANNEL_SWING = ChannelConfig(
     spread_max=0.02,
     min_confidence=75,
     min_volume=10_000_000.0,
+    dca_enabled=True,
 )
 
 CHANNEL_RANGE = ChannelConfig(
@@ -167,6 +175,7 @@ CHANNEL_SELECT = ChannelConfig(
     spread_max=0.015,
     min_confidence=80,
     min_volume=10_000_000.0,
+    dca_enabled=True,
 )
 
 ALL_CHANNELS: List[ChannelConfig] = [

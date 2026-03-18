@@ -12,6 +12,7 @@ import uuid
 
 from config import CHANNEL_SWING
 from src.channels.base import BaseChannel, Signal
+from src.dca import compute_dca_zone
 from src.filters import check_adx, check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
@@ -95,7 +96,7 @@ class SwingChannel(BaseChannel):
             tp2 = close - sl_dist * self.config.tp_ratios[1]
             tp3 = close - sl_dist * self.config.tp_ratios[2]
 
-        return Signal(
+        sig = Signal(
             channel=self.config.name,
             symbol=symbol,
             direction=direction,
@@ -115,3 +116,16 @@ class SwingChannel(BaseChannel):
             current_price=close,
             original_sl_distance=sl_dist,
         )
+
+        # Initialise DCA zone so the trade monitor can check for Entry 2
+        dca_lower, dca_upper = compute_dca_zone(
+            close, round(sl, 8), direction, self.config.dca_zone_range
+        )
+        sig.dca_zone_lower = dca_lower
+        sig.dca_zone_upper = dca_upper
+        sig.original_entry = close
+        sig.original_tp1 = round(tp1, 8)
+        sig.original_tp2 = round(tp2, 8)
+        sig.original_tp3 = round(tp3, 8)
+
+        return sig

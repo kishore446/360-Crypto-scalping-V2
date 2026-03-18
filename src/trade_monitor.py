@@ -19,6 +19,7 @@ from config import (
     TRAILING_ATR_MULTIPLIER,
 )
 from src.channels.base import Signal
+from src.dca import check_dca_entry, recalculate_after_dca
 from src.historical_data import HistoricalDataStore
 from src.indicators import atr as _compute_atr
 from src.performance_metrics import calculate_trade_pnl_pct, classify_trade_outcome
@@ -217,6 +218,29 @@ class TradeMonitor:
             self._remove(sig.signal_id)
             return
 
+        # DCA (Double Entry) check — only on ACTIVE signals before TP1 is hit
+        if sig.status == "ACTIVE" and not sig.entry_2_filled:
+            chan_cfg = next(
+                (c for c in ALL_CHANNELS if c.name == sig.channel), None
+            )
+            if chan_cfg is not None and chan_cfg.dca_enabled:
+                dca_price = check_dca_entry(
+                    sig=sig,
+                    current_price=price,
+                    indicators=None,
+                    smc_data=None,
+                    channel_config=chan_cfg,
+                )
+                if dca_price is not None:
+                    recalculate_after_dca(
+                        sig=sig,
+                        entry_2_price=dca_price,
+                        tp_ratios=list(chan_cfg.tp_ratios),
+                        weight_1=chan_cfg.dca_weight_1,
+                        weight_2=chan_cfg.dca_weight_2,
+                    )
+                    await self._post_dca_update(sig)
+
         # SL direction sanity check – catch misconfigured signals
         protective_stop_active = sig.status in ("TP1_HIT", "TP2_HIT")
         if is_long and sig.stop_loss > sig.entry and not protective_stop_active:
@@ -388,6 +412,45 @@ class TradeMonitor:
             new_sl = price + trail_dist
             if new_sl < sig.stop_loss:
                 sig.stop_loss = round(new_sl, 8)
+
+    async def _post_dca_update(self, sig: Signal) -> None:
+        """Post a Telegram notification when DCA Entry 2 is taken."""
+        channel_id = CHANNEL_TELEGRAM_MAP.get(sig.channel, "")
+        if not channel_id:
+            return
+
+        chan_emojis = {
+            "360_SCALP": "⚡",
+            "360_SWING": "🏛️",
+            "360_RANGE": "⚖️",
+            "360_THE_TAPE": "🐋",
+            "360_SELECT": "🌹",
+        }
+        chan_emoji = chan_emojis.get(sig.channel, "📡")
+        dir_emoji = "🚀" if sig.direction == Direction.LONG else "⬇️"
+
+        # Build R-multiples string from current channel config
+        chan_cfg = next((c for c in ALL_CHANNELS if c.name == sig.channel), None)
+        rr_str = ""
+        if chan_cfg is not None:
+            rr_parts = [f"{r}R" for r in chan_cfg.tp_ratios]
+            rr_str = " / ".join(rr_parts)
+
+        lines = [
+            "📊 DCA ENTRY 2",
+            f"{chan_emoji} *{sig.channel}* | {sig.symbol} *{sig.direction.value}* {dir_emoji}",
+            f"💰 Entry 1: `{fmt_price(sig.original_entry)}` → Entry 2: `{fmt_price(sig.entry_2 if sig.entry_2 is not None else 0.0)}`",
+            f"📊 Avg Entry: `{fmt_price(sig.avg_entry)}`",
+            f"🎯 New TP1: `{fmt_price(sig.tp1)}` | TP2: `{fmt_price(sig.tp2)}`"
+            + (f" | TP3: `{fmt_price(sig.tp3)}`" if sig.tp3 is not None else ""),
+            f"🛑 SL: `{fmt_price(sig.stop_loss)}` (unchanged)",
+        ]
+        if rr_str:
+            lines.append(f"📏 New R:R preserved at {rr_str}")
+        lines.append(f"⏰ {fmt_ts()}")
+
+        text = "\n".join(lines)
+        await self._send(channel_id, text)
 
     async def _post_update(self, sig: Signal, event: str) -> None:
         channel_id = CHANNEL_TELEGRAM_MAP.get(sig.channel, "")

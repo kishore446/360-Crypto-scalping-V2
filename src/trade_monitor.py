@@ -23,6 +23,8 @@ from config import (
 from src.channels.base import Signal
 from src.historical_data import HistoricalDataStore
 from src.indicators import atr as _compute_atr
+from src.indicators import ema as _compute_ema
+from src.indicators import momentum as _compute_momentum
 from src.performance_metrics import calculate_trade_pnl_pct, classify_trade_outcome
 from src.smc import Direction
 from src.utils import fmt_price, fmt_ts, get_logger, utcnow
@@ -223,7 +225,6 @@ class TradeMonitor:
         if indicators is None and self._store is not None:
             candles = self._store.get_candles(sig.symbol, "1m")
             if candles and len(candles.get("close", [])) >= 21:
-                from src.indicators import ema as _compute_ema, momentum as _compute_momentum
                 closes = np.asarray(candles["close"], dtype=np.float64)
                 ema9_arr = _compute_ema(closes, 9)
                 ema21_arr = _compute_ema(closes, 21)

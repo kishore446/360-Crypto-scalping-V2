@@ -1309,20 +1309,20 @@ class TestSignalInvalidation:
         from config import INVALIDATION_MIN_AGE_SECONDS
         channel = "360_SCALP"
         min_age = INVALIDATION_MIN_AGE_SECONDS[channel]
-        # Signal is 10s younger than the minimum age
-        sig = _make_signal(channel=channel, age_seconds=max(0, min_age - 10))
+        # Signal is 10s younger than the minimum age (always positive for min_age >= 10)
+        sig = _make_signal(channel=channel, age_seconds=min_age - 10)
 
-        closes = [30000.0] * 25  # flat → zero momentum
+        closes = [30000.0] * 25  # flat → zero momentum, but EMA9 == EMA21 (no EMA invalidation)
         monitor, _, _ = self._build_monitor({sig.signal_id: sig}, candles_close=closes)
 
-        # EMA check: flat prices mean EMA9 == EMA21 for LONG → no EMA invalidation
         # Regime detector is None → no regime check
-        # Momentum check is age-gated → should not fire
+        # EMA9 == EMA21 for flat prices → no EMA crossover invalidation
+        # Momentum check is age-gated → must NOT fire before min_age
         reason = monitor._check_invalidation(sig)
-        # No invalidation should occur for momentum (age guard)
-        # EMA might report no issue since EMA9 == EMA21 exactly
-        if reason is not None:
-            assert "momentum" not in reason.lower()
+        # Momentum invalidation must not occur before the minimum age
+        assert reason is None, (
+            f"Expected no invalidation before min_age ({min_age}s), got: {reason!r}"
+        )
 
     # ------------------------------------------------------------------
     # Integration tests: _check_invalidation called inside _evaluate_signal

@@ -38,7 +38,7 @@ class TestFormatSignal:
         )
         text = TelegramBot.format_signal(sig)
         assert "⚡" in text
-        assert "360_SCALP" in text
+        assert r"360\_SCALP" in text
         assert "BTCUSDT" in text
         assert "LONG" in text
         assert "32,150" in text

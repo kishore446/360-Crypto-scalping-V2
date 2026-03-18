@@ -116,8 +116,8 @@ class TelegramBot:
             )
 
         lines = [
-            f"{emoji} *{sig.channel} ALERT* 💎",
-            f"Pair: *{sig.symbol}*",
+            f"{emoji} *{TelegramBot._escape_md(sig.channel)} ALERT* 💎",
+            f"Pair: *{TelegramBot._escape_md(sig.symbol)}*",
             f"📈 *{dir_word}* {dir_emoji}",
             entry_text,
             f"🛡️ SL: `{fmt_price(sig.stop_loss)}`",

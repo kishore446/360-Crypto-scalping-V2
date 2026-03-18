@@ -204,8 +204,8 @@ class TestWebSocketLastPongOnText:
 
         assert ws.is_healthy is True
 
-        # Simulate staleness beyond the 6× heartbeat window
-        conn.last_pong = time.monotonic() - 200  # 200 s ago → stale
+        # Simulate staleness beyond the 10× heartbeat window
+        conn.last_pong = time.monotonic() - 350  # 350 s ago → stale (threshold: 30×10=300s)
         assert ws.is_healthy is False
 
         # Simulate a TEXT message arriving and updating last_pong

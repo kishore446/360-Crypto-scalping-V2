@@ -71,6 +71,11 @@ _RANGE_BORDERLINE_ADX_HIGH: float = 25.0
 # Maximum number of symbols scanned concurrently
 _MAX_CONCURRENT_SCANS: int = 10
 
+# Maximum per-symbol SL cooldown set by notify_sl_hit (caps the thesis cooldown
+# duration that flows into the cross-channel _symbol_sl_cooldown_until, to avoid
+# locking a symbol for hours across unrelated theses).
+_MAX_SYMBOL_SL_COOLDOWN_SECONDS: int = 900  # 15 minutes
+
 # Regime-channel compatibility matrix.
 # Maps channel name → list of regimes where that channel is blocked.
 # SCALP needs movement: block in QUIET (nothing moves).
@@ -382,7 +387,7 @@ class Scanner:
         key = (symbol, channel, direction, setup_class)
         self._thesis_cooldown_until[key] = time.monotonic() + base_cooldown
         # Also refresh the per-symbol SL cooldown for a shorter cross-channel window
-        symbol_cooldown = min(base_cooldown, 900)
+        symbol_cooldown = min(base_cooldown, _MAX_SYMBOL_SL_COOLDOWN_SECONDS)
         self._symbol_sl_cooldown_until[symbol] = (
             max(
                 self._symbol_sl_cooldown_until.get(symbol, 0.0),

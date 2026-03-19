@@ -498,6 +498,111 @@ class TestComputeIndicatorsArrayShape:
         assert isinstance(indicators["5m"].get("ema9_last"), float)
         assert isinstance(indicators["5m"].get("ema21_last"), float)
 
+
+class TestThesisCooldown:
+    """Tests for the thesis-based cooldown that prevents SL spam loops."""
+
+    def test_no_thesis_cooldown_initially(self):
+        scanner = _make_scanner()
+        assert scanner._thesis_cooldown_until == {}
+
+    def test_notify_sl_hit_sets_thesis_cooldown(self):
+        scanner = _make_scanner()
+        scanner.notify_sl_hit(
+            symbol="DASHUSDT",
+            channel="360_RANGE",
+            direction="LONG",
+            setup_class="RANGE_REJECTION",
+            hold_duration_seconds=120.0,  # > 30*2=60 → not rapid
+        )
+        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
+        assert key in scanner._thesis_cooldown_until
+        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
+        from config import THESIS_COOLDOWN_AFTER_SL_SECONDS
+        expected = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
+        assert abs(remaining - expected) < 5
+
+    def test_notify_sl_hit_rapid_sl_triples_cooldown(self):
+        scanner = _make_scanner()
+        # hold=10s, threshold=30*2=60s → rapid SL → 3x multiplier
+        scanner.notify_sl_hit(
+            symbol="DASHUSDT",
+            channel="360_RANGE",
+            direction="LONG",
+            setup_class="RANGE_REJECTION",
+            hold_duration_seconds=10.0,
+        )
+        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
+        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
+        from config import THESIS_COOLDOWN_AFTER_SL_SECONDS
+        base = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
+        assert abs(remaining - base * 3) < 5
+
+    def test_notify_sl_hit_also_sets_symbol_sl_cooldown(self):
+        scanner = _make_scanner()
+        scanner.notify_sl_hit(
+            symbol="DASHUSDT",
+            channel="360_RANGE",
+            direction="LONG",
+            setup_class="RANGE_REJECTION",
+            hold_duration_seconds=10.0,
+        )
+        assert "DASHUSDT" in scanner._symbol_sl_cooldown_until
+        remaining = scanner._symbol_sl_cooldown_until["DASHUSDT"] - time.monotonic()
+        assert remaining > 0
+
+    def test_thesis_cooldown_key_matches_setup_class_value(self):
+        """Verify that the thesis cooldown key uses the SetupClass string value."""
+        from src.signal_quality import SetupClass
+        scanner = _make_scanner()
+        scanner._thesis_cooldown_until[
+            ("BTCUSDT", "360_RANGE", "LONG", SetupClass.RANGE_REJECTION.value)
+        ] = time.monotonic() + 7200
+        # The key using the enum value string must be present
+        key = ("BTCUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
+        assert key in scanner._thesis_cooldown_until
+
+    def test_thesis_cooldown_different_setup_class_not_blocked(self):
+        scanner = _make_scanner()
+        scanner._thesis_cooldown_until[
+            ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
+        ] = time.monotonic() + 7200
+        other_key = ("DASHUSDT", "360_RANGE", "LONG", "EXHAUSTION_FADE")
+        assert other_key not in scanner._thesis_cooldown_until
+
+    def test_notify_sl_hit_unknown_channel_uses_default(self):
+        scanner = _make_scanner()
+        scanner.notify_sl_hit(
+            symbol="XYZUSDT",
+            channel="360_UNKNOWN",
+            direction="SHORT",
+            setup_class="MOMENTUM_EXPANSION",
+            hold_duration_seconds=600.0,
+        )
+        key = ("XYZUSDT", "360_UNKNOWN", "SHORT", "MOMENTUM_EXPANSION")
+        assert key in scanner._thesis_cooldown_until
+        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
+        assert remaining > 0  # default 3600s fallback
+
+    def test_rapid_sl_boundary_exactly_at_threshold_is_not_rapid(self):
+        """Hold duration exactly equal to 2× lifespan is NOT considered rapid."""
+        scanner = _make_scanner()
+        from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
+        lifespan = MIN_SIGNAL_LIFESPAN_SECONDS.get("360_RANGE", 30)
+        scanner.notify_sl_hit(
+            symbol="DASHUSDT",
+            channel="360_RANGE",
+            direction="LONG",
+            setup_class="RANGE_REJECTION",
+            hold_duration_seconds=float(lifespan * 2),  # exactly at boundary
+        )
+        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
+        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
+        base = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
+        # Should be base cooldown (not 3x) since hold == threshold (not strictly less)
+        assert abs(remaining - base) < 5
+
+
     def test_1d_arrays_still_work(self):
         """Normal 1-D candle arrays continue to produce correct indicators."""
         import numpy as np

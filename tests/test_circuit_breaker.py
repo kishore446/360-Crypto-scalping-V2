@@ -230,3 +230,72 @@ class TestCircuitBreakerEdgeCases:
         cb.record_outcome("a", hit_sl=False, pnl_pct=10.0)
         cb.record_outcome("b", hit_sl=True, pnl_pct=-10.0)
         assert cb._daily_drawdown_pct() == pytest.approx(10.0, abs=0.01)
+
+
+class TestCircuitBreakerPerSymbol:
+    """Tests for per-symbol consecutive SL tracking."""
+
+    def test_not_symbol_tripped_initially(self):
+        cb = CircuitBreaker(per_symbol_max_sl=3)
+        assert cb.is_symbol_tripped("DASHUSDT") is False
+
+    def test_symbol_tripped_after_max_consecutive_sl(self):
+        cb = CircuitBreaker(per_symbol_max_sl=3, per_symbol_cooldown_seconds=3600)
+        cb.record_outcome("s1", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("s2", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is False  # only 2 hits so far
+        cb.record_outcome("s3", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is True
+
+    def test_symbol_win_resets_per_symbol_counter(self):
+        cb = CircuitBreaker(per_symbol_max_sl=3, per_symbol_cooldown_seconds=3600)
+        cb.record_outcome("s1", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("s2", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("s3", hit_sl=False, pnl_pct=2.0, symbol="DASHUSDT")  # win
+        cb.record_outcome("s4", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is False  # counter reset
+
+    def test_symbol_tripped_expiry(self, monkeypatch):
+        now = 1_000.0
+        monkeypatch.setattr("src.circuit_breaker.time.monotonic", lambda: now)
+        cb = CircuitBreaker(per_symbol_max_sl=2, per_symbol_cooldown_seconds=60)
+        cb.record_outcome("a", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("b", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is True
+        now += 61.0
+        assert cb.is_symbol_tripped("DASHUSDT") is False
+
+    def test_symbol_tripped_does_not_affect_other_symbols(self):
+        cb = CircuitBreaker(per_symbol_max_sl=2, per_symbol_cooldown_seconds=3600)
+        cb.record_outcome("a", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("b", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is True
+        assert cb.is_symbol_tripped("BTCUSDT") is False
+
+    def test_global_breaker_not_tripped_by_per_symbol(self):
+        """Per-symbol trip must not affect the global circuit breaker state."""
+        cb = CircuitBreaker(
+            max_consecutive_sl=100,
+            per_symbol_max_sl=2,
+            per_symbol_cooldown_seconds=3600,
+        )
+        cb.record_outcome("a", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("b", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is True
+        assert cb.is_tripped() is False  # global breaker still healthy
+
+    def test_reset_clears_per_symbol_state(self):
+        cb = CircuitBreaker(per_symbol_max_sl=2, per_symbol_cooldown_seconds=3600)
+        cb.record_outcome("a", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        cb.record_outcome("b", hit_sl=True, pnl_pct=-1.0, symbol="DASHUSDT")
+        assert cb.is_symbol_tripped("DASHUSDT") is True
+        cb.reset()
+        assert cb.is_symbol_tripped("DASHUSDT") is False
+
+    def test_record_outcome_without_symbol_does_not_update_per_symbol(self):
+        cb = CircuitBreaker(per_symbol_max_sl=2, per_symbol_cooldown_seconds=3600)
+        cb.record_outcome("a", hit_sl=True, pnl_pct=-1.0)
+        cb.record_outcome("b", hit_sl=True, pnl_pct=-1.0)
+        # Without symbol, per_symbol dicts must be empty
+        assert cb._per_symbol_consecutive_sl == {}
+        assert cb._per_symbol_tripped_until == {}

@@ -186,6 +186,10 @@ class CryptoSignalEngine:
         # rapid re-fire of the same (symbol, channel, direction) thesis after invalidation.
         self.monitor.on_invalidation_callback = self._scanner.set_invalidation_cooldown
 
+        # Wire the thesis-based SL cooldown callback so the monitor suppresses
+        # the same failing setup for a longer period after an SL hit.
+        self.monitor.on_thesis_sl_callback = self._scanner.notify_sl_hit
+
         # Select mode filter (OFF by default – admin must run /select_mode on)
         self._select_mode = SelectModeFilter()
         self._scanner.select_mode_filter = self._select_mode

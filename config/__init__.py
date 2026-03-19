@@ -269,6 +269,27 @@ CIRCUIT_BREAKER_COOLDOWN_SECONDS: int = int(
     os.getenv("CIRCUIT_BREAKER_COOLDOWN_SECONDS", "900")
 )
 
+# Per-symbol consecutive SL tracking: after this many consecutive SL hits on
+# the same symbol, that symbol is suppressed across all channels.
+CIRCUIT_BREAKER_PER_SYMBOL_MAX_SL: int = int(
+    os.getenv("CIRCUIT_BREAKER_PER_SYMBOL_MAX_SL", "3")
+)
+CIRCUIT_BREAKER_PER_SYMBOL_COOLDOWN_SECONDS: int = int(
+    os.getenv("CIRCUIT_BREAKER_PER_SYMBOL_COOLDOWN_SECONDS", "3600")
+)
+
+# ---------------------------------------------------------------------------
+# Thesis-based cooldown: after an SL hit, suppress the same (symbol, channel,
+# direction, setup_class) tuple for a much longer period.
+# ---------------------------------------------------------------------------
+THESIS_COOLDOWN_AFTER_SL_SECONDS: Dict[str, int] = {
+    "360_SCALP": int(os.getenv("THESIS_COOLDOWN_SCALP", "3600")),       # 1 hour
+    "360_SWING": int(os.getenv("THESIS_COOLDOWN_SWING", "14400")),      # 4 hours
+    "360_RANGE": int(os.getenv("THESIS_COOLDOWN_RANGE", "7200")),       # 2 hours
+    "360_THE_TAPE": int(os.getenv("THESIS_COOLDOWN_TAPE", "1800")),     # 30 min
+    "360_SELECT": int(os.getenv("THESIS_COOLDOWN_SELECT", "7200")),     # 2 hours
+}
+
 # ---------------------------------------------------------------------------
 # Performance Tracker persistence path
 # ---------------------------------------------------------------------------

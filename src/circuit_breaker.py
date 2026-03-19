@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Deque, Optional
+from typing import Any, Callable, Deque, Dict, Optional
 
 from src.performance_metrics import calculate_drawdown_metrics, normalize_pnl_pct
 from src.utils import get_logger
@@ -17,6 +17,8 @@ _DEFAULT_MAX_CONSECUTIVE_SL: int = 3
 _DEFAULT_MAX_HOURLY_SL: int = 5
 _DEFAULT_MAX_DAILY_DRAWDOWN_PCT: float = 10.0
 _DEFAULT_COOLDOWN_SECONDS: int = 900
+_DEFAULT_PER_SYMBOL_MAX_SL: int = 3
+_DEFAULT_PER_SYMBOL_COOLDOWN_SECONDS: int = 3600
 _HOURLY_WINDOW_SECONDS: float = 3600.0
 _DAILY_WINDOW_SECONDS: float = 86_400.0
 
@@ -54,12 +56,16 @@ class CircuitBreaker:
         max_hourly_sl: int = _DEFAULT_MAX_HOURLY_SL,
         max_daily_drawdown_pct: float = _DEFAULT_MAX_DAILY_DRAWDOWN_PCT,
         cooldown_seconds: int = _DEFAULT_COOLDOWN_SECONDS,
+        per_symbol_max_sl: int = _DEFAULT_PER_SYMBOL_MAX_SL,
+        per_symbol_cooldown_seconds: int = _DEFAULT_PER_SYMBOL_COOLDOWN_SECONDS,
         alert_callback: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.max_consecutive_sl = max_consecutive_sl
         self.max_hourly_sl = max_hourly_sl
         self.max_daily_drawdown_pct = max_daily_drawdown_pct
         self.cooldown_seconds = cooldown_seconds
+        self.per_symbol_max_sl = per_symbol_max_sl
+        self.per_symbol_cooldown_seconds = per_symbol_cooldown_seconds
         self._alert_callback = alert_callback
 
         # Rolling outcome history (keep last 1000 entries)
@@ -74,6 +80,12 @@ class CircuitBreaker:
         self._last_resume_reason: str = ""
         self._monitoring_started_at: float = time.monotonic()
 
+        # Per-symbol consecutive SL counters and cooldown expiry times.
+        # After per_symbol_max_sl consecutive SL hits on the same symbol, that
+        # symbol is suppressed for per_symbol_cooldown_seconds.
+        self._per_symbol_consecutive_sl: Dict[str, int] = {}
+        self._per_symbol_tripped_until: Dict[str, float] = {}
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -83,6 +95,7 @@ class CircuitBreaker:
         signal_id: str,
         hit_sl: bool,
         pnl_pct: float,
+        symbol: Optional[str] = None,
     ) -> None:
         """Record the outcome of a completed signal.
 
@@ -94,6 +107,10 @@ class CircuitBreaker:
             ``True`` if the stop-loss was triggered (a loss).
         pnl_pct:
             Realized PnL as a percentage (negative for losses).
+        symbol:
+            Optional trading pair symbol.  When provided, consecutive SL hits
+            on the same symbol are tracked independently and can trigger a
+            per-symbol suppression even if the global breaker has not tripped.
         """
         self._prune_outcomes()
         normalized_pnl = normalize_pnl_pct(pnl_pct)
@@ -108,8 +125,30 @@ class CircuitBreaker:
 
         if loss_hit:
             self._consecutive_sl += 1
+            if symbol:
+                self._per_symbol_consecutive_sl[symbol] = (
+                    self._per_symbol_consecutive_sl.get(symbol, 0) + 1
+                )
+                if self._per_symbol_consecutive_sl[symbol] >= self.per_symbol_max_sl:
+                    expiry = time.monotonic() + self.per_symbol_cooldown_seconds
+                    self._per_symbol_tripped_until[symbol] = expiry
+                    log.warning(
+                        "Per-symbol circuit breaker tripped for %s "
+                        "(%d consecutive SL hits) – suppressed for %ds",
+                        symbol,
+                        self._per_symbol_consecutive_sl[symbol],
+                        self.per_symbol_cooldown_seconds,
+                    )
+                    self._emit_alert(
+                        f"⚠️ *Per-Symbol Circuit Breaker TRIPPED*\n"
+                        f"Symbol: {symbol}\n"
+                        f"Consecutive SL hits: {self._per_symbol_consecutive_sl[symbol]}\n"
+                        f"Suppressed for: {self.per_symbol_cooldown_seconds}s"
+                    )
         else:
             self._consecutive_sl = 0
+            if symbol:
+                self._per_symbol_consecutive_sl[symbol] = 0
 
         self._refresh_state()
         self._evaluate()
@@ -118,6 +157,22 @@ class CircuitBreaker:
         """Return ``True`` when the circuit breaker is active."""
         self._refresh_state()
         return self._tripped
+
+    def is_symbol_tripped(self, symbol: str) -> bool:
+        """Return ``True`` when *symbol* is under a per-symbol suppression.
+
+        The suppression expires automatically based on wall-clock time; no
+        manual reset is required.
+        """
+        expiry = self._per_symbol_tripped_until.get(symbol)
+        if expiry is None:
+            return False
+        if time.monotonic() < expiry:
+            return True
+        # Suppression expired – clean up
+        del self._per_symbol_tripped_until[symbol]
+        self._per_symbol_consecutive_sl[symbol] = 0
+        return False
 
     def reset(self) -> None:
         """Manually reset the circuit breaker and clear all rolling state."""
@@ -133,6 +188,8 @@ class CircuitBreaker:
         self._last_resume_reason = (
             "Manual reset cleared breaker history and restarted the monitoring window."
         )
+        self._per_symbol_consecutive_sl.clear()
+        self._per_symbol_tripped_until.clear()
         log.info("Circuit breaker reset manually and rolling history cleared.")
 
     def status_text(self) -> str:

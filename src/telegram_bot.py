@@ -309,7 +309,7 @@ class TelegramBot:
         try:
             session = await self._ensure_session()
             url = f"{self._base}/getUpdates"
-            params = {"offset": -1, "timeout": 0, "allowed_updates": _allowed}
+            params: dict[str, str] = {"offset": "-1", "timeout": "0", "allowed_updates": _allowed}
             async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -326,7 +326,7 @@ class TelegramBot:
                     continue
                 session = await self._ensure_session()
                 url = f"{self._base}/getUpdates"
-                params = {"offset": self._offset, "timeout": 20, "allowed_updates": _allowed}
+                params = {"offset": str(self._offset), "timeout": "20", "allowed_updates": _allowed}
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status != 200:
                         await asyncio.sleep(5)

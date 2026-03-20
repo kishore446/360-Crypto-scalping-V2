@@ -88,6 +88,9 @@ class TradeMonitor:
         # hold_duration_seconds) when a stop-loss is hit.  Used to set thesis-based
         # cooldowns in the scanner.
         self.on_thesis_sl_callback: Optional[Any] = None
+        # Optional callback invoked with (signal, tp_level, tp_pnl_pct) when TP2+ is hit.
+        # Used to post highlights to the free channel.
+        self.on_highlight_callback: Optional[Any] = None
 
     def _record_outcome(self, sig: Signal, hit_tp: int, hit_sl: bool) -> None:
         """Notify performance tracker and circuit breaker of a completed signal.
@@ -464,6 +467,11 @@ class TradeMonitor:
         # TP hits (progressive)
         if is_long:
             if sig.tp3 and price >= sig.tp3 and sig.status != "TP3_HIT":
+                tp3_pnl = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp3, direction=sig.direction.value
+                )
+                if self.on_highlight_callback is not None:
+                    self.on_highlight_callback(sig, 3, tp3_pnl)
                 self._set_realized_pnl(sig, sig.tp3)
                 self._apply_final_outcome(sig, hit_tp=3, hit_sl=False)
                 await self._post_update(sig, "🎯🎯🎯 FULL TP HIT")
@@ -478,6 +486,8 @@ class TradeMonitor:
                 sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                     entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
                 )
+                if self.on_highlight_callback is not None:
+                    self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
                 # Trailing: move SL to entry (break-even)
                 sig.stop_loss = sig.entry
             if price >= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
@@ -491,6 +501,11 @@ class TradeMonitor:
                     )
         else:
             if sig.tp3 and price <= sig.tp3 and sig.status != "TP3_HIT":
+                tp3_pnl = calculate_trade_pnl_pct(
+                    entry_price=sig.entry, exit_price=sig.tp3, direction=sig.direction.value
+                )
+                if self.on_highlight_callback is not None:
+                    self.on_highlight_callback(sig, 3, tp3_pnl)
                 self._set_realized_pnl(sig, sig.tp3)
                 self._apply_final_outcome(sig, hit_tp=3, hit_sl=False)
                 await self._post_update(sig, "🎯🎯🎯 FULL TP HIT")
@@ -505,6 +520,8 @@ class TradeMonitor:
                 sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                     entry_price=sig.entry, exit_price=sig.tp2, direction=sig.direction.value
                 )
+                if self.on_highlight_callback is not None:
+                    self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
                 sig.stop_loss = sig.entry
             if price <= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
                 sig.status = "TP1_HIT"

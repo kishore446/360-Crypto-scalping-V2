@@ -521,3 +521,94 @@ class TestTPStats:
         assert stats_swing["total"] == 1
         assert stats_scalp["tp1_hits"] == 1
         assert stats_swing["tp2_hits"] == 1
+
+
+class TestGetTopTradesAndDailySummary:
+    """Tests for get_top_trades() and get_daily_summary()."""
+
+    def _make_tracker(self, tmp_path):
+        return PerformanceTracker(storage_path=str(tmp_path / "perf.json"))
+
+    def _record(self, pt, signal_id, pnl_pct, hit_tp=1, hit_sl=False, channel="360_SCALP"):
+        pt.record_outcome(
+            signal_id=signal_id,
+            channel=channel,
+            symbol="BTCUSDT",
+            direction="LONG",
+            entry=50000.0,
+            hit_tp=hit_tp,
+            hit_sl=hit_sl,
+            pnl_pct=pnl_pct,
+            signal_quality_pnl_pct=pnl_pct,
+        )
+
+    def test_get_top_trades_returns_top_n_winners(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        self._record(pt, "A", pnl_pct=3.0, hit_tp=2)
+        self._record(pt, "B", pnl_pct=1.5, hit_tp=1)
+        self._record(pt, "C", pnl_pct=5.0, hit_tp=3)
+        self._record(pt, "D", pnl_pct=-1.0, hit_tp=0, hit_sl=True)
+
+        top = pt.get_top_trades(n=2, window_days=1)
+        assert len(top) == 2
+        assert top[0].signal_id == "C"  # highest PnL
+        assert top[1].signal_id == "A"
+
+    def test_get_top_trades_excludes_losers(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        self._record(pt, "SL1", pnl_pct=-1.0, hit_sl=True)
+        self._record(pt, "SL2", pnl_pct=-2.0, hit_sl=True)
+        top = pt.get_top_trades(n=3, window_days=1)
+        assert top == []
+
+    def test_get_top_trades_returns_at_most_n(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        for i in range(5):
+            self._record(pt, f"W{i}", pnl_pct=float(i + 1), hit_tp=1)
+        top = pt.get_top_trades(n=3, window_days=1)
+        assert len(top) == 3
+
+    def test_get_daily_summary_correct_counts(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        self._record(pt, "WIN1", pnl_pct=2.0, hit_tp=2)
+        self._record(pt, "WIN2", pnl_pct=1.0, hit_tp=1)
+        self._record(pt, "LOSS1", pnl_pct=-1.0, hit_sl=True)
+        self._record(pt, "BE1", pnl_pct=0.0, hit_tp=0)  # breakeven
+
+        summary = pt.get_daily_summary(window_days=1)
+        assert summary["total"] == 4
+        assert summary["wins"] == 2
+        assert summary["losses"] == 1
+        assert summary["breakeven"] == 1
+
+    def test_get_daily_summary_win_rate(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        self._record(pt, "W", pnl_pct=2.0, hit_tp=1)
+        self._record(pt, "L", pnl_pct=-1.0, hit_sl=True)
+
+        summary = pt.get_daily_summary(window_days=1)
+        assert summary["win_rate"] == pytest.approx(50.0)
+
+    def test_get_daily_summary_empty(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        summary = pt.get_daily_summary(window_days=1)
+        assert summary["total"] == 0
+        assert summary["wins"] == 0
+        assert summary["top_trades"] == []
+        assert summary["best_trade"] is None
+
+    def test_get_daily_summary_top_trades_included(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        for i in range(4):
+            self._record(pt, f"W{i}", pnl_pct=float(i + 1), hit_tp=1)
+        summary = pt.get_daily_summary(window_days=1)
+        # top_trades should be capped at 3
+        assert len(summary["top_trades"]) == 3
+        assert summary["best_trade"] is not None
+
+    def test_get_daily_summary_avg_pnl(self, tmp_path):
+        pt = self._make_tracker(tmp_path)
+        self._record(pt, "A", pnl_pct=2.0, hit_tp=1)
+        self._record(pt, "B", pnl_pct=-1.0, hit_sl=True)
+        summary = pt.get_daily_summary(window_days=1)
+        assert summary["avg_pnl"] == pytest.approx(0.5)

@@ -231,6 +231,69 @@ class PerformanceTracker:
             f"Max drawdown: {stats.max_drawdown:.2f}%"
         )
 
+    def get_top_trades(self, n: int = 3, window_days: int = 1) -> List[SignalRecord]:
+        """Return the top *n* completed trades by signal-quality PnL within *window_days*.
+
+        Only winning trades (positive PnL) are included, sorted descending by
+        ``signal_quality_pnl_pct``.
+        """
+        records = self._filter(window_days=window_days)
+        winners = [r for r in records if r.pnl_pct > 0]
+        winners.sort(key=lambda r: r.signal_quality_pnl_pct, reverse=True)
+        return winners[:n]
+
+    def get_daily_summary(self, window_days: int = 1) -> Dict[str, Any]:
+        """Return a summary dict suitable for the daily performance recap.
+
+        Parameters
+        ----------
+        window_days:
+            Rolling window in days (default: 1 = today).
+
+        Returns
+        -------
+        dict with keys:
+            ``total``, ``wins``, ``losses``, ``breakeven``,
+            ``win_rate``, ``avg_pnl``, ``best_trade``, ``top_trades``.
+        """
+        records = self._filter(window_days=window_days)
+        if not records:
+            return {
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "breakeven": 0,
+                "win_rate": 0.0,
+                "avg_pnl": 0.0,
+                "best_trade": None,
+                "top_trades": [],
+            }
+
+        wins = sum(
+            1 for r in records if r.pnl_pct > 0 and not is_breakeven_pnl(r.pnl_pct)
+        )
+        losses = sum(
+            1 for r in records if r.pnl_pct < 0 and not is_breakeven_pnl(r.pnl_pct)
+        )
+        breakeven = sum(1 for r in records if is_breakeven_pnl(r.pnl_pct))
+        total_decisive = wins + losses
+        win_rate = (wins / total_decisive * 100.0) if total_decisive > 0 else 0.0
+        avg_pnl = sum(r.pnl_pct for r in records) / len(records)
+
+        top = self.get_top_trades(n=3, window_days=window_days)
+        best = top[0] if top else None
+
+        return {
+            "total": len(records),
+            "wins": wins,
+            "losses": losses,
+            "breakeven": breakeven,
+            "win_rate": win_rate,
+            "avg_pnl": avg_pnl,
+            "best_trade": best,
+            "top_trades": top,
+        }
+
     def reset_stats(self, channel: Optional[str] = None) -> int:
         """Clear all performance records, or only records for a specific channel.
 

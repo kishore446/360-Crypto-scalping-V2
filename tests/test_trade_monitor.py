@@ -1685,3 +1685,172 @@ class TestSignalInvalidation:
         # The threshold in the reason message should be the base (unscaled) value
         base_threshold = INVALIDATION_MOMENTUM_THRESHOLD.get(channel, 0.15)
         assert f"{base_threshold}" in reason
+
+
+class TestOnHighlightCallback:
+    """TradeMonitor.on_highlight_callback is called for TP2/TP3 but not TP1 or SL."""
+
+    def _build_monitor(self, active, channel_map=None):
+        removed = []
+        sent = []
+        highlight_calls = []
+
+        async def mock_send(chat_id, text):
+            sent.append((chat_id, text))
+
+        data_store = MagicMock()
+        data_store.get_candles.return_value = None
+        data_store.ticks = {}
+
+        monitor = TradeMonitor(
+            data_store=data_store,
+            send_telegram=mock_send,
+            get_active_signals=lambda: dict(active),
+            remove_signal=lambda sid: removed.append(sid),
+            update_signal=MagicMock(),
+        )
+        monitor.on_highlight_callback = lambda sig, tp, pnl: highlight_calls.append((sig, tp, pnl))
+        return monitor, removed, highlight_calls
+
+    @pytest.mark.asyncio
+    async def test_highlight_called_on_tp2_long(self):
+        sig = _make_signal(
+            direction=Direction.LONG,
+            entry=30000.0, stop_loss=29850.0,
+            tp1=30150.0, tp2=30300.0, tp3=30450.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price hits TP2
+        sig.current_price = 30300.0
+        await monitor._evaluate_signal(sig)
+
+        assert len(highlight_calls) == 1
+        _, tp, pnl = highlight_calls[0]
+        assert tp == 2
+        assert pnl > 0
+
+    @pytest.mark.asyncio
+    async def test_highlight_called_on_tp3_long(self):
+        sig = _make_signal(
+            direction=Direction.LONG,
+            entry=30000.0, stop_loss=29850.0,
+            tp1=30150.0, tp2=30300.0, tp3=30450.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price hits TP3
+        sig.current_price = 30450.0
+        await monitor._evaluate_signal(sig)
+
+        assert len(highlight_calls) == 1
+        _, tp, pnl = highlight_calls[0]
+        assert tp == 3
+        assert pnl > 0
+
+    @pytest.mark.asyncio
+    async def test_highlight_not_called_on_tp1(self):
+        sig = _make_signal(
+            direction=Direction.LONG,
+            entry=30000.0, stop_loss=29850.0,
+            tp1=30150.0, tp2=30300.0, tp3=30450.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price only hits TP1
+        sig.current_price = 30150.0
+        await monitor._evaluate_signal(sig)
+
+        assert highlight_calls == []
+
+    @pytest.mark.asyncio
+    async def test_highlight_not_called_on_sl(self):
+        sig = _make_signal(
+            direction=Direction.LONG,
+            entry=30000.0, stop_loss=29850.0,
+            tp1=30150.0, tp2=30300.0, tp3=30450.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price hits SL
+        sig.current_price = 29800.0
+        await monitor._evaluate_signal(sig)
+
+        assert highlight_calls == []
+
+    @pytest.mark.asyncio
+    async def test_highlight_called_on_tp2_short(self):
+        sig = _make_signal(
+            direction=Direction.SHORT,
+            entry=30000.0, stop_loss=30150.0,
+            tp1=29850.0, tp2=29700.0, tp3=29550.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price hits TP2 for SHORT
+        sig.current_price = 29700.0
+        await monitor._evaluate_signal(sig)
+
+        assert len(highlight_calls) == 1
+        _, tp, pnl = highlight_calls[0]
+        assert tp == 2
+        assert pnl > 0
+
+    @pytest.mark.asyncio
+    async def test_highlight_called_on_tp3_short(self):
+        sig = _make_signal(
+            direction=Direction.SHORT,
+            entry=30000.0, stop_loss=30150.0,
+            tp1=29850.0, tp2=29700.0, tp3=29550.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+        monitor, _, highlight_calls = self._build_monitor(active)
+
+        # Price hits TP3 for SHORT
+        sig.current_price = 29550.0
+        await monitor._evaluate_signal(sig)
+
+        assert len(highlight_calls) == 1
+        _, tp, pnl = highlight_calls[0]
+        assert tp == 3
+        assert pnl > 0
+
+    @pytest.mark.asyncio
+    async def test_no_highlight_when_callback_not_set(self):
+        """TradeMonitor works correctly when on_highlight_callback is None."""
+        sig = _make_signal(
+            direction=Direction.LONG,
+            entry=30000.0, stop_loss=29850.0,
+            tp1=30150.0, tp2=30300.0, tp3=30450.0,
+            age_seconds=120.0,
+        )
+        active = {sig.signal_id: sig}
+
+        data_store = MagicMock()
+        data_store.get_candles.return_value = None
+        data_store.ticks = {}
+
+        monitor = TradeMonitor(
+            data_store=data_store,
+            send_telegram=MagicMock(return_value=None),
+            get_active_signals=lambda: dict(active),
+            remove_signal=MagicMock(),
+            update_signal=MagicMock(),
+        )
+        # on_highlight_callback is None by default
+        assert monitor.on_highlight_callback is None
+
+        # Should not raise even when TP2 is hit
+        sig.current_price = 30300.0
+        await monitor._evaluate_signal(sig)  # must not raise

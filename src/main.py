@@ -190,6 +190,12 @@ class CryptoSignalEngine:
         # the same failing setup for a longer period after an SL hit.
         self.monitor.on_thesis_sl_callback = self._scanner.notify_sl_hit
 
+        # Wire the free-channel highlight callback so the monitor posts winning
+        # trades (TP2+) to the free channel in real-time.
+        self.monitor.on_highlight_callback = lambda sig, tp, pnl: asyncio.ensure_future(
+            self.router.publish_highlight(sig, tp, pnl)
+        )
+
         # Select mode filter (OFF by default – admin must run /select_mode on)
         self._select_mode = SelectModeFilter()
         self._scanner.select_mode_filter = self._select_mode
@@ -308,11 +314,11 @@ class CryptoSignalEngine:
     # ------------------------------------------------------------------
 
     async def _free_channel_loop(self) -> None:
-        """Publish top free signals every 24 hours."""
+        """Publish daily performance recap every 24 hours."""
         while True:
             await asyncio.sleep(86_400)
             try:
-                await self.router.publish_free_signals()
+                await self.router.publish_daily_recap(self._performance_tracker)
             except Exception as exc:
                 log.error("Free channel publish error: %s", exc)
 

@@ -574,7 +574,7 @@ class PaperPortfolioManager:
 
         for i, e in enumerate(top):
             medal = medal_emojis[i] if i < 3 else f"#{i + 1}"
-            cid = e["chat_id"]
+            cid = str(e["chat_id"])
             display_id = f"{cid[:4]}…{cid[-2:]}" if len(cid) > 6 else cid
             lines.append(
                 f"{medal} `{display_id}` — ${e['total_balance']:,.2f} "

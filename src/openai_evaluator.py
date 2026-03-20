@@ -20,7 +20,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import aiohttp
 
@@ -69,7 +69,7 @@ class OpenAIEvaluator:
         self._model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self._enabled: bool = bool(self._api_key)
         self._session: Optional[aiohttp.ClientSession] = None
-        self._cache: Dict[str, Tuple[float, EvalResult]] = {}
+        self._cache: Dict[str, Tuple[float, Union[EvalResult, MacroEventResult]]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -147,7 +147,9 @@ class OpenAIEvaluator:
         )
         cached = self._cache.get(cache_key)
         if cached is not None and (time.monotonic() - cached[0]) < _CACHE_TTL:
-            return cached[1]
+            cached_val = cached[1]
+            if isinstance(cached_val, EvalResult):
+                return cached_val
 
         prompt = self._build_prompt(
             symbol=symbol,
@@ -201,11 +203,11 @@ class OpenAIEvaluator:
             )
 
         cache_key = f"macro:{hashlib.sha1(headline.encode()).hexdigest()}"
-        cached_macro = self._cache.get(cache_key)
-        if cached_macro is not None and (time.monotonic() - cached_macro[0]) < _CACHE_TTL:
-            result = cached_macro[1]
-            if isinstance(result, MacroEventResult):
-                return result
+        cached_entry = self._cache.get(cache_key)
+        if cached_entry is not None and (time.monotonic() - cached_entry[0]) < _CACHE_TTL:
+            cached_val = cached_entry[1]
+            if isinstance(cached_val, MacroEventResult):
+                return cached_val
 
         prompt = (
             "You are a crypto macro analyst monitoring global events that could move markets.\n\n"
@@ -218,10 +220,11 @@ class OpenAIEvaluator:
             '"impact": "<brief expected market impact>"}'
         )
 
+        macro_result: MacroEventResult
         try:
             raw = await self._call_api_raw(prompt)
             parsed = self._parse_response_content(raw)
-            result = MacroEventResult(
+            macro_result = MacroEventResult(
                 is_significant=bool(parsed.get("is_significant", False)),
                 severity=str(parsed.get("severity", "LOW")).upper(),
                 summary=str(parsed.get("summary", headline[:120])),
@@ -230,14 +233,14 @@ class OpenAIEvaluator:
             )
         except Exception as exc:
             log.debug("OpenAI macro evaluation failed: {}", exc)
-            result = MacroEventResult(
+            macro_result = MacroEventResult(
                 is_significant=False,
                 summary=headline[:120],
                 model=self._model,
             )
 
-        self._cache[cache_key] = (time.monotonic(), result)
-        return result
+        self._cache[cache_key] = (time.monotonic(), macro_result)
+        return macro_result
 
     async def close(self) -> None:
         """Close the underlying :class:`aiohttp.ClientSession` if open."""

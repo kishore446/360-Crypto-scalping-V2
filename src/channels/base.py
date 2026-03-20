@@ -96,7 +96,6 @@ class BaseChannel:
         candles: Dict[str, dict],
         indicators: Dict[str, dict],
         smc_data: dict,
-        ai_insight: dict,
         spread_pct: float,
         volume_24h_usd: float,
     ) -> Optional[Signal]:

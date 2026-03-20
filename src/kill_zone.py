@@ -100,11 +100,10 @@ def _is_weekend_dead_zone(dt: datetime) -> bool:
     # Saturday after 22:00 UTC
     if weekday == 5 and hour >= _WEEKEND_KILL_ZONE_SAT_START:
         return True
-    # All of Sunday
+    # All of Sunday (weekday==6). Monday (weekday==0) is NOT included –
+    # CME futures re-open Sunday ~21:00 UTC and spot liquidity returns.
     if weekday == 6:
         return True
-    # Monday before 21:00 UTC (CME re-opens gradually)
-    # We only flag up-to Sunday 21:00 (i.e. stop on Monday, weekday==0)
     return False
 
 

@@ -244,15 +244,17 @@ def check_oi_gate(
 
     # Warn about crowded funding for the signal direction
     if dir_upper == "LONG" and oi_analysis.funding_bias == "LONG_CROWDED":
-        log.debug(
-            "OI: funding rate {:.4%} – longs crowded, reduce position size",
-            oi_analysis.latest_funding_rate or 0.0,
-        )
+        fr = oi_analysis.latest_funding_rate
+        if fr is not None:
+            log.debug("OI: funding rate {:.4%} – longs crowded, reduce position size", fr)
+        else:
+            log.debug("OI: longs crowded (funding rate unavailable) – reduce position size")
 
     if dir_upper == "SHORT" and oi_analysis.funding_bias == "SHORT_CROWDED":
-        log.debug(
-            "OI: funding rate {:.4%} – shorts crowded, reduce position size",
-            oi_analysis.latest_funding_rate or 0.0,
-        )
+        fr = oi_analysis.latest_funding_rate
+        if fr is not None:
+            log.debug("OI: funding rate {:.4%} – shorts crowded, reduce position size", fr)
+        else:
+            log.debug("OI: shorts crowded (funding rate unavailable) – reduce position size")
 
     return True, ""

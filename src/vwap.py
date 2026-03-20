@@ -200,7 +200,7 @@ def check_vwap_extension(
             False,
             (
                 f"VWAP: price {current_price} above +{extension_sd:.1f} SD band "
-                f"{upper_band:.8g} – LONG overextended, rejected"
+                f"{upper_band:.4f} – LONG overextended, rejected"
             ),
         )
 
@@ -209,7 +209,7 @@ def check_vwap_extension(
             False,
             (
                 f"VWAP: price {current_price} below -{extension_sd:.1f} SD band "
-                f"{lower_band:.8g} – SHORT overextended, rejected"
+                f"{lower_band:.4f} – SHORT overextended, rejected"
             ),
         )
 

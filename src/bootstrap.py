@@ -153,7 +153,10 @@ class Bootstrap:
             asyncio.create_task(engine.telemetry.start()),
             asyncio.create_task(engine._pair_refresh_loop()),
             asyncio.create_task(engine._scanner.scan_loop()),
-            asyncio.create_task(engine.telegram.poll_commands(engine._handle_command)),
+            asyncio.create_task(engine.telegram.poll_commands(
+                engine._handle_command,
+                on_new_member=engine._welcome_new_member,
+            )),
             asyncio.create_task(engine._free_channel_loop()),
             asyncio.create_task(engine._snapshot_loop()),
         ]

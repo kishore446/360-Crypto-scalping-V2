@@ -403,6 +403,12 @@ class CryptoSignalEngine:
         """Route Telegram commands to CommandHandler."""
         await self._command_handler._handle_command(text, chat_id)
 
+    async def _welcome_new_member(self, user_id: str) -> None:
+        """Send a welcome DM when a user joins one of the bot's channels."""
+        await self.telegram.send_message(
+            user_id, self._command_handler.get_welcome_message()
+        )
+
     async def _restart_tasks(self, chat_id: str) -> None:
         """Cancel and restart all async tasks (called by CommandHandler)."""
         async with self._restart_lock:

@@ -7,8 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from src.order_book import (
-    OBI_DEFAULT_LEVELS,
-    OBI_REJECTION_THRESHOLD,
     OrderBookSnapshot,
     calculate_order_book_imbalance,
     check_order_book_execution,

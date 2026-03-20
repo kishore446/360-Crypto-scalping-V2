@@ -82,7 +82,7 @@ class RangeChannel(BaseChannel):
             tp1 = close - sl_dist * self.config.tp_ratios[0]
             tp2 = close - sl_dist * self.config.tp_ratios[1]
 
-        return Signal(
+        sig = Signal(
             channel=self.config.name,
             symbol=symbol,
             direction=direction,
@@ -102,3 +102,16 @@ class RangeChannel(BaseChannel):
             current_price=close,
             original_sl_distance=sl_dist,
         )
+
+        if self.config.dca_enabled:
+            from src.dca import compute_dca_zone
+            dca_lower, dca_upper = compute_dca_zone(
+                close, round(sl, 8), direction, self.config.dca_zone_range
+            )
+            sig.dca_zone_lower = dca_lower
+            sig.dca_zone_upper = dca_upper
+            sig.original_entry = close
+            sig.original_tp1 = round(tp1, 8)
+            sig.original_tp2 = round(tp2, 8)
+
+        return sig

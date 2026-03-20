@@ -147,6 +147,11 @@ CHANNEL_RANGE = ChannelConfig(
     spread_max=0.02,
     min_confidence=70,
     min_volume=1_000_000.0,
+    dca_enabled=True,
+    dca_zone_range=(0.25, 0.60),
+    dca_weight_1=0.5,
+    dca_weight_2=0.5,
+    dca_min_momentum=0.10,
 )
 
 CHANNEL_TAPE = ChannelConfig(
@@ -154,8 +159,8 @@ CHANNEL_TAPE = ChannelConfig(
     emoji="🐋",
     timeframes=["1m"],
     sl_pct_range=(0.1, 0.3),
-    tp_ratios=[1.0, 2.0, 3.0],
-    trailing_atr_mult=2.0,
+    tp_ratios=[1.5, 3.0, 5.0],  # Was [1.0, 2.0, 3.0] — whale moves are bigger
+    trailing_atr_mult=2.5,       # Was 2.0 — give whale trades more room
     adx_min=0,
     adx_max=100,
     spread_max=0.02,

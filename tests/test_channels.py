@@ -136,6 +136,24 @@ class TestRangeChannel:
         assert sig is None
 
 
+    def test_range_signal_has_dca_zone(self):
+        ch = RangeChannel()
+        candles_data = _make_candles(60, base=100)
+        candles_data["close"][-1] = 97.0  # at bb_lower
+        candles = {"15m": candles_data}
+        indicators = {"15m": _make_indicators(adx_val=15, bb_lower=97.1, rsi_val=28)}
+        smc_data = {}
+
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, {}, 0.01, 10_000_000)
+        assert sig is not None
+        assert sig.dca_zone_lower is not None and sig.dca_zone_lower > 0
+        assert sig.dca_zone_upper is not None and sig.dca_zone_upper > 0
+        assert sig.dca_zone_lower < sig.dca_zone_upper
+        assert sig.original_entry == sig.entry
+        assert sig.original_tp1 == sig.tp1
+        assert sig.original_tp2 == sig.tp2
+
+
 class TestTapeChannel:
     def test_signal_on_whale_alert(self):
         ch = TapeChannel()
@@ -164,3 +182,83 @@ class TestTapeChannel:
         smc_data = {"whale_alert": None, "volume_delta_spike": False}
         sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
         assert sig is None
+
+    def test_no_signal_when_flow_ambiguous(self):
+        """Buy/sell ratio < 2× should return None (ambiguous flow)."""
+        ch = TapeChannel()
+        candles = {"1m": _make_candles(20)}
+        indicators = {"1m": _make_indicators()}
+        # 10000 buy vs 8000 sell at $100 → ratio = 1.25× < 2×, total = $1.8M > $500K
+        ticks = [
+            {"price": 100.0, "qty": 10000, "isBuyerMaker": False},  # buy
+            {"price": 100.0, "qty": 8000, "isBuyerMaker": True},    # sell
+        ]
+        smc_data = {
+            "whale_alert": {"amount_usd": 1_500_000},
+            "volume_delta_spike": True,
+            "recent_ticks": ticks,
+        }
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        assert sig is None
+
+    def test_no_signal_when_tick_volume_too_low(self):
+        """Total tick volume < $500K should return None."""
+        ch = TapeChannel()
+        candles = {"1m": _make_candles(20)}
+        indicators = {"1m": _make_indicators()}
+        # 3 buy vs 1 sell but tiny quantities → total volume < $500K
+        ticks = [
+            {"price": 100.0, "qty": 3000, "isBuyerMaker": False},   # buy: $300K
+            {"price": 100.0, "qty": 1000, "isBuyerMaker": True},    # sell: $100K
+        ]
+        smc_data = {
+            "whale_alert": {"amount_usd": 1_500_000},
+            "volume_delta_spike": True,
+            "recent_ticks": ticks,
+        }
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        assert sig is None
+
+    def test_order_book_imbalance_blocks_signal(self):
+        """Valid whale + ticks but order_book ratio < 1.5× should block signal."""
+        ch = TapeChannel()
+        candles = {"1m": _make_candles(20)}
+        indicators = {"1m": _make_indicators()}
+        # Strong LONG tick flow (3× ratio)
+        ticks = [
+            {"price": 100.0, "qty": 15000, "isBuyerMaker": False},  # buy
+            {"price": 100.0, "qty": 5000, "isBuyerMaker": True},    # sell
+        ]
+        # Order book: bid_depth barely above ask_depth (< 1.5× imbalance for LONG)
+        order_book = {
+            "bids": [["100.0", "10"] for _ in range(10)],   # bid_depth = price*qty*count = 100*10*10 = 10000
+            "asks": [["100.0", "9"] for _ in range(10)],    # ask_depth = 100*9*10 = 9000
+            # ratio = 10000/9000 ≈ 1.11 < ORDER_BOOK_IMBALANCE_MIN (1.5)
+        }
+        smc_data = {
+            "whale_alert": {"amount_usd": 1_500_000},
+            "volume_delta_spike": True,
+            "recent_ticks": ticks,
+            "order_book": order_book,
+        }
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        assert sig is None
+
+    def test_order_book_missing_doesnt_block(self):
+        """Valid whale + ticks, no order_book key → signal still fires (backward compatible)."""
+        ch = TapeChannel()
+        candles = {"1m": _make_candles(20)}
+        indicators = {"1m": _make_indicators()}
+        ticks = [
+            {"price": 100.0, "qty": 15000, "isBuyerMaker": False},  # buy
+            {"price": 100.0, "qty": 5000, "isBuyerMaker": True},    # sell
+        ]
+        smc_data = {
+            "whale_alert": {"amount_usd": 1_500_000},
+            "volume_delta_spike": True,
+            "recent_ticks": ticks,
+            # no "order_book" key
+        }
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        assert sig is not None
+        assert sig.direction == Direction.LONG

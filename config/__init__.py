@@ -49,6 +49,16 @@ FEAR_GREED_API_URL: str = os.getenv(
 # OpenAI GPT-4 trade evaluator (optional)
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# Minimum quantitative confidence score (0–100) required before an OpenAI
+# evaluation is triggered.  Setups below this threshold skip GPT evaluation
+# entirely, preventing unnecessary API spend on mediocre signals.
+OPENAI_MIN_CONFIDENCE_THRESHOLD: float = float(
+    os.getenv("OPENAI_MIN_CONFIDENCE_THRESHOLD", "85.0")
+)
+# Channels whose signals must NOT block on OpenAI (or any slow network call)
+# before being fired.  For these high-frequency channels the quantitative /
+# SMC detection result is sufficient; AI enrichment can happen asynchronously.
+OPENAI_HOT_PATH_BYPASS_CHANNELS: List[str] = ["360_SCALP", "360_THE_TAPE"]
 
 # On-chain intelligence — Glassnode (optional)
 ONCHAIN_API_KEY: str = os.getenv("ONCHAIN_API_KEY", "")
@@ -368,6 +378,14 @@ INVALIDATION_MOMENTUM_THRESHOLD: Dict[str, float] = {
 # Backtester – default slippage per trade (percent, e.g. 0.03 = 0.03 %)
 # ---------------------------------------------------------------------------
 BACKTEST_SLIPPAGE_PCT: float = float(os.getenv("BACKTEST_SLIPPAGE_PCT", "0.03"))
+
+# ---------------------------------------------------------------------------
+# Auto-Execution (V3 groundwork) – when enabled the OrderManager will attempt
+# to place orders directly on the exchange instead of (or in addition to)
+# publishing Telegram signals.  Disabled by default; flip to True once real
+# exchange API keys and order logic are wired in.
+# ---------------------------------------------------------------------------
+AUTO_EXECUTION_ENABLED: bool = os.getenv("AUTO_EXECUTION_ENABLED", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Trailing stop – ATR multiplier for adaptive trailing distance

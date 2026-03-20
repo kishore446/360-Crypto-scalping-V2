@@ -68,6 +68,7 @@ class TradeMonitor:
         regime_detector: Optional[Any] = None,
         indicators_fn: Optional[Callable] = None,
         paper_portfolio: Optional[Any] = None,
+        order_manager: Optional[Any] = None,
     ) -> None:
         self._store = data_store
         self._send = send_telegram
@@ -79,6 +80,13 @@ class TradeMonitor:
         self._regime_detector = regime_detector
         self._indicators_fn = indicators_fn
         self._paper_portfolio = paper_portfolio
+        # Optional OrderManager for direct exchange execution (V3 groundwork).
+        # When provided and auto-execution is enabled, confirmed signals are
+        # forwarded to the exchange instead of (or alongside) Telegram.
+        self._order_manager = order_manager
+        # Track signal IDs for which an order has already been placed to avoid
+        # duplicate orders across consecutive poll cycles.
+        self._order_placed_ids: set = set()
         self._running = False
         # Optional callback invoked with the symbol whenever a stop-loss is hit.
         # Set after construction (e.g. to scanner.set_symbol_sl_cooldown).
@@ -196,6 +204,9 @@ class TradeMonitor:
                     sig.setup_class or "",
                     hold_duration_sec,
                 )
+        # Release order-placement tracking for this closed signal so that the
+        # set does not grow without bound across many completed signals.
+        self._order_placed_ids.discard(sig.signal_id)
 
     @staticmethod
     def _set_realized_pnl(sig: Signal, exit_price: float) -> None:
@@ -241,6 +252,32 @@ class TradeMonitor:
             if price is None:
                 continue
             sig.current_price = price
+            # Auto-execution: attempt to place an order the first time we see
+            # this signal (status == "ACTIVE" and no order has been placed yet).
+            # The OrderManager is a no-op when auto-execution is disabled.
+            if (
+                self._order_manager is not None
+                and self._order_manager.is_enabled
+                and sig.status == "ACTIVE"
+                and sig.signal_id not in self._order_placed_ids
+            ):
+                try:
+                    order_id = await self._order_manager.execute_signal(sig)
+                    self._order_placed_ids.add(sig.signal_id)
+                    if order_id:
+                        log.info(
+                            "Auto-execution order placed for {} {}: order_id={}",
+                            sig.symbol,
+                            sig.channel,
+                            order_id,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "Auto-execution failed for {} {}: {}",
+                        sig.symbol,
+                        sig.channel,
+                        exc,
+                    )
             await self._evaluate_signal(sig)
 
     def _latest_price(self, symbol: str) -> Optional[float]:

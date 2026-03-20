@@ -17,6 +17,7 @@ import numpy as np
 
 from config import SEED_TIMEFRAMES, SIGNAL_SCAN_COOLDOWN_SECONDS
 from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
+from config import OPENAI_HOT_PATH_BYPASS_CHANNELS, OPENAI_MIN_CONFIDENCE_THRESHOLD
 from src.ai_engine import get_ai_insight
 from src.binance import BinanceClient
 from src.confidence import (
@@ -905,6 +906,29 @@ class Scanner:
         ctx: ScanContext,
     ) -> bool:
         if not (self.openai_evaluator and self.openai_evaluator.enabled):
+            return True
+        # Hot-path bypass: high-frequency channels must never block on a slow
+        # external network call.  The signal is fired instantly on quantitative
+        # / SMC detection; AI enrichment is skipped entirely for these channels.
+        if chan_name in OPENAI_HOT_PATH_BYPASS_CHANNELS:
+            log.debug(
+                "Skipping OpenAI evaluation for {} {} – hot-path channel",
+                symbol,
+                chan_name,
+            )
+            return True
+        # API cost filter: only evaluate setups whose quantitative confidence
+        # is already exceptionally high.  Mediocre setups (score ≤ threshold)
+        # are not worth the GPT-4 API spend across 50–100 pairs.
+        pre_conf = getattr(sig, "pre_ai_confidence", sig.confidence)
+        if pre_conf < OPENAI_MIN_CONFIDENCE_THRESHOLD:
+            log.debug(
+                "Skipping OpenAI evaluation for {} {} – pre-AI confidence {:.1f} < {:.1f}",
+                symbol,
+                chan_name,
+                pre_conf,
+                OPENAI_MIN_CONFIDENCE_THRESHOLD,
+            )
             return True
         try:
             openai_eval = await asyncio.wait_for(

@@ -303,10 +303,26 @@ class TestScannerConfidencePipeline:
         predictive.adjust_tp_sl = MagicMock()
         predictive.update_confidence = MagicMock()
 
+        # score_signal_components is patched to return a total above
+        # OPENAI_MIN_CONFIDENCE_THRESHOLD so that the OpenAI evaluator
+        # is triggered for this 360_RANGE (non-hot-path) channel.
+        fake_component_score = SimpleNamespace(
+            total=87.0,
+            quality_tier=SimpleNamespace(value="A"),
+            components={
+                "market": 20.0,
+                "setup": 25.0,
+                "execution": 20.0,
+                "risk": 15.0,
+                "context": 7.0,
+            },
+        )
+
         def _update_confidence(signal, _prediction):
-            # Base confidence (55) plus the RANGE ranging boost (+5) must be in
-            # place before predictive adjustments run.
-            assert signal.confidence == 60.0
+            # Base confidence (87.0, from mocked score_signal_components) plus
+            # the RANGE ranging boost (+5) must be in place before predictive
+            # adjustments run.
+            assert signal.confidence == 92.0
             signal.confidence += 7.0
 
         predictive.update_confidence.side_effect = _update_confidence
@@ -333,6 +349,7 @@ class TestScannerConfidencePipeline:
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
              patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)), \
+             patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
              patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
@@ -349,9 +366,29 @@ class TestScannerConfidencePipeline:
 
     @pytest.mark.asyncio
     async def test_signals_below_final_min_confidence_are_rejected_after_all_adjustments(self):
+        """Signals on non-hot-path channels that fall below min_confidence after
+        OpenAI adjustment must be rejected (not enqueued).
+
+        Uses 360_SWING (not in OPENAI_HOT_PATH_BYPASS_CHANNELS) so the OpenAI
+        evaluator is exercised.  The pre-AI confidence is pushed above the
+        OPENAI_MIN_CONFIDENCE_THRESHOLD via a mocked score_signal_components,
+        then OpenAI deducts enough to put it under min_confidence.
+        """
         channel = MagicMock()
-        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=80.0)
-        channel.evaluate.return_value = _make_signal(channel="360_SCALP", signal_id="SIG-LOW")
+        channel.config = SimpleNamespace(name="360_SWING", min_confidence=80.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SWING", signal_id="SIG-LOW")
+
+        fake_component_score = SimpleNamespace(
+            total=86.0,
+            quality_tier=SimpleNamespace(value="A"),
+            components={
+                "market": 20.0,
+                "setup": 25.0,
+                "execution": 20.0,
+                "risk": 15.0,
+                "context": 6.0,
+            },
+        )
 
         predictive = MagicMock(
             predict=AsyncMock(
@@ -390,21 +427,42 @@ class TestScannerConfidencePipeline:
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
              patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=50.0, blocked=False)), \
+             patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
              patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] > 70.0
+        # OpenAI is called and its confidence_before equals the pre-AI score (≥ 85)
+        openai_evaluator.evaluate.assert_awaited_once()
+        assert openai_evaluator.evaluate.await_args.kwargs["confidence_before"] >= 85.0
+        # Final confidence (86 - 5 - 10 = 71) is below min_confidence (80), so rejected
         signal_queue.put.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_openai_skip_prevents_enqueue(self):
+        """When OpenAI returns recommended=False for a non-hot-path channel the
+        signal must not be enqueued.  Uses 360_SWING (not in the hot-path bypass
+        list) and mocks score_signal_components to exceed OPENAI_MIN_CONFIDENCE_THRESHOLD.
+        """
         channel = MagicMock()
-        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
-        channel.evaluate.return_value = _make_signal(channel="360_SCALP", signal_id="SIG-002")
+        channel.config = SimpleNamespace(name="360_SWING", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SWING", signal_id="SIG-002")
         signal_queue = MagicMock()
         signal_queue.put = AsyncMock(return_value=True)
+
+        fake_component_score = SimpleNamespace(
+            total=90.0,
+            quality_tier=SimpleNamespace(value="A+"),
+            components={
+                "market": 22.0,
+                "setup": 25.0,
+                "execution": 20.0,
+                "risk": 15.0,
+                "context": 8.0,
+            },
+        )
+
         scanner = _make_scan_ready_scanner(
             channel=channel,
             signal_queue=signal_queue,
@@ -422,12 +480,120 @@ class TestScannerConfidencePipeline:
 
         with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
              patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)), \
+             patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
              patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         scanner.signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_openai_bypassed_for_hot_path_channels(self):
+        """High-frequency channels (360_SCALP, 360_THE_TAPE) must never block
+        on OpenAI.  The evaluator must not be called even when enabled and the
+        signal has a high confidence score.
+        """
+        for hot_channel in ("360_SCALP", "360_THE_TAPE"):
+            channel = MagicMock()
+            channel.config = SimpleNamespace(name=hot_channel, min_confidence=10.0)
+            channel.evaluate.return_value = _make_signal(channel=hot_channel, signal_id="SIG-HOT")
+            openai_evaluator = MagicMock(
+                enabled=True,
+                evaluate=AsyncMock(
+                    return_value=SimpleNamespace(
+                        adjustment=0.0,
+                        recommended=True,
+                        reasoning="ok",
+                    )
+                ),
+            )
+            signal_queue = MagicMock()
+            signal_queue.put = AsyncMock(return_value=True)
+
+            fake_component_score = SimpleNamespace(
+                total=92.0,
+                quality_tier=SimpleNamespace(value="A+"),
+                components={
+                    "market": 22.0,
+                    "setup": 25.0,
+                    "execution": 20.0,
+                    "risk": 17.0,
+                    "context": 8.0,
+                },
+            )
+
+            scanner = _make_scan_ready_scanner(
+                channel=channel,
+                signal_queue=signal_queue,
+                openai_evaluator=openai_evaluator,
+            )
+
+            with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
+                 patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=55.0, blocked=False)), \
+                 patch("src.scanner.score_signal_components", return_value=fake_component_score), \
+                 patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+                 patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+                 patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+                await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+            # OpenAI must NOT have been called for hot-path channels
+            openai_evaluator.evaluate.assert_not_awaited()
+            # But the signal IS enqueued (instantly, without AI blocking)
+            signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_openai_skipped_when_pre_ai_confidence_below_threshold(self):
+        """Non-hot-path channels with a quantitative score below
+        OPENAI_MIN_CONFIDENCE_THRESHOLD must not trigger an OpenAI API call.
+        """
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SWING", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SWING", signal_id="SIG-LOW-CONF")
+        openai_evaluator = MagicMock(
+            enabled=True,
+            evaluate=AsyncMock(
+                return_value=SimpleNamespace(
+                    adjustment=0.0,
+                    recommended=True,
+                    reasoning="ok",
+                )
+            ),
+        )
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+
+        # score_signal_components returns 70.0 — below the 85.0 threshold
+        fake_component_score = SimpleNamespace(
+            total=70.0,
+            quality_tier=SimpleNamespace(value="B"),
+            components={
+                "market": 15.0,
+                "setup": 20.0,
+                "execution": 15.0,
+                "risk": 13.0,
+                "context": 7.0,
+            },
+        )
+
+        scanner = _make_scan_ready_scanner(
+            channel=channel,
+            signal_queue=signal_queue,
+            openai_evaluator=openai_evaluator,
+        )
+
+        with patch("src.scanner.get_ai_insight", AsyncMock(return_value=SimpleNamespace(label="Neutral", summary="", score=0.0))), \
+             patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=50.0, blocked=False)), \
+             patch("src.scanner.score_signal_components", return_value=fake_component_score), \
+             patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
+             patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # OpenAI must NOT have been called (pre-AI confidence 70 < threshold 85)
+        openai_evaluator.evaluate.assert_not_awaited()
+        # Signal still passes (min_confidence=10.0) and is enqueued
+        signal_queue.put.assert_awaited_once()
 
 
 class TestScannerEnqueueSemantics:

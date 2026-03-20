@@ -6,6 +6,7 @@ Uses aiohttp to call the Telegram Bot API directly (no heavy library needed).
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Optional
 
 import aiohttp
@@ -286,19 +287,29 @@ class TelegramBot:
     # Admin command polling
     # ------------------------------------------------------------------
 
-    async def poll_commands(self, handler) -> None:
+    async def poll_commands(self, handler, on_new_member=None) -> None:
         """Long-poll for commands from any chat that starts with ``/``.
 
         Admin-only commands are gated inside the *handler* by comparing
         ``chat_id`` against ``TELEGRAM_ADMIN_CHAT_ID``.
+
+        Parameters
+        ----------
+        handler:
+            Async callable ``(text, chat_id)`` that handles ``/`` commands.
+        on_new_member:
+            Optional async callable ``(user_id)`` invoked when a user joins
+            one of the bot's channels (``my_chat_member`` update with status
+            changing from ``left``/``kicked`` to ``member``).
         """
         self._running = True
+        _allowed: str = json.dumps(["message", "my_chat_member"])
         # Clear stale updates before starting to poll so commands queued
         # during a long boot (pair seeding, etc.) are not re-processed.
         try:
             session = await self._ensure_session()
             url = f"{self._base}/getUpdates"
-            params = {"offset": -1, "timeout": 0}
+            params: dict[str, str] = {"offset": "-1", "timeout": "0", "allowed_updates": _allowed}
             async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -315,7 +326,7 @@ class TelegramBot:
                     continue
                 session = await self._ensure_session()
                 url = f"{self._base}/getUpdates"
-                params = {"offset": self._offset, "timeout": 20}
+                params = {"offset": str(self._offset), "timeout": "20", "allowed_updates": _allowed}
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status != 200:
                         await asyncio.sleep(5)
@@ -328,6 +339,18 @@ class TelegramBot:
                     chat_id = str(msg.get("chat", {}).get("id", ""))
                     if text.startswith("/"):
                         await handler(text, chat_id)
+                    # Handle channel subscription events
+                    mcm = update.get("my_chat_member", {})
+                    if mcm and on_new_member is not None:
+                        new_status = mcm.get("new_chat_member", {}).get("status", "")
+                        old_status = mcm.get("old_chat_member", {}).get("status", "")
+                        if new_status == "member" and old_status in ("left", "kicked"):
+                            user_id = str(mcm.get("from", {}).get("id", ""))
+                            if user_id:
+                                try:
+                                    await on_new_member(user_id)
+                                except Exception as exc:
+                                    log.debug("Welcome DM failed for user %s: %s", user_id, exc)
             except asyncio.CancelledError:
                 break
             except Exception as exc:

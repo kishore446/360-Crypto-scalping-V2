@@ -62,6 +62,58 @@ class TestAdminGuard:
         assert "restricted" not in args[1].lower()
 
 
+class TestWelcomeCommands:
+    """Tests for /start and /help welcome message commands."""
+
+    @pytest.mark.asyncio
+    async def test_start_sends_welcome_message(self):
+        handler = _make_handler()
+        await handler._handle_command("/start", USER_CHAT_ID)
+        handler._telegram.send_message.assert_called_once()
+        args = handler._telegram.send_message.call_args[0]
+        assert args[0] == USER_CHAT_ID
+        assert "360 Crypto Eye" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_help_sends_welcome_message(self):
+        handler = _make_handler()
+        await handler._handle_command("/help", USER_CHAT_ID)
+        handler._telegram.send_message.assert_called_once()
+        args = handler._telegram.send_message.call_args[0]
+        assert "360 Crypto Eye" in args[1]
+
+    @pytest.mark.asyncio
+    async def test_start_not_admin_gated(self):
+        """Even non-admin users must receive the welcome message for /start."""
+        handler = _make_handler()
+        with patch("src.commands.TELEGRAM_ADMIN_CHAT_ID", ADMIN_CHAT_ID):
+            await handler._handle_command("/start", USER_CHAT_ID)
+        args = handler._telegram.send_message.call_args[0]
+        assert "restricted" not in args[1].lower()
+
+    @pytest.mark.asyncio
+    async def test_start_registers_paper_portfolio_user(self):
+        """On /start the user should be registered with paper_portfolio."""
+        paper = MagicMock()
+        handler = _make_handler(paper_portfolio=paper)
+        await handler._handle_command("/start", USER_CHAT_ID)
+        paper.ensure_user.assert_called_once_with(USER_CHAT_ID)
+
+    @pytest.mark.asyncio
+    async def test_start_works_without_paper_portfolio(self):
+        """/start must not raise when paper_portfolio is None."""
+        handler = _make_handler(paper_portfolio=None)
+        await handler._handle_command("/start", USER_CHAT_ID)
+        handler._telegram.send_message.assert_called_once()
+
+    def test_get_welcome_message_returns_string(self):
+        handler = _make_handler()
+        msg = handler.get_welcome_message()
+        assert isinstance(msg, str)
+        assert len(msg) <= 4096
+        assert "360 Crypto Eye" in msg
+
+
 class TestAdminCommands:
     @pytest.mark.asyncio
     async def test_view_dashboard(self):

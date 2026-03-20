@@ -34,6 +34,43 @@ _CHANNEL_EMOJIS: Dict[str, str] = {
     "360_THE_TAPE": "🐋",
 }
 
+_WELCOME_MESSAGE: str = (
+    "🔮 *Welcome to 360 Crypto Eye* 🔮\n\n"
+    "The Ultimate Institutional AI Signal Engine\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🧠 *What We Do*\n"
+    "We run a 24/7 AI-powered engine that detects Smart Money Concepts (SMC) "
+    "— liquidity sweeps, market structure shifts, fair value gaps — across "
+    "50–100 crypto pairs on Binance.\n\n"
+    "Every signal is scored 0–100 by our multi-layer confidence system "
+    "combining technical analysis, AI sentiment, and whale flow data.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "📡 *Our Premium Channels*\n\n"
+    "⚡ *SCALP* — M1/M5 high-frequency precision entries\n"
+    "🏛️ *SWING* — H1/H4 institutional swing trades\n"
+    "⚖️ *RANGE* — M15 mean-reversion with DCA\n"
+    "🐋 *THE TAPE* — Real-time whale flow tracking\n"
+    "🆓 *Free Channel* — Daily proof-of-results highlights\n"
+    "🌟 *SELECT* — Curated best-of-best signals\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🎯 *What You Get*\n"
+    "✅ Real-time AI-scored signals with entry, SL, TP1–TP3\n"
+    "✅ Live trade updates & trailing stop adjustments\n"
+    "✅ AI sentiment analysis (news + social + whale)\n"
+    "✅ Paper trading portfolio to track performance\n"
+    "✅ Confidence-based risk management\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "🤖 *Bot Commands*\n"
+    "/portfolio — View your paper trading portfolio\n"
+    "/history — Recent trade history\n"
+    "/leaderboard — Top performers\n"
+    "/signals — View active signals\n"
+    "/help — Show this message\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "💎 *Start trading smarter, not harder.*\n"
+    "Type /portfolio to begin your paper trading journey!"
+)
+
 
 def _split_message(text: str, limit: int = _TELEGRAM_MAX_MSG_CHARS) -> List[str]:
     """Split *text* into chunks that fit within Telegram's message size limit."""
@@ -162,6 +199,10 @@ class CommandHandler:
     # Public API
     # ------------------------------------------------------------------
 
+    def get_welcome_message(self) -> str:
+        """Return the branded welcome message text."""
+        return _WELCOME_MESSAGE
+
     async def _handle_command(self, text: str, chat_id: str) -> None:
         """Route an incoming Telegram command to the appropriate handler."""
         parts = text.strip().split()
@@ -170,6 +211,16 @@ class CommandHandler:
         # Command aliases
         _aliases = {"/status": "/engine_status"}
         cmd = _aliases.get(cmd, cmd)
+
+        # --- User-facing commands (no admin gate) ---
+        if cmd in ("/start", "/help"):
+            if self._paper_portfolio is not None:
+                try:
+                    self._paper_portfolio.ensure_user(chat_id)
+                except Exception as exc:
+                    log.debug("Failed to register user %s for paper portfolio: %s", chat_id, exc)
+            await self._telegram.send_message(chat_id, _WELCOME_MESSAGE)
+            return
 
         is_admin = bool(TELEGRAM_ADMIN_CHAT_ID and chat_id == TELEGRAM_ADMIN_CHAT_ID)
 

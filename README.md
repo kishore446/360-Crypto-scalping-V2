@@ -70,11 +70,12 @@ Binance WS ──► WebSocketManager (multi-conn, heartbeat, auto-reconnect)
 - **Trigger**: ADX < 20 + Bollinger Band rejection
 - **Filters**: SMA trend, RSI mean-reversion, ATR volatility
 - **Risk**: SL 0.1–0.2%, TP1 1R, TP2 1.5R, Trailing 1×ATR
+- **DCA**: Enabled (50/50 split, zone 25–60% of SL distance)
 
 ### 🐋 360_THE_TAPE — Tick/Data Whale Tracking
-- **Trigger**: Trade > 1M USD or Volume Delta > 2×
-- **Filters**: Order book imbalance, whale detection, AI sentiment
-- **Risk**: SL 0.1–0.3% AI-adaptive, Trailing AI-adaptive
+- **Trigger**: Trade > 1M USD or Volume Delta > 2× + Min 2× flow delta ratio
+- **Filters**: Order-book imbalance (1.5×), whale detection, AI sentiment, spread < 0.02%
+- **Risk**: SL 0.1–0.3%, TP1 1.5R, TP2 3R, TP3 5R, Trailing 2.5×ATR
 
 ## AI Sentiment APIs
 

@@ -1,9 +1,9 @@
 """360_THE_TAPE – Tick / Data Whale Tracking 🐋
 
-Trigger : Trade > 1 M USD **or** Volume Delta > 2×
-Filters : Order-book imbalance, whale detection, AI sentiment, spread < 0.02 %
-Risk    : SL 0.1–0.3 % AI-adaptive, TP1 1R partial, TP2 2R partial,
-          TP3 AI-determined, trailing AI-adaptive
+Trigger : Trade > 1 M USD **or** Volume Delta > 2× + Min 2× flow delta ratio
+Filters : Order-book imbalance (1.5×), whale detection, AI sentiment, spread < 0.02 %
+Risk    : SL 0.1–0.3 % AI-adaptive, TP1 1.5R partial, TP2 3R partial,
+          TP3 5R, trailing AI-adaptive
 """
 
 from __future__ import annotations
@@ -16,6 +16,15 @@ from src.channels.base import BaseChannel, Signal
 from src.filters import check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
+
+# Minimum ratio of dominant side to weak side (e.g. buy_vol >= 2× sell_vol)
+WHALE_DELTA_MIN_RATIO: float = 2.0
+
+# Minimum total tick volume in USD to avoid firing on thin tick windows
+WHALE_MIN_TICK_VOLUME_USD: float = 500_000.0
+
+# Minimum order book imbalance ratio in signal's direction (optional filter)
+ORDER_BOOK_IMBALANCE_MIN: float = 1.5
 
 
 class TapeChannel(BaseChannel):
@@ -51,17 +60,37 @@ class TapeChannel(BaseChannel):
 
         close = float(m1["close"][-1])
 
-        # Direction from net whale flow or delta
+        # Direction from net whale flow or delta (requires strong imbalance)
         ticks: List[Dict[str, Any]] = smc_data.get("recent_ticks", [])
         buy_vol = sum(t.get("qty", 0) * t.get("price", 0) for t in ticks if not t.get("isBuyerMaker", True))
         sell_vol = sum(t.get("qty", 0) * t.get("price", 0) for t in ticks if t.get("isBuyerMaker", True))
 
-        if buy_vol > sell_vol:
+        total_vol = buy_vol + sell_vol
+        if total_vol < WHALE_MIN_TICK_VOLUME_USD:
+            return None
+
+        if buy_vol >= sell_vol * WHALE_DELTA_MIN_RATIO:
             direction = Direction.LONG
-        elif sell_vol > buy_vol:
+        elif sell_vol >= buy_vol * WHALE_DELTA_MIN_RATIO:
             direction = Direction.SHORT
         else:
-            return None
+            return None  # Flow is ambiguous — skip
+
+        # Order book imbalance check (if available)
+        order_book = smc_data.get("order_book")
+        if order_book is not None:
+            bids = order_book.get("bids", [])
+            asks = order_book.get("asks", [])
+            bid_depth = sum(float(b[1]) * float(b[0]) for b in bids[:10])
+            ask_depth = sum(float(a[1]) * float(a[0]) for a in asks[:10])
+
+            if bid_depth > 0 and ask_depth > 0:
+                if direction == Direction.LONG:
+                    imbalance_ratio = bid_depth / ask_depth
+                else:
+                    imbalance_ratio = ask_depth / bid_depth
+                if imbalance_ratio < ORDER_BOOK_IMBALANCE_MIN:
+                    return None  # Order book doesn't support the direction
 
         atr_val = indicators.get("1m", {}).get("atr_last", close * 0.002)
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val)

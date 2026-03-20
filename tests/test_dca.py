@@ -493,9 +493,18 @@ class TestDcaConfig:
     def test_swing_dca_zone_range(self):
         assert CHANNEL_SWING.dca_zone_range == (0.30, 0.70)
 
-    def test_range_dca_disabled(self):
+    def test_range_dca_enabled(self):
         from config import CHANNEL_RANGE
-        assert CHANNEL_RANGE.dca_enabled is False
+        assert CHANNEL_RANGE.dca_enabled is True
+
+    def test_range_dca_zone_range(self):
+        from config import CHANNEL_RANGE
+        assert CHANNEL_RANGE.dca_zone_range == (0.25, 0.60)
+
+    def test_range_dca_weights(self):
+        from config import CHANNEL_RANGE
+        assert CHANNEL_RANGE.dca_weight_1 == pytest.approx(0.5)
+        assert CHANNEL_RANGE.dca_weight_2 == pytest.approx(0.5)
 
     def test_tape_dca_disabled(self):
         from config import CHANNEL_TAPE

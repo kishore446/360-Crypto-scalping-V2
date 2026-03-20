@@ -159,6 +159,7 @@ class Bootstrap:
             )),
             asyncio.create_task(engine._free_channel_loop()),
             asyncio.create_task(engine._snapshot_loop()),
+            asyncio.create_task(engine._macro_watchdog.start()),
         ]
 
     async def shutdown(self) -> None:
@@ -193,6 +194,11 @@ class Bootstrap:
                 await engine._openai_evaluator.close()
             except Exception as exc:
                 log.warning("Failed to close OpenAI evaluator session: {}", exc)
+        if getattr(engine, "_macro_watchdog", None) is not None:
+            try:
+                await engine._macro_watchdog.stop()
+            except Exception as exc:
+                log.warning("Failed to stop MacroWatchdog: {}", exc)
         if getattr(engine, "_onchain_client", None) is not None:
             try:
                 await engine._onchain_client.close()

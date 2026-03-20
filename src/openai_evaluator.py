@@ -1,10 +1,15 @@
-"""OpenAI GPT-4 trade evaluator — AI analyst replacement.
+"""OpenAI GPT-4 macro-event evaluator — repurposed for market-wide alerts.
 
-Sends signal context (SMC events, indicators, sentiment, Fear & Greed) to
-GPT-4o-mini and receives a confidence rating + reasoning.
+The OpenAI integration is no longer used for individual trade-signal scoring
+(which is now 100 % quantitative / zero latency).  Instead, this module
+evaluates crypto macro-events fetched by the MacroWatchdog (news, FOMC
+decisions, interest-rate changes, major geopolitical events, new token
+listings) and decides whether they are significant enough to push a
+high-priority alert to the Telegram admin channel.
 
-Degrades gracefully: if ``OPENAI_API_KEY`` is not set the evaluator is
-disabled and every call returns a neutral :class:`EvalResult` immediately.
+Degrades gracefully: if ``OPENAI_API_KEY`` is not set every call returns a
+neutral result immediately so the MacroWatchdog still runs (it just won't
+AI-classify events).
 """
 
 from __future__ import annotations
@@ -32,10 +37,20 @@ _CACHE_MAX_ITEMS: int = 256
 
 @dataclass
 class EvalResult:
-    """Result of an OpenAI trade evaluation."""
+    """Result of an OpenAI trade evaluation (kept for backward compatibility)."""
     adjustment: float = 0.0   # -15 to +15 confidence adjustment
     recommended: bool = True  # False = AI says skip this trade
     reasoning: str = ""
+    model: str = ""
+
+
+@dataclass
+class MacroEventResult:
+    """Result of an OpenAI macro-event classification."""
+    is_significant: bool = False   # True → push alert to Telegram
+    severity: str = "LOW"          # LOW / MEDIUM / HIGH / CRITICAL
+    summary: str = ""              # One-line human-readable summary
+    impact: str = ""               # Expected market impact description
     model: str = ""
 
 
@@ -154,6 +169,72 @@ class OpenAIEvaluator:
         except Exception as exc:
             log.debug("OpenAI evaluation failed for {}: {}", symbol, exc)
             return EvalResult(adjustment=0.0, reasoning="OpenAI error", recommended=True)
+
+        self._cache[cache_key] = (time.monotonic(), result)
+        return result
+
+    async def evaluate_macro_event(
+        self,
+        headline: str,
+        event_type: str = "NEWS",
+    ) -> MacroEventResult:
+        """Classify a macro event headline and decide if it warrants a Telegram alert.
+
+        Parameters
+        ----------
+        headline:
+            Short description of the event (e.g. a news headline or calendar entry).
+        event_type:
+            Category hint: ``"NEWS"``, ``"FOMC"``, ``"LISTING"``, ``"WAR"``,
+            ``"INTEREST_RATE"``, or ``"OTHER"``.
+
+        Returns
+        -------
+        MacroEventResult
+            ``is_significant=True`` when the event is material enough for an alert.
+        """
+        if not self._enabled:
+            return MacroEventResult(
+                is_significant=False,
+                summary=headline[:120],
+                model="",
+            )
+
+        cache_key = f"macro:{hashlib.sha1(headline.encode()).hexdigest()}"
+        cached_macro = self._cache.get(cache_key)
+        if cached_macro is not None and (time.monotonic() - cached_macro[0]) < _CACHE_TTL:
+            result = cached_macro[1]
+            if isinstance(result, MacroEventResult):
+                return result
+
+        prompt = (
+            "You are a crypto macro analyst monitoring global events that could move markets.\n\n"
+            f"Event type: {event_type}\n"
+            f"Headline: {headline}\n\n"
+            "Classify this event for a crypto trading system. Respond ONLY with valid JSON:\n"
+            '{"is_significant": <true or false>, '
+            '"severity": "<LOW|MEDIUM|HIGH|CRITICAL>", '
+            '"summary": "<one sentence summary>", '
+            '"impact": "<brief expected market impact>"}'
+        )
+
+        try:
+            raw = await self._call_api_raw(prompt)
+            parsed = self._parse_response_content(raw)
+            result = MacroEventResult(
+                is_significant=bool(parsed.get("is_significant", False)),
+                severity=str(parsed.get("severity", "LOW")).upper(),
+                summary=str(parsed.get("summary", headline[:120])),
+                impact=str(parsed.get("impact", "")),
+                model=self._model,
+            )
+        except Exception as exc:
+            log.debug("OpenAI macro evaluation failed: {}", exc)
+            result = MacroEventResult(
+                is_significant=False,
+                summary=headline[:120],
+                model=self._model,
+            )
 
         self._cache[cache_key] = (time.monotonic(), result)
         return result
@@ -343,3 +424,39 @@ class OpenAIEvaluator:
             reasoning=reasoning,
             model=self._model,
         )
+
+    async def _call_api_raw(self, prompt: str) -> str:
+        """POST to the OpenAI chat completions endpoint and return the raw text."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": self._model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a crypto macro analyst. Respond only with JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 200,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=_TIMEOUT)
+        async with self._session.post(
+            _OPENAI_CHAT_URL, headers=headers, json=body, timeout=timeout
+        ) as resp:
+            if resp.status != 200:
+                log.warning("OpenAI API returned status {} for macro evaluation", resp.status)
+                raise RuntimeError(f"OpenAI API error: {resp.status}")
+            data = await resp.json(content_type=None)
+
+        try:
+            return str(data["choices"][0]["message"]["content"])
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(f"Unexpected OpenAI response structure: {exc}") from exc

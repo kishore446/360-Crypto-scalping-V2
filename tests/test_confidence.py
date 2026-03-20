@@ -7,7 +7,6 @@ from src.confidence import (
     ConfidenceInput,
     compute_confidence,
     get_session_multiplier,
-    score_ai_sentiment,
     score_data_sufficiency,
     score_liquidity,
     score_multi_exchange,
@@ -19,114 +18,83 @@ from src.confidence import (
 
 class TestScoreSMC:
     def test_all_present(self):
-        # With no gradient inputs, base scores: sweep=8, mss=9, fvg=2 → 19
-        assert score_smc(True, True, True) == 19.0
+        # With no gradient inputs, base scores: sweep=10, mss=11, fvg=2 → 23
+        assert score_smc(True, True, True) == 23.0
 
     def test_none_present(self):
         assert score_smc(False, False, False) == 0.0
 
     def test_sweep_only_no_depth(self):
         # Base sweep score only (no depth bonus)
-        assert score_smc(True, False, False) == 8.0
+        assert score_smc(True, False, False) == 10.0
 
     def test_sweep_and_mss_no_depth(self):
-        assert score_smc(True, True, False) == 17.0
+        assert score_smc(True, True, False) == 21.0
 
     def test_sweep_with_full_depth_bonus(self):
-        # sweep_depth_pct=0.5 → full depth bonus (+4), total = 8 + 4 = 12
-        assert score_smc(True, False, False, sweep_depth_pct=0.5) == 12.0
+        # sweep_depth_pct=0.5 → full depth bonus (+5), total = 10 + 5 = 15
+        assert score_smc(True, False, False, sweep_depth_pct=0.5) == 15.0
 
     def test_sweep_with_half_depth_bonus(self):
-        # sweep_depth_pct=0.25 → half depth bonus (+2), total = 8 + 2 = 10
-        assert score_smc(True, False, False, sweep_depth_pct=0.25) == pytest.approx(10.0)
+        # sweep_depth_pct=0.25 → half depth bonus (+2.5), total = 10 + 2.5 = 12.5
+        assert score_smc(True, False, False, sweep_depth_pct=0.25) == pytest.approx(12.5)
 
     def test_fvg_with_atr_ratio_bonus(self):
         # fvg_atr_ratio=1.5 → full size bonus (+2), base 2 + 2 = 4
         assert score_smc(False, False, True, fvg_atr_ratio=1.5) == pytest.approx(4.0)
 
     def test_all_max_gradient(self):
-        # sweep: 8+4=12, mss: 9, fvg: 2+2=4 → 25, capped at 25
-        assert score_smc(True, True, True, sweep_depth_pct=0.5, fvg_atr_ratio=1.5) == 25.0
+        # sweep: 10+5=15, mss: 11, fvg: 2+2=4 → 30, capped at 30
+        assert score_smc(True, True, True, sweep_depth_pct=0.5, fvg_atr_ratio=1.5) == 30.0
 
     def test_backward_compat_no_gradient_params(self):
         # Old 3-arg call signature still works
-        assert score_smc(True, True, True) == 19.0
+        assert score_smc(True, True, True) == 23.0
 
 
 class TestScoreTrend:
     def test_all_positive_base_only(self):
-        # With no gradient inputs: ema=8, adx base=3, mom base=2 → 13
-        assert score_trend(True, True, True) == 13.0
+        # With no gradient inputs: ema=10, adx base=4, mom base=2 → 16
+        assert score_trend(True, True, True) == 16.0
 
     def test_none(self):
         assert score_trend(False, False, False) == 0.0
 
     def test_with_adx_at_20_no_bonus(self):
-        # ADX=20 → adx_bonus = 0, base only → ema=8, adx=3, mom=2 → 13
-        assert score_trend(True, True, True, adx_value=20.0) == pytest.approx(13.0)
+        # ADX=20 → adx_bonus = 0, base only → ema=10, adx=4, mom=2 → 16
+        assert score_trend(True, True, True, adx_value=20.0) == pytest.approx(16.0)
 
     def test_with_adx_at_40_full_bonus(self):
-        # ADX=40 → adx_bonus = 4, ema=8, adx=3+4=7, mom=2 → 17
-        assert score_trend(True, True, True, adx_value=40.0) == pytest.approx(17.0)
+        # ADX=40 → adx_bonus = 5, ema=10, adx=4+5=9, mom=2 → 21
+        assert score_trend(True, True, True, adx_value=40.0) == pytest.approx(21.0)
 
     def test_with_momentum_strength_full_bonus(self):
-        # momentum_strength=1.0 → mom_bonus=3, ema=8, adx=3 (no adx_value), mom=2+3=5 → 16
-        assert score_trend(True, True, True, momentum_strength=1.0) == pytest.approx(16.0)
+        # momentum_strength=1.0 → mom_bonus=4, ema=10, adx=4 (no adx_value), mom=2+4=6 → 20
+        assert score_trend(True, True, True, momentum_strength=1.0) == pytest.approx(20.0)
 
     def test_negative_momentum_strength_same_bonus(self):
         # abs(-1.0) = 1.0 → same bonus as +1.0 (useful for SHORT signals)
-        assert score_trend(True, True, True, momentum_strength=-1.0) == pytest.approx(16.0)
+        assert score_trend(True, True, True, momentum_strength=-1.0) == pytest.approx(20.0)
 
     def test_all_max_gradient(self):
-        # ema=8, adx=3+4=7, mom=2+3=5 → 20
-        assert score_trend(True, True, True, adx_value=40.0, momentum_strength=1.0) == pytest.approx(20.0)
+        # ema=10, adx=4+5=9, mom=2+4=6 → 25
+        assert score_trend(True, True, True, adx_value=40.0, momentum_strength=1.0) == pytest.approx(25.0)
 
     def test_backward_compat_no_gradient_params(self):
         # Old 3-arg call signature still works
-        assert score_trend(True, True, True) == 13.0
-
-
-class TestScoreAISentiment:
-    def test_neutral(self):
-        assert score_ai_sentiment(0.0) == pytest.approx(7.5)
-
-    def test_bullish(self):
-        assert score_ai_sentiment(1.0) == 15.0
-
-    def test_bearish(self):
-        assert score_ai_sentiment(-1.0) == 0.0
-
-    def test_long_direction_default(self):
-        # LONG is the default – behavior unchanged from before
-        assert score_ai_sentiment(1.0, "LONG") == 15.0
-        assert score_ai_sentiment(-1.0, "LONG") == 0.0
-
-    def test_short_bearish_sentiment_scores_high(self):
-        # For SHORT signals, bearish sentiment supports the trade → high score
-        assert score_ai_sentiment(-1.0, "SHORT") == 15.0
-
-    def test_short_bullish_sentiment_scores_low(self):
-        # For SHORT signals, bullish sentiment is against the trade → low score
-        assert score_ai_sentiment(1.0, "SHORT") == 0.0
-
-    def test_short_neutral_is_still_neutral(self):
-        # Neutral sentiment is neutral for both directions
-        assert score_ai_sentiment(0.0, "SHORT") == pytest.approx(7.5)
-
-    def test_direction_case_insensitive(self):
-        assert score_ai_sentiment(-0.8, "short") == score_ai_sentiment(-0.8, "SHORT")
+        assert score_trend(True, True, True) == 16.0
 
 
 class TestScoreLiquidity:
     def test_high_volume(self):
-        assert score_liquidity(10_000_000) == 15.0
+        assert score_liquidity(10_000_000) == 20.0
 
     def test_zero_volume(self):
         assert score_liquidity(0) == 0.0
 
     def test_partial(self):
         result = score_liquidity(2_500_000)
-        assert 0 < result < 15
+        assert 0 < result < 20
 
 
 class TestScoreSpread:
@@ -170,10 +138,9 @@ class TestComputeConfidence:
 
     def test_basic(self):
         inp = ConfidenceInput(
-            smc_score=25,
-            trend_score=20,
-            ai_sentiment_score=15,
-            liquidity_score=15,
+            smc_score=30,
+            trend_score=25,
+            liquidity_score=20,
             spread_score=10,
             data_sufficiency=10,
             multi_exchange=5,
@@ -183,10 +150,9 @@ class TestComputeConfidence:
 
     def test_cap_for_new_pair(self):
         inp = ConfidenceInput(
-            smc_score=25,
-            trend_score=20,
-            ai_sentiment_score=15,
-            liquidity_score=15,
+            smc_score=30,
+            trend_score=25,
+            liquidity_score=20,
             spread_score=10,
             data_sufficiency=10,
             multi_exchange=5,
@@ -208,6 +174,12 @@ class TestComputeConfidence:
     def test_zero_inputs(self):
         result = compute_confidence(ConfidenceInput(), session_now=self._EU_SESSION)
         assert result.total == 0.0
+
+    def test_no_ai_sentiment_in_breakdown(self):
+        """Breakdown dict must NOT contain an 'ai_sentiment' key."""
+        inp = ConfidenceInput(smc_score=10, trend_score=5)
+        result = compute_confidence(inp, session_now=self._EU_SESSION)
+        assert "ai_sentiment" not in result.breakdown
 
 
 # ---------------------------------------------------------------------------
@@ -255,8 +227,8 @@ class TestGetSessionMultiplier:
     def test_compute_confidence_caps_at_100(self):
         """Even with the 1.05× US multiplier, total must be capped at 100."""
         inp = ConfidenceInput(
-            smc_score=25, trend_score=20, ai_sentiment_score=15,
-            liquidity_score=15, spread_score=10, data_sufficiency=10, multi_exchange=5,
+            smc_score=30, trend_score=25,
+            liquidity_score=20, spread_score=10, data_sufficiency=10, multi_exchange=5,
         )
         us_t = datetime(2024, 1, 15, 18, 0, 0, tzinfo=timezone.utc)
         result = compute_confidence(inp, session_now=us_t)

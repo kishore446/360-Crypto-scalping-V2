@@ -17,13 +17,10 @@ import numpy as np
 
 from config import SEED_TIMEFRAMES, SIGNAL_SCAN_COOLDOWN_SECONDS
 from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
-from config import OPENAI_HOT_PATH_BYPASS_CHANNELS, OPENAI_MIN_CONFIDENCE_THRESHOLD
-from src.ai_engine import get_ai_insight
 from src.binance import BinanceClient
 from src.confidence import (
     ConfidenceInput,
     compute_confidence,
-    score_ai_sentiment,
     score_data_sufficiency,
     score_liquidity,
     score_multi_exchange,
@@ -494,20 +491,6 @@ class Scanner:
             indicators[tf_key] = ind
         return indicators
 
-    async def _fetch_ai_context(self, symbol: str) -> Dict[str, Any]:
-        ai: Dict[str, Any] = {"label": "Neutral", "summary": "", "score": 0.0, "fear_greed_value": 50}
-        try:
-            insight = await asyncio.wait_for(get_ai_insight(symbol), timeout=2)
-            ai = {
-                "label": insight.label,
-                "summary": insight.summary,
-                "score": insight.score,
-                "fear_greed_value": insight.fear_greed_value,
-            }
-        except Exception:
-            pass
-        return ai
-
     async def _get_spread_pct(self, symbol: str, market: str = "spot") -> float:
         spread_pct = 0.01  # fallback
         now = time.monotonic()
@@ -614,11 +597,11 @@ class Scanner:
             if symbol in self.pair_mgr.pairs
             else "spot"
         )
-        ai, spread_pct, onchain_data = await asyncio.gather(
-            self._fetch_ai_context(symbol),
+        spread_pct, onchain_data = await asyncio.gather(
             self._get_spread_pct(symbol, market=market),
             self._fetch_onchain_data(symbol),
         )
+        ai: Dict[str, Any] = {}
         pair_quality = assess_pair_quality(
             volume_24h=volume_24h,
             spread_pct=spread_pct,
@@ -847,11 +830,6 @@ class Scanner:
                 adx_value=ctx.ind_for_predict.get("adx_last") or 0.0,
                 momentum_strength=ctx.ind_for_predict.get("momentum_last") or 0.0,
             ),
-            ai_sentiment_score=score_ai_sentiment(
-                ctx.ai.get("score", 0),
-                sig.direction.value,
-                fear_greed_value=int(ctx.ai.get("fear_greed_value", 50)),
-            ),
             liquidity_score=score_liquidity(volume_24h),
             spread_score=score_spread(ctx.spread_pct),
             data_sufficiency=score_data_sufficiency(ctx.candle_total),
@@ -897,78 +875,6 @@ class Scanner:
             self.predictive.update_confidence(sig, prediction)
         except Exception as exc:
             log.debug("Predictive AI error for {}: {}", symbol, exc)
-
-    async def _apply_openai_adjustments(
-        self,
-        symbol: str,
-        chan_name: str,
-        sig: Any,
-        ctx: ScanContext,
-    ) -> bool:
-        if not (self.openai_evaluator and self.openai_evaluator.enabled):
-            return True
-        # Hot-path bypass: high-frequency channels must never block on a slow
-        # external network call.  The signal is fired instantly on quantitative
-        # / SMC detection; AI enrichment is skipped entirely for these channels.
-        if chan_name in OPENAI_HOT_PATH_BYPASS_CHANNELS:
-            log.debug(
-                "Skipping OpenAI evaluation for {} {} – hot-path channel",
-                symbol,
-                chan_name,
-            )
-            return True
-        # API cost filter: only evaluate setups whose quantitative confidence
-        # is already exceptionally high.  Mediocre setups (score ≤ threshold)
-        # are not worth the GPT-4 API spend across 50–100 pairs.
-        pre_conf = getattr(sig, "pre_ai_confidence", sig.confidence)
-        if pre_conf < OPENAI_MIN_CONFIDENCE_THRESHOLD:
-            log.debug(
-                "Skipping OpenAI evaluation for {} {} – pre-AI confidence {:.1f} < {:.1f}",
-                symbol,
-                chan_name,
-                pre_conf,
-                OPENAI_MIN_CONFIDENCE_THRESHOLD,
-            )
-            return True
-        try:
-            openai_eval = await asyncio.wait_for(
-                self.openai_evaluator.evaluate(
-                    symbol=symbol,
-                    direction=sig.direction.value,
-                    channel=chan_name,
-                    entry_price=sig.entry,
-                    stop_loss=sig.stop_loss,
-                    tp1=sig.tp1,
-                    tp2=sig.tp2,
-                    indicators=ctx.ind_for_predict,
-                    smc_summary=self._build_smc_summary(ctx.smc_result),
-                    ai_sentiment_summary=ctx.ai.get("summary", ""),
-                    market_phase=ctx.regime_result.regime.value,
-                    confidence_before=sig.confidence,
-                ),
-                timeout=6,
-            )
-            if openai_eval and not openai_eval.recommended:
-                log.info(
-                    "OpenAI recommends SKIP for {} {}: {}",
-                    symbol,
-                    chan_name,
-                    openai_eval.reasoning,
-                )
-                return False
-            if openai_eval and openai_eval.adjustment != 0.0:
-                sig.confidence += openai_eval.adjustment
-                log.debug(
-                    "OpenAI adjusted confidence for {} {} by {:+.1f} → {:.1f} ({})",
-                    symbol,
-                    chan_name,
-                    openai_eval.adjustment,
-                    sig.confidence,
-                    openai_eval.reasoning,
-                )
-        except Exception as exc:
-            log.debug("OpenAI evaluation error for {}: {}", symbol, exc)
-        return True
 
     @staticmethod
     def _clamp_confidence(value: float) -> float:
@@ -1025,7 +931,6 @@ class Scanner:
                 candles=ctx.candles,
                 indicators=ctx.indicators,
                 smc_data=ctx.smc_data,
-                ai_insight=ctx.ai,
                 spread_pct=ctx.spread_pct,
                 volume_24h_usd=volume_24h,
             )
@@ -1124,8 +1029,6 @@ class Scanner:
                 ctx.adx_val,
                 sig.confidence,
             )
-        if not await self._apply_openai_adjustments(symbol, chan_name, sig, ctx):
-            return None, cross_verified
         sig.confidence = self._clamp_confidence(sig.confidence)
         sig.post_ai_confidence = sig.confidence
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)

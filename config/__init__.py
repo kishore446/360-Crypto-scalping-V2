@@ -46,19 +46,32 @@ FEAR_GREED_API_URL: str = os.getenv(
     "FEAR_GREED_API_URL", "https://api.alternative.me/fng/?limit=1"
 )
 
-# OpenAI GPT-4 trade evaluator (optional)
+# OpenAI GPT-4 – repurposed exclusively for macro/news event evaluation
+# (no longer used in the trade-signal hot path)
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-# Minimum quantitative confidence score (0–100) required before an OpenAI
-# evaluation is triggered.  Setups below this threshold skip GPT evaluation
-# entirely, preventing unnecessary API spend on mediocre signals.
+# Kept for backward compatibility – no longer used by the scanner.
 OPENAI_MIN_CONFIDENCE_THRESHOLD: float = float(
     os.getenv("OPENAI_MIN_CONFIDENCE_THRESHOLD", "85.0")
 )
-# Channels whose signals must NOT block on OpenAI (or any slow network call)
-# before being fired.  For these high-frequency channels the quantitative /
-# SMC detection result is sufficient; AI enrichment can happen asynchronously.
+# Kept for backward compatibility – no longer used by the scanner.
 OPENAI_HOT_PATH_BYPASS_CHANNELS: List[str] = ["360_SCALP", "360_THE_TAPE"]
+
+# ---------------------------------------------------------------------------
+# Macro Watchdog – async background task for global market-event alerts
+# ---------------------------------------------------------------------------
+MACRO_WATCHDOG_ENABLED: bool = os.getenv("MACRO_WATCHDOG_ENABLED", "true").lower() in (
+    "true", "1", "yes"
+)
+MACRO_WATCHDOG_POLL_INTERVAL: float = float(
+    os.getenv("MACRO_WATCHDOG_POLL_INTERVAL", "300")  # seconds (5 min default)
+)
+MACRO_WATCHDOG_FEAR_GREED_THRESHOLD_LOW: int = int(
+    os.getenv("MACRO_WATCHDOG_FEAR_GREED_THRESHOLD_LOW", "20")
+)
+MACRO_WATCHDOG_FEAR_GREED_THRESHOLD_HIGH: int = int(
+    os.getenv("MACRO_WATCHDOG_FEAR_GREED_THRESHOLD_HIGH", "80")
+)
 
 # On-chain intelligence — Glassnode (optional)
 ONCHAIN_API_KEY: str = os.getenv("ONCHAIN_API_KEY", "")

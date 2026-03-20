@@ -1,14 +1,18 @@
 """Multi-layer confidence scoring engine (0–100).
 
 Factors:
-  * SMC signal strength
-  * Trend / EMA alignment
-  * AI sentiment score
-  * Spread & liquidity quality
-  * Historical data sufficiency
-  * Multi-exchange verification
+  * SMC signal strength       (0–30)
+  * Trend / EMA alignment     (0–25)
+  * Liquidity quality         (0–20)
+  * Spread quality            (0–10)
+  * Historical data sufficiency (0–10)
+  * Multi-exchange verification (0–5)
   * Correlation / position lock
   * Trading-session multiplier (Asian / EU / US)
+
+AI sentiment is intentionally excluded from signal scoring so that
+high-frequency signals fire with zero external-network latency.
+Macro/news AI alerts are handled separately by the MacroWatchdog.
 """
 
 from __future__ import annotations
@@ -19,26 +23,17 @@ from typing import Dict, Optional
 
 from config import NEW_PAIR_MIN_CONFIDENCE
 
-# Fear & Greed index thresholds and modifiers for AI sentiment scoring
-_FG_EXTREME_FEAR_THRESHOLD: int = 25   # below this → extreme fear zone
-_FG_EXTREME_GREED_THRESHOLD: int = 75  # above this → extreme greed zone
-_FG_LONG_PENALTY: float = -3.0   # applied to LONG confidence in extreme fear
-_FG_SHORT_BOOST: float = 2.0     # applied to SHORT confidence in extreme fear
-_FG_LONG_BOOST: float = 2.0      # applied to LONG confidence in extreme greed
-_FG_SHORT_PENALTY: float = -3.0  # applied to SHORT confidence in extreme greed
-
 
 @dataclass
 class ConfidenceInput:
     """All inputs the scorer needs for one signal evaluation."""
-    smc_score: float = 0.0          # 0-25
-    trend_score: float = 0.0        # 0-20
-    ai_sentiment_score: float = 0.0  # 0-15
-    liquidity_score: float = 0.0     # 0-15
-    spread_score: float = 0.0        # 0-10
-    data_sufficiency: float = 0.0    # 0-10
-    multi_exchange: float = 0.0      # 0-5
-    onchain_score: float = 0.0       # 0-5 (populated by score_onchain(); 0 = no data)
+    smc_score: float = 0.0          # 0-30
+    trend_score: float = 0.0        # 0-25
+    liquidity_score: float = 0.0    # 0-20
+    spread_score: float = 0.0       # 0-10
+    data_sufficiency: float = 0.0   # 0-10
+    multi_exchange: float = 0.0     # 0-5
+    onchain_score: float = 0.0      # 0-5 (populated by score_onchain(); 0 = no data)
     has_enough_history: bool = True
     opposing_position_open: bool = False
 
@@ -60,7 +55,7 @@ def score_smc(
     sweep_depth_pct: float = 0.0,
     fvg_atr_ratio: float = 0.0,
 ) -> float:
-    """SMC component (max 25).
+    """SMC component (max 30).
 
     Parameters
     ----------
@@ -79,16 +74,16 @@ def score_smc(
     """
     s = 0.0
     if has_sweep:
-        # Base 8 + up to 4 for depth (deeper sweep = stronger signal)
-        depth_bonus = min(sweep_depth_pct / 0.5, 1.0) * 4.0  # max at 0.5%
-        s += 8.0 + depth_bonus
+        # Base 10 + up to 5 for depth (deeper sweep = stronger signal)
+        depth_bonus = min(sweep_depth_pct / 0.5, 1.0) * 5.0  # max at 0.5%
+        s += 10.0 + depth_bonus
     if has_mss:
-        s += 9.0
+        s += 11.0
     if has_fvg:
         # Base 2 + up to 2 for size (larger FVG = more significant)
         size_bonus = min(fvg_atr_ratio / 1.5, 1.0) * 2.0  # max at 1.5×ATR
         s += 2.0 + size_bonus
-    return min(s, 25.0)
+    return min(s, 30.0)
 
 
 def score_trend(
@@ -98,7 +93,7 @@ def score_trend(
     adx_value: float = 0.0,
     momentum_strength: float = 0.0,
 ) -> float:
-    """Trend component (max 20).
+    """Trend component (max 25).
 
     Parameters
     ----------
@@ -116,55 +111,24 @@ def score_trend(
     """
     s = 0.0
     if ema_aligned:
-        s += 8.0
+        s += 10.0
     if adx_ok:
-        # Base 3 + up to 4 based on ADX strength (20→3, 40+→7)
-        adx_bonus = min(max(adx_value - 20.0, 0.0) / 20.0, 1.0) * 4.0
-        s += 3.0 + adx_bonus
+        # Base 4 + up to 5 based on ADX strength (20→4, 40+→9)
+        adx_bonus = min(max(adx_value - 20.0, 0.0) / 20.0, 1.0) * 5.0
+        s += 4.0 + adx_bonus
     if momentum_positive:
-        # Base 2 + up to 3 based on momentum strength
-        mom_bonus = min(abs(momentum_strength) / 1.0, 1.0) * 3.0
+        # Base 2 + up to 4 based on momentum strength
+        mom_bonus = min(abs(momentum_strength) / 1.0, 1.0) * 4.0
         s += 2.0 + mom_bonus
-    return min(s, 20.0)
-
-
-def score_ai_sentiment(
-    sentiment_value: float,
-    direction: str = "LONG",
-    fear_greed_value: int = 50,
-) -> float:
-    """AI sentiment component (max 15).
-
-    *sentiment_value* expected in [-1, 1].
-    For SHORT signals, bearish sentiment supports the trade and should score
-    high, so the sentiment value is inverted before scoring.
-
-    *fear_greed_value* is the Alternative.me Fear & Greed index (0–100).
-    Extreme readings apply a directional modifier:
-      - F&G < 25 (Extreme Fear): LONG penalised by -3, SHORT boosted by +2
-      - F&G > 75 (Extreme Greed): SHORT penalised by -3, LONG boosted by +2
-    """
-    effective = sentiment_value if direction.upper() != "SHORT" else -sentiment_value
-    normalised = (effective + 1.0) / 2.0  # map to [0, 1]
-    base = normalised * 15.0
-
-    # Fear & Greed modifier
-    is_long = direction.upper() != "SHORT"
-    fg_modifier = 0.0
-    if fear_greed_value < _FG_EXTREME_FEAR_THRESHOLD:  # Extreme Fear – contrarian boost for SHORT
-        fg_modifier = _FG_LONG_PENALTY if is_long else _FG_SHORT_BOOST
-    elif fear_greed_value > _FG_EXTREME_GREED_THRESHOLD:  # Extreme Greed – contrarian boost for LONG
-        fg_modifier = _FG_LONG_BOOST if is_long else _FG_SHORT_PENALTY
-
-    return round(min(max(base + fg_modifier, 0.0), 15.0), 2)
+    return min(s, 25.0)
 
 
 def score_liquidity(volume_24h_usd: float, threshold: float = 5_000_000) -> float:
-    """Liquidity component (max 15)."""
+    """Liquidity component (max 20)."""
     if volume_24h_usd <= 0:
         return 0.0
     ratio = min(volume_24h_usd / threshold, 1.0)
-    return round(ratio * 15.0, 2)
+    return round(ratio * 20.0, 2)
 
 
 def score_spread(spread_pct: float, max_spread: float = 0.02) -> float:
@@ -251,7 +215,6 @@ def compute_confidence(
     breakdown: Dict[str, float] = {
         "smc": inp.smc_score,
         "trend": inp.trend_score,
-        "ai_sentiment": inp.ai_sentiment_score,
         "liquidity": inp.liquidity_score,
         "spread": inp.spread_score,
         "data_sufficiency": inp.data_sufficiency,

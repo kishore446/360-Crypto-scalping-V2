@@ -416,9 +416,8 @@ class TestChannelDcaZoneInit:
             }
         }
         smc_data = {"sweeps": [sweep]}
-        ai = {"label": "Positive", "summary": "", "score": 0.5}
 
-        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, ai, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000)
         assert sig is not None
         assert sig.dca_zone_lower > 0
         assert sig.dca_zone_upper > 0
@@ -466,9 +465,8 @@ class TestChannelDcaZoneInit:
             },
         }
         smc_data = {"sweeps": [sweep], "mss": mss}
-        ai = {"label": "Bullish", "summary": "", "score": 0.7}
 
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, ai, 0.01, 15_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 15_000_000)
         assert sig is not None
         assert sig.dca_zone_lower > 0
         assert sig.dca_zone_upper > 0

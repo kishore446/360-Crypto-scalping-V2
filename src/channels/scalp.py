@@ -29,7 +29,6 @@ class ScalpChannel(BaseChannel):
         candles: Dict[str, dict],
         indicators: Dict[str, dict],
         smc_data: dict,
-        ai_insight: dict,
         spread_pct: float,
         volume_24h_usd: float,
     ) -> Optional[Signal]:
@@ -86,8 +85,8 @@ class ScalpChannel(BaseChannel):
             tp2 = close - sl_dist * self.config.tp_ratios[1]
             tp3 = close - sl_dist * self.config.tp_ratios[2]
 
-        sentiment_label = ai_insight.get("label", "Neutral")
-        sentiment_summary = ai_insight.get("summary", "")
+        sentiment_label = ""
+        sentiment_summary = ""
 
         # Sanity check: SL must be on the correct side of entry
         if direction == Direction.LONG and sl >= close:

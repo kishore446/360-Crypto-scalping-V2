@@ -45,9 +45,8 @@ class TestScalpChannel:
         )
         indicators = {"5m": _make_indicators(adx_val=30, mom=0.5, ema9=101, ema21=100)}
         smc_data = {"sweeps": [sweep]}
-        ai = {"label": "Positive", "summary": "Whale activity", "score": 0.5}
 
-        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, ai, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000)
         assert sig is not None
         assert sig.channel == "360_SCALP"
         assert sig.direction == Direction.LONG
@@ -63,14 +62,14 @@ class TestScalpChannel:
         )
         indicators = {"5m": _make_indicators(adx_val=10)}  # below 20
         smc_data = {"sweeps": [sweep]}
-        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, {}, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000)
         assert sig is None
 
     def test_no_signal_without_sweep(self):
         ch = ScalpChannel()
         candles = {"5m": _make_candles(60)}
         indicators = {"5m": _make_indicators()}
-        sig = ch.evaluate("BTCUSDT", candles, indicators, {"sweeps": []}, {}, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, {"sweeps": []}, 0.01, 10_000_000)
         assert sig is None
 
 
@@ -96,7 +95,7 @@ class TestSwingChannel:
         }
         smc_data = {"sweeps": [sweep], "mss": mss}
 
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is not None
         assert sig.channel == "360_SWING"
 
@@ -110,7 +109,7 @@ class TestSwingChannel:
             wick_high=101, wick_low=98,
         )
         smc_data = {"sweeps": [sweep], "mss": None}
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is None
 
 
@@ -124,7 +123,7 @@ class TestRangeChannel:
         indicators = {"15m": _make_indicators(adx_val=15, bb_lower=97.1, rsi_val=28)}
         smc_data = {}
 
-        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, {}, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000)
         assert sig is not None
         assert sig.direction == Direction.LONG
 
@@ -132,7 +131,7 @@ class TestRangeChannel:
         ch = RangeChannel()
         candles = {"15m": _make_candles(60)}
         indicators = {"15m": _make_indicators(adx_val=30)}
-        sig = ch.evaluate("BTCUSDT", candles, indicators, {}, {}, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, {}, 0.01, 10_000_000)
         assert sig is None
 
 
@@ -144,7 +143,7 @@ class TestRangeChannel:
         indicators = {"15m": _make_indicators(adx_val=15, bb_lower=97.1, rsi_val=28)}
         smc_data = {}
 
-        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, {}, 0.01, 10_000_000)
+        sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000)
         assert sig is not None
         assert sig.dca_zone_lower is not None and sig.dca_zone_lower > 0
         assert sig.dca_zone_upper is not None and sig.dca_zone_upper > 0
@@ -168,9 +167,8 @@ class TestTapeChannel:
             "volume_delta_spike": True,
             "recent_ticks": ticks,
         }
-        ai = {"label": "Bullish", "summary": "Whale confirmed"}
 
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, ai, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is not None
         assert sig.direction == Direction.LONG
         assert sig.channel == "360_THE_TAPE"
@@ -180,7 +178,7 @@ class TestTapeChannel:
         candles = {"1m": _make_candles(20)}
         indicators = {"1m": _make_indicators()}
         smc_data = {"whale_alert": None, "volume_delta_spike": False}
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is None
 
     def test_no_signal_when_flow_ambiguous(self):
@@ -198,7 +196,7 @@ class TestTapeChannel:
             "volume_delta_spike": True,
             "recent_ticks": ticks,
         }
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is None
 
     def test_no_signal_when_tick_volume_too_low(self):
@@ -216,7 +214,7 @@ class TestTapeChannel:
             "volume_delta_spike": True,
             "recent_ticks": ticks,
         }
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is None
 
     def test_order_book_imbalance_blocks_signal(self):
@@ -241,7 +239,7 @@ class TestTapeChannel:
             "recent_ticks": ticks,
             "order_book": order_book,
         }
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is None
 
     def test_order_book_missing_doesnt_block(self):
@@ -259,6 +257,6 @@ class TestTapeChannel:
             "recent_ticks": ticks,
             # no "order_book" key
         }
-        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, {}, 0.01, 50_000_000)
+        sig = ch.evaluate("ETHUSDT", candles, indicators, smc_data, 0.01, 50_000_000)
         assert sig is not None
         assert sig.direction == Direction.LONG

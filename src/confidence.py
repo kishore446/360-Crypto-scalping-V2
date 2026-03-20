@@ -23,6 +23,9 @@ from typing import Dict, Optional
 
 from config import NEW_PAIR_MIN_CONFIDENCE
 
+# USD liquidation volume at which the order-flow liq bonus is maximised (5 pts).
+_ORDER_FLOW_LIQ_CAP_USD: float = 500_000.0
+
 
 @dataclass
 class ConfidenceInput:
@@ -203,7 +206,7 @@ def score_order_flow(
         if liq_vol_usd > 0:
             # Additional bonus for confirmed liquidation activity
             # Scales with USD volume, capped at 5 extra points
-            liq_bonus = min(liq_vol_usd / 500_000, 1.0) * 5.0
+            liq_bonus = min(liq_vol_usd / _ORDER_FLOW_LIQ_CAP_USD, 1.0) * 5.0
             s += liq_bonus
 
     # CVD divergence component (+5 when present)

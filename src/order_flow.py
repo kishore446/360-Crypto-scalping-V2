@@ -133,7 +133,7 @@ def classify_oi_trend(
 
 def is_squeeze(
     oi_trend: OITrend,
-    liquidation_vol_usd: float,
+    liq_vol_usd: float,
     liq_threshold_usd: float = 0.0,
 ) -> bool:
     """Return ``True`` when a *squeeze* (stop-hunt) scenario is confirmed.
@@ -147,7 +147,7 @@ def is_squeeze(
     ----------
     oi_trend:
         Current OI trend classification.
-    liquidation_vol_usd:
+    liq_vol_usd:
         Total USD value of liquidations in the recent window.
     liq_threshold_usd:
         Minimum USD liquidation volume required.  Defaults to 0 (any liquidation
@@ -155,7 +155,7 @@ def is_squeeze(
     """
     return (
         oi_trend == OITrend.FALLING
-        and liquidation_vol_usd > liq_threshold_usd
+        and liq_vol_usd > liq_threshold_usd
     )
 
 

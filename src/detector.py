@@ -28,6 +28,10 @@ _LTF_MAP: Dict[str, str] = {
 # Ordered preference for SMC detection timeframes (most sensitive first)
 _SMC_TIMEFRAMES = ("5m", "4h", "15m", "1m")
 
+# Minimum number of candles required for CVD divergence detection.
+# Must be >= the default lookback passed to detect_cvd_divergence (20).
+_CVD_MIN_CANDLES: int = 21
+
 
 @dataclass
 class SMCResult:
@@ -128,7 +132,7 @@ class SMCDetector:
             # CVD divergence: check if price/CVD diverge (confirms the sweep)
             tf_key_for_cvd = next(
                 (tf for tf in _SMC_TIMEFRAMES if candles.get(tf) and
-                 len(candles[tf].get("close", [])) >= 21),
+                 len(candles[tf].get("close", [])) >= _CVD_MIN_CANDLES),
                 None,
             )
             if tf_key_for_cvd is not None:

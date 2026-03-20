@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import time
 from typing import Dict, List, Optional, Set
 
 from config import (
@@ -345,7 +346,7 @@ class CryptoSignalEngine:
             if liq_sym and side and qty > 0 and avg_price > 0:
                 self._order_flow_store.add_liquidation(
                     LiquidationEvent(
-                        timestamp=__import__("time").monotonic(),
+                        timestamp=time.monotonic(),
                         symbol=liq_sym,
                         side=side,
                         qty=qty,

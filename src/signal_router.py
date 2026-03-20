@@ -16,7 +16,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 
 from config import (
@@ -35,6 +35,11 @@ from src.smc import Direction
 from src.utils import get_logger
 
 log = get_logger("signal_router")
+
+# Max highlights posted to the free channel per calendar day.
+_FREE_HIGHLIGHT_MAX_PER_DAY: int = 4
+# Minimum TP level required to trigger a free-channel highlight.
+_FREE_HIGHLIGHT_MIN_TP: int = 2
 
 
 def _signal_from_dict(data: dict) -> Optional[Signal]:
@@ -87,6 +92,9 @@ class SignalRouter:
         self._running = False
         self._free_limit: int = 2  # max daily free signals
         self._risk_mgr = RiskManager()
+        # Free-channel highlight rate limiting
+        self._highlight_count_today: int = 0
+        self._highlight_date: Optional[date] = None
         # Detect whether queue.get() supports a timeout keyword argument
         self._queue_has_timeout = "timeout" in inspect.signature(queue.get).parameters
 
@@ -390,7 +398,12 @@ class SignalRouter:
         self._trim_daily_best()
 
     async def publish_free_signals(self) -> None:
-        """Post the top free signals of the day to the free channel."""
+        """Post the top free signals of the day to the free channel.
+
+        .. deprecated::
+            Use :meth:`publish_daily_recap` instead.  This method is kept for
+            backward compatibility (tests reference it).
+        """
         if not self._daily_best or not TELEGRAM_FREE_CHANNEL_ID:
             return
         for sig in self._daily_best:
@@ -402,6 +415,67 @@ class SignalRouter:
             )
             await self._send_telegram(TELEGRAM_FREE_CHANNEL_ID, header + text + footer)
         self._daily_best.clear()
+
+    async def publish_highlight(self, sig: Signal, tp_level: int, tp_pnl_pct: float) -> None:
+        """Post a winning trade highlight to the free channel.
+
+        Called by the trade monitor when a signal hits TP2 or higher.
+        Rate-limited to ``_FREE_HIGHLIGHT_MAX_PER_DAY`` highlights per day.
+        """
+        if not TELEGRAM_FREE_CHANNEL_ID:
+            return
+        if tp_level < _FREE_HIGHLIGHT_MIN_TP:
+            return
+
+        # Daily rate limit
+        today = date.today()
+        if self._highlight_date != today:
+            self._highlight_date = today
+            self._highlight_count_today = 0
+        if self._highlight_count_today >= _FREE_HIGHLIGHT_MAX_PER_DAY:
+            log.debug(
+                "Free highlight daily limit reached ({}/{})",
+                self._highlight_count_today,
+                _FREE_HIGHLIGHT_MAX_PER_DAY,
+            )
+            return
+
+        text = self._format_highlight(sig, tp_level, tp_pnl_pct)
+        try:
+            await self._send_telegram(TELEGRAM_FREE_CHANNEL_ID, text)
+            self._highlight_count_today += 1
+            log.info(
+                "Posted free highlight: {} {} TP{} +{:.2f}%",
+                sig.symbol, sig.direction.value, tp_level, tp_pnl_pct,
+            )
+        except Exception as exc:
+            log.warning("Failed to post free highlight: {}", exc)
+
+    def _format_highlight(self, sig: Signal, tp_level: int, tp_pnl_pct: float) -> str:
+        """Delegate highlight formatting to TelegramBot."""
+        from src.telegram_bot import TelegramBot
+        return TelegramBot.format_highlight_message(sig, tp_level, tp_pnl_pct)
+
+    async def publish_daily_recap(self, performance_tracker: Any) -> None:
+        """Post the daily performance recap to the free channel."""
+        if not TELEGRAM_FREE_CHANNEL_ID:
+            return
+
+        summary = performance_tracker.get_daily_summary(window_days=1)
+        if summary["total"] == 0:
+            return  # No trades today, skip
+
+        text = self._format_daily_recap(summary)
+        try:
+            await self._send_telegram(TELEGRAM_FREE_CHANNEL_ID, text)
+            log.info("Posted daily recap to free channel")
+        except Exception as exc:
+            log.warning("Failed to post daily recap: {}", exc)
+
+    def _format_daily_recap(self, summary: Any) -> str:
+        """Delegate daily recap formatting to TelegramBot."""
+        from src.telegram_bot import TelegramBot
+        return TelegramBot.format_daily_recap(summary)
 
     # ------------------------------------------------------------------
     # Active-signal helpers

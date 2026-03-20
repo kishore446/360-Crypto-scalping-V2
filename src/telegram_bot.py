@@ -178,6 +178,110 @@ class TelegramBot:
         )
         return header + body + footer
 
+    @staticmethod
+    def format_highlight_message(sig: Signal, tp_level: int, tp_pnl_pct: float) -> str:
+        """Format an eye-catching winning trade highlight for the free channel."""
+        from src.utils import utcnow
+
+        chan_emojis = {
+            "360_SCALP": "⚡",
+            "360_SWING": "🏛️",
+            "360_RANGE": "⚖️",
+            "360_THE_TAPE": "🐋",
+            "360_SELECT": "🌹",
+        }
+        chan_emoji = chan_emojis.get(sig.channel, "📡")
+        dir_emoji = "🚀" if sig.direction.value == "LONG" else "⬇️"
+        tp_emoji = "✅" * tp_level  # ✅✅ for TP2, ✅✅✅ for TP3
+
+        # Determine the TP price to display
+        if tp_level == 3 and sig.tp3:
+            tp_price = sig.tp3
+        elif tp_level == 2:
+            tp_price = sig.tp2
+        else:
+            tp_price = sig.tp1
+
+        # Hold duration
+        hold_secs = (utcnow() - sig.timestamp).total_seconds()
+        if hold_secs < 60:
+            duration_str = f"{hold_secs:.0f} seconds"
+        elif hold_secs < 3600:
+            duration_str = f"{hold_secs / 60:.0f} minutes"
+        else:
+            duration_str = f"{hold_secs / 3600:.1f} hours"
+
+        lines = [
+            "🏆 *WINNING TRADE HIGHLIGHT* 🏆",
+            "",
+            f"{chan_emoji} {TelegramBot._escape_md(sig.channel)} | "
+            f"*{TelegramBot._escape_md(sig.symbol)}* *{sig.direction.value}* {dir_emoji}",
+            "",
+            f"📊 Result: *TP{tp_level} HIT* {tp_emoji}",
+            f"💰 Entry: `{fmt_price(sig.entry)}` → TP{tp_level}: `{fmt_price(tp_price)}`",
+            f"📈 PnL: *+{tp_pnl_pct:.2f}%*",
+            f"⏱️ Duration: {duration_str}",
+        ]
+
+        if sig.setup_class and sig.setup_class != "UNCLASSIFIED":
+            setup_label = sig.setup_class.replace("_", " ").title()
+            lines.append(f"🧠 Setup: {TelegramBot._escape_md(setup_label)}")
+        if sig.market_phase:
+            lines.append(f"📊 Market Phase: {TelegramBot._escape_md(sig.market_phase)}")
+        lines.append(f"🤖 Confidence: *{sig.confidence:.0f}%*")
+        if sig.quality_tier:
+            lines.append(f"🧩 Quality: *{TelegramBot._escape_md(sig.quality_tier)}*")
+
+        lines.extend([
+            "",
+            "💡 _Our engine caught this move in real-time._",
+            "📲 _Join Premium for ALL signals!_",
+        ])
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def format_daily_recap(summary: dict) -> str:
+        """Format the daily performance recap for the free channel."""
+        lines = [
+            "📊 *DAILY PERFORMANCE RECAP* 📊",
+            "",
+        ]
+
+        best = summary.get("best_trade")
+        if best:
+            lines.append(
+                f"🏆 Best Trade: *{TelegramBot._escape_md(best.symbol)}* "
+                f"{best.direction} *+{best.signal_quality_pnl_pct:.2f}%* "
+                f"({TelegramBot._escape_md(best.channel)})"
+            )
+
+        lines.extend([
+            f"⚡ Total Signals: *{summary['total']}*",
+            f"✅ Wins: {summary['wins']} | ❌ Losses: {summary['losses']} | "
+            f"➖ BE: {summary['breakeven']}",
+            f"📈 Win Rate: *{summary['win_rate']:.0f}%*",
+            f"💰 Avg PnL: *{summary['avg_pnl']:+.2f}%*",
+        ])
+
+        top_trades = summary.get("top_trades", [])
+        if top_trades:
+            lines.extend(["", "🔥 *Top 3 Trades:*"])
+            for i, t in enumerate(top_trades, 1):
+                chan_short = t.channel.replace("360_", "")
+                lines.append(
+                    f"{i}. *{TelegramBot._escape_md(t.symbol)}* {t.direction} "
+                    f"+{t.signal_quality_pnl_pct:.2f}% ({TelegramBot._escape_md(chan_short)})"
+                )
+
+        lines.extend([
+            "",
+            "📲 _Premium gets ALL signals in real-time_",
+            "🆓 _Free channel shows highlights only_",
+        ])
+
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Admin command polling
     # ------------------------------------------------------------------

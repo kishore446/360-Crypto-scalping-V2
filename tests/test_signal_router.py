@@ -818,3 +818,165 @@ class TestStartLoopCallsCleanup:
         assert len(cleanup_calls) >= 1, "cleanup_expired was never called from the start() loop"
         # The expired signal must have been removed
         assert sig.signal_id not in router._active_signals
+
+
+class TestPublishHighlight:
+    """Tests for SignalRouter.publish_highlight() – rate limit and min TP."""
+
+    @pytest.fixture
+    def router_with_free(self, queue, sent_messages, monkeypatch):
+        """Router with TELEGRAM_FREE_CHANNEL_ID configured."""
+        import src.signal_router as m
+        monkeypatch.setattr(m, "TELEGRAM_FREE_CHANNEL_ID", "free_channel")
+        for channel in ("360_SCALP", "360_RANGE", "360_SWING", "360_THE_TAPE", "360_SELECT"):
+            monkeypatch.setitem(m.CHANNEL_TELEGRAM_MAP, channel, "premium")
+
+        async def mock_send(chat_id: str, text: str):
+            sent_messages.append((chat_id, text))
+            return True
+
+        def mock_format(sig):
+            return f"Signal: {sig.symbol}"
+
+        return SignalRouter(queue=queue, send_telegram=mock_send, format_signal=mock_format)
+
+    def _make_sig(self):
+        return _make_signal()
+
+    @pytest.mark.asyncio
+    async def test_highlight_posted_to_free_channel(self, router_with_free, sent_messages):
+        sig = self._make_sig()
+        await router_with_free.publish_highlight(sig, 2, 0.62)
+        assert any(chat_id == "free_channel" for chat_id, _ in sent_messages)
+
+    @pytest.mark.asyncio
+    async def test_highlight_skipped_for_tp1(self, router_with_free, sent_messages):
+        sig = self._make_sig()
+        await router_with_free.publish_highlight(sig, 1, 0.31)
+        assert sent_messages == []
+
+    @pytest.mark.asyncio
+    async def test_highlight_rate_limit_respected(self, router_with_free, sent_messages):
+        sig = self._make_sig()
+        # Post 4 highlights (max)
+        for _ in range(4):
+            await router_with_free.publish_highlight(sig, 2, 0.62)
+        # 5th should be blocked
+        await router_with_free.publish_highlight(sig, 2, 0.62)
+        free_msgs = [m for m in sent_messages if m[0] == "free_channel"]
+        assert len(free_msgs) == 4
+
+    @pytest.mark.asyncio
+    async def test_highlight_daily_reset(self, router_with_free, sent_messages):
+        import datetime as dt
+        sig = self._make_sig()
+        # Simulate yesterday's limit
+        router_with_free._highlight_count_today = 4
+        yesterday = dt.date.today() - dt.timedelta(days=1)
+        router_with_free._highlight_date = yesterday
+
+        # First post on new day should succeed
+        await router_with_free.publish_highlight(sig, 2, 0.62)
+        free_msgs = [m for m in sent_messages if m[0] == "free_channel"]
+        assert len(free_msgs) == 1
+        assert router_with_free._highlight_count_today == 1
+
+    @pytest.mark.asyncio
+    async def test_highlight_tp3_posted(self, router_with_free, sent_messages):
+        sig = self._make_sig()
+        await router_with_free.publish_highlight(sig, 3, 1.25)
+        free_msgs = [m for m in sent_messages if m[0] == "free_channel"]
+        assert len(free_msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_highlight_not_posted_when_no_free_channel_id(
+        self, queue, sent_messages, monkeypatch
+    ):
+        import src.signal_router as m
+        monkeypatch.setattr(m, "TELEGRAM_FREE_CHANNEL_ID", "")
+
+        async def mock_send(chat_id, text):
+            sent_messages.append((chat_id, text))
+            return True
+
+        r = SignalRouter(queue=queue, send_telegram=mock_send, format_signal=lambda s: "")
+        sig = self._make_sig()
+        await r.publish_highlight(sig, 2, 0.62)
+        assert sent_messages == []
+
+    @pytest.mark.asyncio
+    async def test_highlight_message_contains_tp_level(self, router_with_free, sent_messages):
+        sig = self._make_sig()
+        await router_with_free.publish_highlight(sig, 2, 0.62)
+        _, text = sent_messages[-1]
+        assert "TP2" in text
+
+
+class TestPublishDailyRecap:
+    """Tests for SignalRouter.publish_daily_recap()."""
+
+    @pytest.fixture
+    def router_with_free(self, queue, sent_messages, monkeypatch):
+        import src.signal_router as m
+        monkeypatch.setattr(m, "TELEGRAM_FREE_CHANNEL_ID", "free_channel")
+        for channel in ("360_SCALP", "360_RANGE", "360_SWING", "360_THE_TAPE", "360_SELECT"):
+            monkeypatch.setitem(m.CHANNEL_TELEGRAM_MAP, channel, "premium")
+
+        async def mock_send(chat_id, text):
+            sent_messages.append((chat_id, text))
+            return True
+
+        return SignalRouter(queue=queue, send_telegram=mock_send, format_signal=lambda s: "")
+
+    @pytest.mark.asyncio
+    async def test_recap_skipped_when_no_trades(self, router_with_free, sent_messages):
+        mock_tracker = MagicMock()
+        mock_tracker.get_daily_summary.return_value = {
+            "total": 0, "wins": 0, "losses": 0, "breakeven": 0,
+            "win_rate": 0.0, "avg_pnl": 0.0, "best_trade": None, "top_trades": [],
+        }
+        await router_with_free.publish_daily_recap(mock_tracker)
+        assert sent_messages == []
+
+    @pytest.mark.asyncio
+    async def test_recap_posted_to_free_channel(self, router_with_free, sent_messages):
+        mock_tracker = MagicMock()
+        mock_tracker.get_daily_summary.return_value = {
+            "total": 5, "wins": 4, "losses": 1, "breakeven": 0,
+            "win_rate": 80.0, "avg_pnl": 1.2, "best_trade": None, "top_trades": [],
+        }
+        await router_with_free.publish_daily_recap(mock_tracker)
+        free_msgs = [m for m in sent_messages if m[0] == "free_channel"]
+        assert len(free_msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_recap_contains_stats(self, router_with_free, sent_messages):
+        mock_tracker = MagicMock()
+        mock_tracker.get_daily_summary.return_value = {
+            "total": 10, "wins": 7, "losses": 2, "breakeven": 1,
+            "win_rate": 77.8, "avg_pnl": 1.5, "best_trade": None, "top_trades": [],
+        }
+        await router_with_free.publish_daily_recap(mock_tracker)
+        _, text = sent_messages[-1]
+        assert "10" in text
+        assert "RECAP" in text
+
+    @pytest.mark.asyncio
+    async def test_recap_not_posted_when_no_free_channel_id(
+        self, queue, sent_messages, monkeypatch
+    ):
+        import src.signal_router as m
+        monkeypatch.setattr(m, "TELEGRAM_FREE_CHANNEL_ID", "")
+
+        async def mock_send(chat_id, text):
+            sent_messages.append((chat_id, text))
+            return True
+
+        r = SignalRouter(queue=queue, send_telegram=mock_send, format_signal=lambda s: "")
+        mock_tracker = MagicMock()
+        mock_tracker.get_daily_summary.return_value = {
+            "total": 5, "wins": 4, "losses": 1, "breakeven": 0,
+            "win_rate": 80.0, "avg_pnl": 1.2, "best_trade": None, "top_trades": [],
+        }
+        await r.publish_daily_recap(mock_tracker)
+        assert sent_messages == []

@@ -108,6 +108,19 @@ class BinanceClient:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        # Sync used-weight from the authoritative server header
+                        # so our local estimate stays accurate across parallel
+                        # requests.  Prefer the 1-minute window header which
+                        # Binance always returns on Spot and Futures REST calls.
+                        raw_weight = resp.headers.get(
+                            "x-mbx-used-weight-1m",
+                            resp.headers.get("x-mbx-used-weight"),
+                        )
+                        if raw_weight is not None:
+                            try:
+                                self._used_weight = int(raw_weight)
+                            except ValueError:
+                                pass
                         if BinanceClient.on_api_call is not None:
                             BinanceClient.on_api_call()
                         return data

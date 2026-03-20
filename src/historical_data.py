@@ -142,24 +142,39 @@ class HistoricalDataStore:
     # ------------------------------------------------------------------
 
     async def seed_symbol(self, symbol: str, market: str = "spot") -> None:
-        """Seed all timeframes + ticks for a single symbol."""
+        """Seed all timeframes + ticks for a single symbol.
+
+        All timeframe fetches are dispatched concurrently via
+        ``asyncio.gather`` so that a single symbol's worth of data is
+        retrieved in one round-trip rather than one sequential request per
+        timeframe.  Ticks are fetched in parallel with the candles.
+        A single rate-limit sleep is taken afterwards (instead of one per
+        request), which cuts per-symbol boot time by the number of
+        timeframes.
+        """
         self.candles.setdefault(symbol, {})
 
-        for tf in SEED_TIMEFRAMES:
+        async def _fetch_tf(tf: Any) -> None:
             data = await self.fetch_candles(symbol, tf.interval, tf.limit, market)
             if data:
-                # Prune to the bucket limit immediately so seeded data never
-                # exceeds the same cap enforced by update_candle().
                 if len(data.get("close", [])) > _MAX_CANDLES_PER_BUCKET:
                     data = {k: v[-_MAX_CANDLES_PER_BUCKET:] for k, v in data.items()}
                 self.candles[symbol][tf.interval] = data
                 log.debug("Seeded %s %s: %d candles", symbol, tf.interval, len(data["close"]))
-            await asyncio.sleep(BATCH_REQUEST_DELAY)
 
-        ticks = await self.fetch_recent_trades(symbol, SEED_TICK_LIMIT, market)
-        if ticks:
-            self.ticks[symbol] = ticks
-            log.debug("Seeded %s ticks: %d", symbol, len(ticks))
+        async def _fetch_ticks() -> None:
+            ticks = await self.fetch_recent_trades(symbol, SEED_TICK_LIMIT, market)
+            if ticks:
+                self.ticks[symbol] = ticks
+                log.debug("Seeded %s ticks: %d", symbol, len(ticks))
+
+        # Fetch all timeframes and ticks simultaneously for this symbol
+        await asyncio.gather(
+            *[_fetch_tf(tf) for tf in SEED_TIMEFRAMES],
+            _fetch_ticks(),
+        )
+
+        # One consolidated rate-limit pause after all parallel fetches
         await asyncio.sleep(BATCH_REQUEST_DELAY)
 
     # ------------------------------------------------------------------
@@ -167,12 +182,25 @@ class HistoricalDataStore:
     # ------------------------------------------------------------------
 
     async def seed_all(self, pair_mgr: PairManager) -> None:
-        """Seed historical data for every active pair."""
+        """Seed historical data for every active pair.
+
+        Up to :data:`_GAP_FILL_CONCURRENT_SYMBOLS` symbols are seeded in
+        parallel.  Within each symbol, all timeframe fetches are already
+        parallelised by :meth:`seed_symbol`, so the overall boot time is
+        reduced from O(symbols × timeframes) sequential requests to
+        O(⌈symbols / concurrency⌉) rounds.
+        """
         log.info("Starting historical data seed for %d pairs …", len(pair_mgr.pairs))
-        for sym, info in pair_mgr.pairs.items():
-            await self.seed_symbol(sym, info.market)
-            for tf_name, data in self.candles.get(sym, {}).items():
-                pair_mgr.record_candles(sym, tf_name, len(data.get("close", [])))
+
+        semaphore = asyncio.Semaphore(_GAP_FILL_CONCURRENT_SYMBOLS)
+
+        async def _seed_one(sym: str, info: Any) -> None:
+            async with semaphore:
+                await self.seed_symbol(sym, info.market)
+                for tf_name, data in self.candles.get(sym, {}).items():
+                    pair_mgr.record_candles(sym, tf_name, len(data.get("close", [])))
+
+        await asyncio.gather(*[_seed_one(sym, info) for sym, info in pair_mgr.pairs.items()])
         log.info("Historical data seed complete.")
 
     # ------------------------------------------------------------------

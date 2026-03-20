@@ -177,9 +177,64 @@ class TestMarketRegimeDetector:
         assert result_5m.regime == MarketRegime.TRENDING_UP
         assert result_1m.regime == MarketRegime.TRENDING_UP
 
+    # ------------------------------------------------------------------
+    # Volume-delta override
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Filters
+    def test_volume_delta_spike_forces_quiet_to_volatile(self):
+        """A large volume-delta spike with no EMA context should upgrade QUIET → VOLATILE."""
+        det = MarketRegimeDetector()
+        # Narrow BB → QUIET without volume delta
+        ind = {
+            "bb_upper_last": 100.5,
+            "bb_lower_last": 99.5,
+            "bb_mid_last": 100.0,
+        }
+        quiet_result = det.classify(ind)
+        assert quiet_result.regime == MarketRegime.QUIET
+        # Same indicators + 70% net volume delta → forced VOLATILE
+        result = det.classify(ind, volume_delta=70.0)
+        assert result.regime == MarketRegime.VOLATILE
+        assert result.volume_delta_pct == 70.0
+
+    def test_volume_delta_spike_forces_ranging_to_trending_up(self):
+        """Volume spike with bullish EMA slope upgrades RANGING → TRENDING_UP."""
+        det = MarketRegimeDetector()
+        ind = {"adx_last": 15.0, "ema9_last": 100.1, "ema21_last": 100.0}
+        ranging = det.classify(ind)
+        assert ranging.regime == MarketRegime.RANGING
+        result = det.classify(ind, volume_delta=65.0)
+        assert result.regime == MarketRegime.TRENDING_UP
+
+    def test_volume_delta_spike_forces_ranging_to_trending_down(self):
+        """Negative volume spike with bearish EMA slope upgrades RANGING → TRENDING_DOWN."""
+        det = MarketRegimeDetector()
+        ind = {"adx_last": 15.0, "ema9_last": 99.9, "ema21_last": 100.0}
+        result = det.classify(ind, volume_delta=-65.0)
+        assert result.regime == MarketRegime.TRENDING_DOWN
+
+    def test_volume_delta_below_threshold_no_override(self):
+        """A small volume delta does not change the base regime."""
+        det = MarketRegimeDetector()
+        ind = {"adx_last": 15.0, "ema9_last": 100.1, "ema21_last": 100.0}
+        result = det.classify(ind, volume_delta=30.0)
+        assert result.regime == MarketRegime.RANGING
+        assert result.volume_delta_pct is None
+
+    def test_volume_delta_does_not_downgrade_trending(self):
+        """Volume delta override only affects QUIET/RANGING; trending stays trending."""
+        det = MarketRegimeDetector()
+        ind = {"adx_last": 30.0, "ema9_last": 102.0, "ema21_last": 100.0}
+        result = det.classify(ind, volume_delta=70.0)
+        assert result.regime == MarketRegime.TRENDING_UP
+
+    def test_no_volume_delta_result_field_is_none(self):
+        """When volume_delta is not provided, volume_delta_pct in result is None."""
+        det = MarketRegimeDetector()
+        result = det.classify({"adx_last": 15.0})
+        assert result.volume_delta_pct is None
+
+
 # ---------------------------------------------------------------------------
 
 

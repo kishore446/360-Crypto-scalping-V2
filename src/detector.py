@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.ai_engine import WhaleAlert, detect_volume_delta_spike, detect_whale_trade
-from src.order_flow import OITrend, OrderFlowStore, is_oi_invalidated
+from src.order_flow import OrderFlowStore, is_oi_invalidated
 from src.smc import FVGZone, LiquiditySweep, MSSSignal, detect_fvg, detect_liquidity_sweeps, detect_mss
 from src.utils import get_logger
 

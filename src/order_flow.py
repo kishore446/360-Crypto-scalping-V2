@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Deque, Dict, List, Optional
 
@@ -311,7 +311,7 @@ class OrderFlowStore:
             Optional side filter – ``"BUY"`` (short liq'd), ``"SELL"`` (long
             liq'd), or ``None`` for both.
         """
-        evts = self._liqs.get(symbol, [])
+        evts: Deque[LiquidationEvent] = self._liqs.get(symbol, deque())
         cutoff = time.monotonic() - window_seconds
         total = 0.0
         for e in evts:

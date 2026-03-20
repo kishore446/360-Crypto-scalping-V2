@@ -33,6 +33,7 @@ class RegimeResult:
     adx: Optional[float] = None
     bb_width_pct: Optional[float] = None
     ema_slope: Optional[float] = None
+    volume_delta_pct: Optional[float] = None
     note: str = ""
 
 
@@ -41,6 +42,9 @@ _ADX_TRENDING_MIN: float = 25.0
 _ADX_RANGING_MAX: float = 20.0
 _BB_WIDTH_VOLATILE_PCT: float = 5.0   # Bollinger width as % of price
 _BB_WIDTH_QUIET_PCT: float = 1.5
+# Volume-delta override: if |volume_delta_pct| >= this threshold, the regime
+# is forced out of QUIET / RANGING into VOLATILE or TRENDING.
+_VOLUME_DELTA_SPIKE_PCT: float = 60.0  # percent of total volume as net delta
 
 
 class MarketRegimeDetector:
@@ -59,6 +63,7 @@ class MarketRegimeDetector:
         indicators: Dict[str, Any],
         candles: Optional[Dict[str, Any]] = None,
         timeframe: str = "5m",
+        volume_delta: Optional[float] = None,
     ) -> RegimeResult:
         """Classify market regime from *indicators* dict.
 
@@ -73,6 +78,17 @@ class MarketRegimeDetector:
         The *timeframe* parameter adjusts EMA slope thresholds: on 1-minute
         data the threshold is widened (±0.15 %) to reduce noise-driven regime
         flips that would otherwise occur every few candles.
+
+        Parameters
+        ----------
+        volume_delta:
+            Optional net volume delta value expressed as a percentage of total
+            volume (buy_volume - sell_volume) / total_volume * 100.  When its
+            absolute value exceeds :data:`_VOLUME_DELTA_SPIKE_PCT` the regime
+            is forced out of ``QUIET`` or ``RANGING`` into ``VOLATILE`` (when
+            the direction is ambiguous) or ``TRENDING_UP`` / ``TRENDING_DOWN``
+            (when EMA slope provides directional context).  This lets the bot
+            react to sudden order-book imbalances faster than ADX or EMAs can.
         """
         adx_val: Optional[float] = indicators.get("adx_last")
         ema_fast: Optional[float] = indicators.get("ema9_last")
@@ -104,11 +120,43 @@ class MarketRegimeDetector:
 
         regime = self._decide(adx_val, ema_slope, bb_width_pct, timeframe=timeframe)
 
+        # Volume-delta override: a sudden order-book imbalance should push the
+        # regime out of a passive (QUIET / RANGING) state before ADX and EMA
+        # can catch up.  When |volume_delta_pct| exceeds the spike threshold:
+        #   * Use EMA slope to determine direction if available → TRENDING_UP/DOWN
+        #   * Fall back to VOLATILE when direction is unclear
+        volume_delta_pct: Optional[float] = None
+        if volume_delta is not None:
+            abs_volume_delta = abs(volume_delta)
+            if abs_volume_delta >= _VOLUME_DELTA_SPIKE_PCT:
+                volume_delta_pct = float(volume_delta)
+                if regime in (MarketRegime.QUIET, MarketRegime.RANGING):
+                    ema_slope_threshold = 0.15 if timeframe == "1m" else 0.05
+                    if ema_slope is not None and ema_slope > ema_slope_threshold:
+                        regime = MarketRegime.TRENDING_UP
+                        log.debug(
+                            "Volume-delta spike (%.1f%%) forced QUIET/RANGING → TRENDING_UP",
+                            volume_delta,
+                        )
+                    elif ema_slope is not None and ema_slope < -ema_slope_threshold:
+                        regime = MarketRegime.TRENDING_DOWN
+                        log.debug(
+                            "Volume-delta spike (%.1f%%) forced QUIET/RANGING → TRENDING_DOWN",
+                            volume_delta,
+                        )
+                    else:
+                        regime = MarketRegime.VOLATILE
+                        log.debug(
+                            "Volume-delta spike (%.1f%%) forced QUIET/RANGING → VOLATILE",
+                            volume_delta,
+                        )
+
         return RegimeResult(
             regime=regime,
             adx=adx_val,
             bb_width_pct=bb_width_pct,
             ema_slope=ema_slope,
+            volume_delta_pct=volume_delta_pct,
         )
 
     # ------------------------------------------------------------------

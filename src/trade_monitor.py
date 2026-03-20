@@ -247,10 +247,11 @@ class TradeMonitor:
 
     async def _check_all(self) -> None:
         signals = self._get_signals()
-        for sid, sig in list(signals.items()):
+
+        async def _process_signal(sig: Signal) -> None:
             price = self._latest_price(sig.symbol)
             if price is None:
-                continue
+                return
             sig.current_price = price
             # Auto-execution: attempt to place an order the first time we see
             # this signal (status == "ACTIVE" and no order has been placed yet).
@@ -279,6 +280,8 @@ class TradeMonitor:
                         exc,
                     )
             await self._evaluate_signal(sig)
+
+        await asyncio.gather(*[_process_signal(sig) for sig in signals.values()])
 
     def _latest_price(self, symbol: str) -> Optional[float]:
         # Prefer real-time tick data over (potentially stale) candle close

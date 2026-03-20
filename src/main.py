@@ -23,6 +23,7 @@ from config import (
 )
 from src.ai_engine import get_ai_insight
 from src.bootstrap import Bootstrap
+from src.macro_watchdog import MacroWatchdog
 from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel
@@ -136,8 +137,16 @@ class CryptoSignalEngine:
         # Predictive AI engine
         self.predictive = PredictiveEngine()
 
-        # OpenAI GPT-4 trade evaluator (optional — no-op if key is absent)
+        # OpenAI GPT-4 macro-event evaluator (repurposed – no longer scores trade signals)
         self._openai_evaluator = OpenAIEvaluator()
+
+        # Macro Watchdog – async background task for global market-event alerts
+        # Polls news, Fear & Greed index, and uses OpenAI to detect significant
+        # macro events (FOMC, wars, token listings) and sends alerts to Telegram.
+        self._macro_watchdog = MacroWatchdog(
+            send_alert=self.telegram.send_admin_alert,
+            openai_evaluator=self._openai_evaluator,
+        )
 
         # On-chain intelligence client (optional — no-op if key is absent)
         self._onchain_client = OnChainClient(api_key=ONCHAIN_API_KEY)

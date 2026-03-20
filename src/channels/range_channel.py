@@ -27,7 +27,6 @@ class RangeChannel(BaseChannel):
         candles: Dict[str, dict],
         indicators: Dict[str, dict],
         smc_data: dict,
-        ai_insight: dict,
         spread_pct: float,
         volume_24h_usd: float,
     ) -> Optional[Signal]:
@@ -94,8 +93,8 @@ class RangeChannel(BaseChannel):
             trailing_active=True,
             trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
             confidence=0.0,
-            ai_sentiment_label=ai_insight.get("label", "Neutral"),
-            ai_sentiment_summary=ai_insight.get("summary", ""),
+            ai_sentiment_label="",
+            ai_sentiment_summary="",
             risk_label="Conservative",
             timestamp=utcnow(),
             signal_id=f"RANGE-{uuid.uuid4().hex[:8].upper()}",

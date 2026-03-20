@@ -6,6 +6,7 @@ Uses aiohttp to call the Telegram Bot API directly (no heavy library needed).
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Optional
 
 import aiohttp
@@ -302,7 +303,7 @@ class TelegramBot:
             changing from ``left``/``kicked`` to ``member``).
         """
         self._running = True
-        _allowed: list = ["message", "my_chat_member"]
+        _allowed: str = json.dumps(["message", "my_chat_member"])
         # Clear stale updates before starting to poll so commands queued
         # during a long boot (pair seeding, etc.) are not re-processed.
         try:

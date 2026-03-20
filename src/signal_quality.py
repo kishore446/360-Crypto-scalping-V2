@@ -464,6 +464,32 @@ def build_risk_plan(
         structure = structure if structure > signal.entry else signal.entry + atr_val
         stop_loss = round(structure + buffer, 8)
 
+    # Directional sanity check – reject immediately if the computed SL is on
+    # the wrong side of the entry price (can happen with unusual price action
+    # or very thin markets where ATR/structure estimates are unreliable).
+    if signal.direction == Direction.LONG and stop_loss >= signal.entry:
+        return RiskAssessment(
+            passed=False,
+            stop_loss=stop_loss,
+            tp1=signal.tp1,
+            tp2=signal.tp2,
+            tp3=signal.tp3,
+            r_multiple=0.0,
+            invalidation_summary="SL computed above entry for LONG – risk plan rejected.",
+            reason="SL above entry for LONG",
+        )
+    if signal.direction == Direction.SHORT and stop_loss <= signal.entry:
+        return RiskAssessment(
+            passed=False,
+            stop_loss=stop_loss,
+            tp1=signal.tp1,
+            tp2=signal.tp2,
+            tp3=signal.tp3,
+            r_multiple=0.0,
+            invalidation_summary="SL computed below entry for SHORT – risk plan rejected.",
+            reason="SL below entry for SHORT",
+        )
+
     risk = abs(signal.entry - stop_loss)
     if risk <= max(signal.entry * 0.0003, buffer * 0.5):
         return RiskAssessment(

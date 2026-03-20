@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 
 from config import SEED_TIMEFRAMES, SIGNAL_SCAN_COOLDOWN_SECONDS
+from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
 from src.ai_engine import get_ai_insight
 from src.binance import BinanceClient
 from src.confidence import (
@@ -69,6 +70,11 @@ _RANGE_BORDERLINE_ADX_HIGH: float = 25.0
 
 # Maximum number of symbols scanned concurrently
 _MAX_CONCURRENT_SCANS: int = 10
+
+# Maximum per-symbol SL cooldown set by notify_sl_hit (caps the thesis cooldown
+# duration that flows into the cross-channel _symbol_sl_cooldown_until, to avoid
+# locking a symbol for hours across unrelated theses).
+_MAX_SYMBOL_SL_COOLDOWN_SECONDS: int = 900  # 15 minutes
 
 # Regime-channel compatibility matrix.
 # Maps channel name → list of regimes where that channel is blocked.
@@ -189,6 +195,10 @@ class Scanner:
         # Post-invalidation cooldown: (symbol, channel, direction) → monotonic expiry
         # Prevents rapid re-fire of the same thesis after invalidation.
         self._invalidation_cooldown_until: Dict[Tuple[str, str, str], float] = {}
+
+        # Thesis-based cooldown: (symbol, channel, direction, setup_class) → expiry
+        # Prevents the same failing thesis from re-firing after an SL hit.
+        self._thesis_cooldown_until: Dict[Tuple[str, str, str, str], float] = {}
 
         # Semaphore to limit concurrent symbol scans
         self._scan_semaphore: asyncio.Semaphore = asyncio.Semaphore(_MAX_CONCURRENT_SCANS)
@@ -328,6 +338,61 @@ class Scanner:
         log.debug(
             "Post-invalidation cooldown set for {} {} {} ({:.0f}s)",
             symbol, channel, direction, duration_s,
+        )
+
+    def notify_sl_hit(
+        self,
+        symbol: str,
+        channel: str,
+        direction: str,
+        setup_class: str,
+        hold_duration_seconds: float,
+    ) -> None:
+        """Called by the trade monitor when a signal is stopped out.
+
+        Sets a thesis-based cooldown so the same failing setup cannot re-fire
+        immediately.  If the SL was hit very quickly (within 2× the channel's
+        minimum lifespan), the cooldown is multiplied by 3 to reflect that the
+        entry was already invalid at signal generation time.
+
+        Parameters
+        ----------
+        symbol:
+            Trading pair symbol (e.g. ``"DASHUSDT"``).
+        channel:
+            Channel name (e.g. ``"360_RANGE"``).
+        direction:
+            Trade direction ``"LONG"`` or ``"SHORT"``.
+        setup_class:
+            Setup class value (e.g. ``"RANGE_REJECTION"``).
+        hold_duration_seconds:
+            How long the signal was live before hitting SL.
+        """
+        base_cooldown = THESIS_COOLDOWN_AFTER_SL_SECONDS.get(channel, 3600)
+        lifespan_threshold = MIN_SIGNAL_LIFESPAN_SECONDS.get(channel, 30)
+        rapid_sl = hold_duration_seconds < lifespan_threshold * 2
+        if rapid_sl:
+            base_cooldown *= 3
+            log.warning(
+                "Rapid SL detected for {} {} {} (held {:.1f}s < {}s threshold) – "
+                "thesis cooldown set to {:.0f}s",
+                symbol, channel, direction,
+                hold_duration_seconds, lifespan_threshold * 2, base_cooldown,
+            )
+        else:
+            log.debug(
+                "SL hit for {} {} {} (held {:.1f}s) – thesis cooldown set to {:.0f}s",
+                symbol, channel, direction, hold_duration_seconds, base_cooldown,
+            )
+        key = (symbol, channel, direction, setup_class)
+        self._thesis_cooldown_until[key] = time.monotonic() + base_cooldown
+        # Also refresh the per-symbol SL cooldown for a shorter cross-channel window
+        symbol_cooldown = min(base_cooldown, _MAX_SYMBOL_SL_COOLDOWN_SECONDS)
+        self._symbol_sl_cooldown_until[symbol] = (
+            max(
+                self._symbol_sl_cooldown_until.get(symbol, 0.0),
+                time.monotonic() + symbol_cooldown,
+            )
         )
 
     async def _scan_symbol_bounded(self, sem: asyncio.Semaphore, symbol: str, volume_24h: float) -> None:
@@ -557,6 +622,13 @@ class Scanner:
                 )
                 return True
             del self._symbol_sl_cooldown_until[symbol]
+        # Per-symbol circuit breaker: suppress the symbol across all channels
+        # when it has accumulated too many consecutive SL hits.
+        if self.circuit_breaker is not None and self.circuit_breaker.is_symbol_tripped(symbol):
+            log.debug(
+                "Per-symbol circuit breaker active: skipping {} {}", symbol, chan_name
+            )
+            return True
         if any(
             s.symbol == symbol and s.channel == chan_name
             for s in self.router.active_signals.values()
@@ -878,6 +950,19 @@ class Scanner:
         if not setup.channel_compatible or not setup.regime_compatible:
             log.debug("Rejected {} {} setup: {}", symbol, chan_name, setup.reason)
             return None, None
+
+        # Thesis-based cooldown: suppress (symbol, channel, direction, setup_class)
+        # after an SL hit on the same thesis to prevent spam loops.
+        thesis_key = (symbol, chan_name, sig.direction.value, setup.setup_class.value)
+        thesis_expiry = self._thesis_cooldown_until.get(thesis_key)
+        if thesis_expiry is not None:
+            if time.monotonic() < thesis_expiry:
+                log.debug(
+                    "Thesis cooldown active: skipping {} {} {} {}",
+                    symbol, chan_name, sig.direction.value, setup.setup_class.value,
+                )
+                return None, None
+            del self._thesis_cooldown_until[thesis_key]
 
         execution = self._evaluate_execution(sig, ctx, setup)
         if not execution.passed:

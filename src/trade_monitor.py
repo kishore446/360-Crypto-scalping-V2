@@ -84,6 +84,10 @@ class TradeMonitor:
         # Optional callback invoked with (symbol, channel, direction) on invalidation.
         # Set after construction (e.g. to scanner.set_invalidation_cooldown).
         self.on_invalidation_callback: Optional[Any] = None
+        # Optional callback invoked with (symbol, channel, direction, setup_class,
+        # hold_duration_seconds) when a stop-loss is hit.  Used to set thesis-based
+        # cooldowns in the scanner.
+        self.on_thesis_sl_callback: Optional[Any] = None
 
     def _record_outcome(self, sig: Signal, hit_tp: int, hit_sl: bool) -> None:
         """Notify performance tracker and circuit breaker of a completed signal.
@@ -112,13 +116,13 @@ class TradeMonitor:
             signal_quality_pnl = sig.best_tp_pnl_pct
             signal_quality_hit_tp = sig.best_tp_hit
 
+        hold_duration_sec = max((utcnow() - sig.timestamp).total_seconds(), 0.0)
         outcome_label = classify_trade_outcome(
             pnl_pct=actual_pnl,
             hit_tp=hit_tp,
             hit_sl=hit_sl,
         )
         if self._performance_tracker is not None:
-            hold_duration_sec = max((utcnow() - sig.timestamp).total_seconds(), 0.0)
             self._performance_tracker.record_outcome(
                 signal_id=sig.signal_id,
                 channel=sig.channel,
@@ -149,11 +153,23 @@ class TradeMonitor:
                 signal_id=sig.signal_id,
                 hit_sl=hit_sl,
                 pnl_pct=actual_pnl,
+                symbol=sig.symbol,
             )
-        # Notify the scanner to apply a short per-symbol cooldown so no other
-        # channel fires on the same symbol immediately after a stop-loss.
-        if hit_sl and self.on_sl_callback is not None:
-            self.on_sl_callback(sig.symbol)
+        if hit_sl:
+            # Notify the scanner to apply a short per-symbol cooldown so no other
+            # channel fires on the same symbol immediately after a stop-loss.
+            if self.on_sl_callback is not None:
+                self.on_sl_callback(sig.symbol)
+            # Notify the scanner about the thesis that failed so it can apply a
+            # longer thesis-based cooldown to prevent repeat entries.
+            if self.on_thesis_sl_callback is not None:
+                self.on_thesis_sl_callback(
+                    sig.symbol,
+                    sig.channel,
+                    sig.direction.value,
+                    sig.setup_class or "",
+                    hold_duration_sec,
+                )
 
     @staticmethod
     def _set_realized_pnl(sig: Signal, exit_price: float) -> None:

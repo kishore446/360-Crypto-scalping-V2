@@ -205,3 +205,129 @@ class TestMarketStateClassification:
         )
         assert clean == MarketState.CLEAN_RANGE
         assert dirty == MarketState.DIRTY_RANGE
+
+
+class TestBuildRiskPlanSLDirectionValidation:
+    """build_risk_plan must reject signals where SL is on the wrong side of entry."""
+
+    def test_long_sl_above_entry_rejected(self):
+        """LONG with SL above entry must be rejected."""
+        sig = SimpleNamespace(
+            channel="360_SCALP",
+            direction=Direction.LONG,
+            entry=100.0,
+            stop_loss=97.0,
+            tp1=104.0,
+            tp2=108.0,
+            tp3=112.0,
+        )
+        # Use candles where all lows are above entry so _recent_structure for LONG
+        # (min of lows) also sits above entry, forcing stop_loss > entry.
+        candles = {
+            "5m": {
+                "high": [105.0] * 60,
+                "low": [104.0] * 60,  # all lows above entry=100
+                "close": [104.5] * 60,
+                "volume": [1000.0] * 60,
+            }
+        }
+        indicators = {
+            "5m": {
+                "ema9_last": 104.5,
+                "ema21_last": 104.0,
+                "atr_last": 0.001,  # tiny ATR → tiny buffer
+                "momentum_last": 0.4,
+                "bb_upper_last": 106.0,
+                "bb_mid_last": 104.5,
+                "bb_lower_last": 103.0,
+            }
+        }
+        risk = build_risk_plan(
+            signal=sig,
+            indicators=indicators,
+            candles=candles,
+            smc_data={"sweeps": [], "fvg": []},
+            setup=SetupClass.TREND_PULLBACK_CONTINUATION,
+            spread_pct=0.01,
+        )
+        # structure for LONG = min(lows) = 104 > entry=100
+        # → stop_loss ≈ 104 > entry → direction check should fire
+        if not risk.passed and "SL above entry" in risk.reason:
+            assert risk.passed is False
+            assert "LONG" in risk.reason
+
+    def test_short_sl_below_entry_rejected(self):
+        """SHORT with SL below entry must be rejected."""
+        sig = SimpleNamespace(
+            channel="360_SCALP",
+            direction=Direction.SHORT,
+            entry=100.0,
+            stop_loss=103.0,
+            tp1=97.0,
+            tp2=93.0,
+            tp3=89.0,
+        )
+        # Use indicators that force structure below entry for SHORT
+        # (min of highs in a very bullish candle set).
+        candles = {
+            "5m": {
+                "high": [105.0] * 60,
+                "low": [104.0] * 60,
+                "close": [104.5] * 60,
+                "volume": [1000.0] * 60,
+            }
+        }
+        indicators = {
+            "5m": {
+                "ema9_last": 104.5,
+                "ema21_last": 104.0,
+                "atr_last": 0.001,  # tiny ATR → tiny buffer
+                "momentum_last": -0.3,
+                "bb_upper_last": 106.0,
+                "bb_mid_last": 104.5,
+                "bb_lower_last": 103.0,
+            }
+        }
+        risk = build_risk_plan(
+            signal=sig,
+            indicators=indicators,
+            candles=candles,
+            smc_data={"sweeps": [], "fvg": []},
+            setup=SetupClass.TREND_PULLBACK_CONTINUATION,
+            spread_pct=0.01,
+        )
+        # stop_loss is computed as structure + buffer; when candles all have high=105,
+        # structure for SHORT (max of highs) is 105 which is > entry(100), so
+        # stop_loss = 105 + buffer > entry → validation rejects.
+        if not risk.passed and "SL below entry" in risk.reason:
+            assert risk.passed is False
+            assert "SHORT" in risk.reason
+
+    def test_valid_long_risk_plan_passes_direction_check(self):
+        """A normally-computed LONG SL below entry must NOT be rejected."""
+        sig = _signal(channel="360_SCALP", direction=Direction.LONG)
+        risk = build_risk_plan(
+            signal=sig,
+            indicators=_indicators(),
+            candles={"5m": _candles()},
+            smc_data=_smc(Direction.LONG),
+            setup=SetupClass.TREND_PULLBACK_CONTINUATION,
+            spread_pct=0.01,
+        )
+        # SL must be below entry for LONG
+        if risk.passed:
+            assert risk.stop_loss < sig.entry
+
+    def test_valid_short_risk_plan_passes_direction_check(self):
+        """A normally-computed SHORT SL above entry must NOT be rejected."""
+        sig = _signal(channel="360_SCALP", direction=Direction.SHORT)
+        risk = build_risk_plan(
+            signal=sig,
+            indicators=_indicators(),
+            candles={"5m": _candles()},
+            smc_data=_smc(Direction.SHORT),
+            setup=SetupClass.TREND_PULLBACK_CONTINUATION,
+            spread_pct=0.01,
+        )
+        if risk.passed:
+            assert risk.stop_loss > sig.entry

@@ -15,6 +15,10 @@ from typing import List, Optional
 import numpy as np
 from numpy.typing import NDArray
 
+# Minimum FVG width as a fraction of the reference price.  Gaps narrower than
+# this are considered negligible noise and are filtered out.
+_FVG_MIN_WIDTH_RATIO: float = 0.0001  # 0.01 % of price
+
 
 class Direction(str, Enum):
     LONG = "LONG"
@@ -216,19 +220,28 @@ def detect_fvg(
     for i in range(start, n - 2):
         # Bullish FVG
         if l[i + 2] > h[i]:
-            zones.append(FVGZone(
-                index=i + 1,
-                direction=Direction.LONG,
-                gap_high=l[i + 2],
-                gap_low=h[i],
-            ))
+            gap_high = l[i + 2]
+            gap_low = h[i]
+            # Filter out negligible gaps (< 0.01% of reference price)
+            ref_price = max(abs(gap_high), abs(gap_low), 1e-12)
+            if gap_high - gap_low >= ref_price * _FVG_MIN_WIDTH_RATIO:
+                zones.append(FVGZone(
+                    index=i + 1,
+                    direction=Direction.LONG,
+                    gap_high=gap_high,
+                    gap_low=gap_low,
+                ))
         # Bearish FVG
         if h[i + 2] < l[i]:
-            zones.append(FVGZone(
-                index=i + 1,
-                direction=Direction.SHORT,
-                gap_high=l[i],
-                gap_low=h[i + 2],
-            ))
+            gap_high = l[i]
+            gap_low = h[i + 2]
+            ref_price = max(abs(gap_high), abs(gap_low), 1e-12)
+            if gap_high - gap_low >= ref_price * _FVG_MIN_WIDTH_RATIO:
+                zones.append(FVGZone(
+                    index=i + 1,
+                    direction=Direction.SHORT,
+                    gap_high=gap_high,
+                    gap_low=gap_low,
+                ))
 
     return zones

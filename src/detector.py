@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.ai_engine import WhaleAlert, detect_volume_delta_spike, detect_whale_trade
+from src.order_flow import OITrend, OrderFlowStore, is_oi_invalidated
 from src.smc import FVGZone, LiquiditySweep, MSSSignal, detect_fvg, detect_liquidity_sweeps, detect_mss
 from src.utils import get_logger
 
@@ -38,6 +39,8 @@ class SMCResult:
     whale_alert: Optional[WhaleAlert] = None
     volume_delta_spike: bool = False
     recent_ticks: List[Dict[str, Any]] = field(default_factory=list)
+    oi_invalidated: bool = False
+    cvd_divergence: Optional[str] = None  # "BULLISH", "BEARISH", or None
 
     def as_dict(self) -> dict:
         """Return a plain dict for backward-compat with channel evaluate() calls."""
@@ -48,6 +51,8 @@ class SMCResult:
             "whale_alert": self.whale_alert,
             "volume_delta_spike": self.volume_delta_spike,
             "recent_ticks": self.recent_ticks,
+            "oi_invalidated": self.oi_invalidated,
+            "cvd_divergence": self.cvd_divergence,
         }
 
 
@@ -59,6 +64,7 @@ class SMCDetector:
         symbol: str,
         candles: Dict[str, Dict[str, Any]],
         ticks: List[Dict[str, Any]],
+        order_flow_store: Optional[OrderFlowStore] = None,
     ) -> SMCResult:
         """Run full SMC detection and return an :class:`SMCResult`.
 
@@ -70,6 +76,12 @@ class SMCDetector:
             Dict of timeframe → OHLCV arrays, e.g. ``{"5m": {"high": ..., ...}}``.
         ticks:
             Recent trade ticks from the data store.
+        order_flow_store:
+            Optional :class:`src.order_flow.OrderFlowStore` for OI trend and
+            CVD divergence checks.  When provided, detected sweeps are validated
+            against the current OI trend (rising OI during a sweep in the
+            opposing direction sets ``oi_invalidated = True``).  CVD divergence
+            is also queried and attached to the result.
         """
         result = SMCResult()
 
@@ -95,6 +107,43 @@ class SMCDetector:
 
             result.fvg = detect_fvg(cd["high"], cd["low"], cd["close"])
             break  # use first timeframe that has a sweep
+
+        # ------------------------------------------------------------------
+        # Order flow validation (OI trend + CVD divergence)
+        # ------------------------------------------------------------------
+        if order_flow_store is not None and result.sweeps:
+            primary_sweep = result.sweeps[0]
+            oi_trend = order_flow_store.get_oi_trend(symbol)
+
+            # Invalidate if OI is rising while we have a sweep signal.
+            # Rising OI means new aggressive positions are entering against
+            # the proposed reversal direction.
+            if is_oi_invalidated(oi_trend, primary_sweep.direction.value):
+                result.oi_invalidated = True
+                log.debug(
+                    "{}: OI RISING during {} sweep – signal invalidated",
+                    symbol, primary_sweep.direction.value,
+                )
+
+            # CVD divergence: check if price/CVD diverge (confirms the sweep)
+            tf_key_for_cvd = next(
+                (tf for tf in _SMC_TIMEFRAMES if candles.get(tf) and
+                 len(candles[tf].get("close", [])) >= 21),
+                None,
+            )
+            if tf_key_for_cvd is not None:
+                import numpy as np
+                close_arr = np.asarray(
+                    candles[tf_key_for_cvd]["close"], dtype=np.float64
+                ).ravel()
+                result.cvd_divergence = order_flow_store.get_cvd_divergence(
+                    symbol, close_arr
+                )
+                if result.cvd_divergence:
+                    log.debug(
+                        "{}: CVD divergence detected – {}",
+                        symbol, result.cvd_divergence,
+                    )
 
         # ------------------------------------------------------------------
         # Whale / tape detection

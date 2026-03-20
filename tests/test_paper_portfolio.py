@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 
-import pytest
-
-from src.paper_portfolio import ChannelPortfolio, PaperPortfolioManager, PaperTrade
+from src.paper_portfolio import PaperPortfolioManager
 
 
 # ---------------------------------------------------------------------------

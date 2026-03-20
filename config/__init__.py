@@ -7,7 +7,7 @@ All tunables live here so every other module simply does
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List
 
 from dotenv import load_dotenv

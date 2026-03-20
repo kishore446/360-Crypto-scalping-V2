@@ -36,6 +36,7 @@ from src.historical_data import HistoricalDataStore
 from src.onchain import OnChainClient
 from src.openai_evaluator import OpenAIEvaluator
 from src.pair_manager import PairManager
+from src.paper_portfolio import PaperPortfolioManager
 from src.performance_tracker import PerformanceTracker
 from src.predictive_ai import PredictiveEngine
 from src.regime import MarketRegimeDetector
@@ -108,6 +109,9 @@ class CryptoSignalEngine:
             storage_path=PERFORMANCE_TRACKER_PATH
         )
 
+        # Paper trading portfolio simulator (virtual $1,000 per channel per user)
+        self._paper_portfolio = PaperPortfolioManager()
+
         self.monitor = TradeMonitor(
             data_store=self.data_store,
             send_telegram=self.telegram.send_message,
@@ -116,6 +120,7 @@ class CryptoSignalEngine:
             update_signal=self.router.update_signal,
             performance_tracker=self._performance_tracker,
             circuit_breaker=self._circuit_breaker,
+            paper_portfolio=self._paper_portfolio,
         )
 
         # Channel strategies
@@ -224,6 +229,7 @@ class CryptoSignalEngine:
             performance_tracker=self._performance_tracker,
             circuit_breaker=self._circuit_breaker,
             select_mode_filter=self._select_mode,
+            paper_portfolio=self._paper_portfolio,
         )
 
         # Bootstrap coordinates the boot/shutdown/WS sequence

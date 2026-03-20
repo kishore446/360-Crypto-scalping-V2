@@ -127,6 +127,7 @@ class CommandHandler:
         performance_tracker: Optional[Any] = None,
         circuit_breaker: Optional[Any] = None,
         select_mode_filter: Optional[Any] = None,
+        paper_portfolio: Optional[Any] = None,
     ) -> None:
         self._telegram = telegram
         self._telemetry = telemetry
@@ -150,6 +151,7 @@ class CommandHandler:
         self._performance_tracker = performance_tracker
         self._circuit_breaker = circuit_breaker
         self._select_mode = select_mode_filter
+        self._paper_portfolio = paper_portfolio
         # Backtest configuration defaults
         self._bt_fee_pct: float = 0.08
         self._bt_slippage_pct: float = 0.02
@@ -866,6 +868,75 @@ class CommandHandler:
                     "Keys: fee, slippage, lookahead, min\\_window",
                 )
 
+        elif cmd == "/portfolio":
+            if self._paper_portfolio is None:
+                await self._telegram.send_message(chat_id, "ℹ️ Paper portfolio is not enabled.")
+            else:
+                if len(parts) >= 2:
+                    channel_arg = parts[1].upper()
+                    if not channel_arg.startswith("360_"):
+                        channel_arg = f"360_{channel_arg}"
+                    msg = self._paper_portfolio.get_channel_detail(chat_id, channel_arg)
+                else:
+                    msg = self._paper_portfolio.get_portfolio_summary(chat_id)
+                await self._telegram.send_message(chat_id, msg)
+
+        elif cmd == "/reset_portfolio":
+            if self._paper_portfolio is None:
+                await self._telegram.send_message(chat_id, "ℹ️ Paper portfolio is not enabled.")
+            else:
+                channel_arg = parts[1].upper() if len(parts) >= 2 else None
+                if channel_arg and not channel_arg.startswith("360_"):
+                    channel_arg = f"360_{channel_arg}"
+                msg = self._paper_portfolio.reset_portfolio(chat_id, channel_arg)
+                await self._telegram.send_message(chat_id, msg)
+
+        elif cmd == "/set_leverage":
+            if self._paper_portfolio is None:
+                await self._telegram.send_message(chat_id, "ℹ️ Paper portfolio is not enabled.")
+            elif len(parts) < 3:
+                await self._telegram.send_message(
+                    chat_id, "Usage: /set\\_leverage <channel> <1-20>"
+                )
+            else:
+                channel_arg = parts[1].upper()
+                if not channel_arg.startswith("360_"):
+                    channel_arg = f"360_{channel_arg}"
+                try:
+                    lev = int(parts[2])
+                    msg = self._paper_portfolio.set_leverage(chat_id, channel_arg, lev)
+                except ValueError:
+                    msg = "❌ Leverage must be a number."
+                await self._telegram.send_message(chat_id, msg)
+
+        elif cmd == "/set_risk":
+            if self._paper_portfolio is None:
+                await self._telegram.send_message(chat_id, "ℹ️ Paper portfolio is not enabled.")
+            elif len(parts) < 3:
+                await self._telegram.send_message(
+                    chat_id, "Usage: /set\\_risk <channel> <0.5-10>"
+                )
+            else:
+                channel_arg = parts[1].upper()
+                if not channel_arg.startswith("360_"):
+                    channel_arg = f"360_{channel_arg}"
+                try:
+                    risk = float(parts[2])
+                    msg = self._paper_portfolio.set_risk(chat_id, channel_arg, risk)
+                except ValueError:
+                    msg = "❌ Risk must be a number."
+                await self._telegram.send_message(chat_id, msg)
+
+        elif cmd == "/trade_history":
+            if self._paper_portfolio is None:
+                await self._telegram.send_message(chat_id, "ℹ️ Paper portfolio is not enabled.")
+            else:
+                channel_arg = parts[1].upper() if len(parts) >= 2 else None
+                if channel_arg and not channel_arg.startswith("360_"):
+                    channel_arg = f"360_{channel_arg}"
+                msg = self._paper_portfolio.get_trade_history(chat_id, channel_arg)
+                await self._telegram.send_message(chat_id, msg)
+
         else:
             await self._telegram.send_message(
                 chat_id,
@@ -907,5 +978,10 @@ class CommandHandler:
                 "/unsubscribe\n"
                 "/signal\\_history\n"
                 "/signal\\_stats [channel]\n"
-                "/tp\\_stats [channel]",
+                "/tp\\_stats [channel]\n"
+                "/portfolio [channel]\n"
+                "/reset\\_portfolio [channel]\n"
+                "/set\\_leverage <channel> <1-20>\n"
+                "/set\\_risk <channel> <0.5-10>\n"
+                "/trade\\_history [channel]",
             )

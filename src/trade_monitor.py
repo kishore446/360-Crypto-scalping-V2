@@ -67,6 +67,7 @@ class TradeMonitor:
         circuit_breaker: Optional[Any] = None,
         regime_detector: Optional[Any] = None,
         indicators_fn: Optional[Callable] = None,
+        paper_portfolio: Optional[Any] = None,
     ) -> None:
         self._store = data_store
         self._send = send_telegram
@@ -77,6 +78,7 @@ class TradeMonitor:
         self._circuit_breaker = circuit_breaker
         self._regime_detector = regime_detector
         self._indicators_fn = indicators_fn
+        self._paper_portfolio = paper_portfolio
         self._running = False
         # Optional callback invoked with the symbol whenever a stop-loss is hit.
         # Set after construction (e.g. to scanner.set_symbol_sl_cooldown).
@@ -157,6 +159,19 @@ class TradeMonitor:
                 hit_sl=hit_sl,
                 pnl_pct=actual_pnl,
                 symbol=sig.symbol,
+            )
+        # Paper portfolio tracking (silent — no Telegram messages)
+        if self._paper_portfolio is not None:
+            self._paper_portfolio.record_trade(
+                channel=sig.channel,
+                signal_id=sig.signal_id,
+                symbol=sig.symbol,
+                direction=sig.direction.value,
+                entry_price=sig.entry,
+                exit_price=sig.current_price,
+                hit_tp=hit_tp,
+                hit_sl=hit_sl,
+                pnl_pct=actual_pnl,
             )
         if hit_sl:
             # Notify the scanner to apply a short per-symbol cooldown so no other

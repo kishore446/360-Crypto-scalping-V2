@@ -315,10 +315,10 @@ class TestRiskManagerOBIIntegration:
 
     def test_rr_rejection_takes_priority_over_obi(self):
         """Insufficient R:R must still reject even if OBI would allow."""
-        # R:R = 1.0 < 1.2 floor, order book supports LONG
+        # R:R = 0.67 < 1.0 floor, order book supports LONG
         ob = _make_book(bid_qty=7.0, ask_qty=3.0)
         sig = _make_risk_signal(
-            entry=100.0, stop_loss=97.0, tp1=103.0,  # R:R = 1.0
+            entry=100.0, stop_loss=97.0, tp1=102.0,  # R:R = 2/3 ≈ 0.67
             direction="LONG", order_book=ob,
         )
         result = self.rm.calculate_risk(sig, {}, 100_000_000)

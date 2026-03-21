@@ -85,9 +85,9 @@ class WebSocketManager:
         self._connections = []
         self._subscribed_streams = set()
         self._rest_fallback_active = False
-        self._session = aiohttp.ClientSession()
-
-        # Chunk streams across connections
+        self._session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(keepalive_timeout=30)
+        )
         for i in range(0, len(streams), WS_MAX_STREAMS_PER_CONN):
             chunk = streams[i: i + WS_MAX_STREAMS_PER_CONN]
             conn = WSConnection(streams=chunk)
@@ -363,7 +363,9 @@ class WebSocketManager:
                 await self._session.close()
             except Exception as exc:
                 log.debug("Error closing stale session ({}): {}", self._market, exc)
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(keepalive_timeout=30)
+        )
 
     def build_kline_stream(self, symbol: str, interval: str) -> str:
         return f"{symbol.lower()}@kline_{interval}"

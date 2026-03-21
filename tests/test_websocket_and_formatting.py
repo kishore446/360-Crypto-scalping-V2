@@ -339,9 +339,9 @@ class TestAdminAlertRateLimiting:
         ws = WebSocketManager(lambda data: None, market="spot")
         assert not hasattr(ws, "_ping_loop")
 
-    def test_alert_cooldown_is_300(self):
-        """WS_ALERT_COOLDOWN must be at least 300s to reduce Telegram spam."""
-        assert WS_ALERT_COOLDOWN >= 300
+    def test_alert_cooldown_is_600(self):
+        """WS_ALERT_COOLDOWN must be at least 600s to reduce Telegram spam."""
+        assert WS_ALERT_COOLDOWN >= 600
 
 
 class TestHeartbeatIntervalPerMarket:
@@ -360,6 +360,16 @@ class TestHeartbeatIntervalPerMarket:
     def test_futures_heartbeat_longer_than_spot(self):
         """Futures heartbeat interval must be strictly longer than spot."""
         assert WS_HEARTBEAT_INTERVAL_FUTURES > WS_HEARTBEAT_INTERVAL
+
+    def test_futures_staleness_threshold_with_new_heartbeat(self):
+        """Futures connections should be stale after 60×10=600s with no data."""
+        ws = WebSocketManager(lambda data: None, market="futures")
+        conn = WSConnection()
+        mock_ws = type("FakeWS", (), {"closed": False})()
+        conn.ws = mock_ws
+        conn.last_pong = time.monotonic() - 650  # 650s > 600s threshold
+        ws._connections = [conn]
+        assert ws.is_healthy is False
 
 
 class TestReconnectJitter:

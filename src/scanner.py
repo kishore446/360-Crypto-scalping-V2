@@ -1089,10 +1089,10 @@ class Scanner:
             _primary_tf = self._get_primary_timeframe(chan_name)
             _cd = self._resolve_candles(ctx.candles, _primary_tf)
             _vwap_result = compute_vwap(
-                np.asarray(_cd.get("high", []), dtype=np.float64),
-                np.asarray(_cd.get("low", []), dtype=np.float64),
-                np.asarray(_cd.get("close", []), dtype=np.float64),
-                np.asarray(_cd.get("volume", []), dtype=np.float64),
+                _cd.get("high", []),
+                _cd.get("low", []),
+                _cd.get("close", []),
+                _cd.get("volume", []),
             )
             vwap_allowed, vwap_reason = check_vwap_extension(
                 sig.direction.value, sig.entry, _vwap_result

@@ -513,7 +513,6 @@ class TestSendMessageRetry:
     async def test_retries_on_429_with_retry_after(self, monkeypatch):
         """send_message honours retry_after from a 429 response and retries."""
         import json as _json
-        import aiohttp
 
         bot = self._make_bot()
         calls = []
@@ -565,8 +564,6 @@ class TestSendMessageRetry:
     @pytest.mark.asyncio
     async def test_retries_on_500_with_exponential_backoff(self, monkeypatch):
         """send_message retries on 5xx errors with exponential back-off."""
-        import aiohttp
-
         bot = self._make_bot()
         sleep_args = []
 

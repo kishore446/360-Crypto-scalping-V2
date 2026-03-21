@@ -79,6 +79,9 @@ class Signal:
     original_tp2: float = 0.0
     original_tp3: Optional[float] = None
 
+    # ---- Delivery retry tracking (router-internal, not shown to users) ----
+    _delivery_retries: int = 0
+
     @property
     def r_multiple(self) -> float:
         risk = abs(self.entry - self.stop_loss)

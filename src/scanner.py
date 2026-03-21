@@ -862,6 +862,7 @@ class Scanner:
                 oi_trend=oi_trend.value,
                 liq_vol_usd=liq_vol,
                 cvd_divergence=cvd_div,
+                signal_direction=sig.direction.value,
             )
 
         cinp = ConfidenceInput(

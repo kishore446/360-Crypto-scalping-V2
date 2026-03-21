@@ -41,6 +41,10 @@ _FREE_HIGHLIGHT_MAX_PER_DAY: int = 4
 # Minimum TP level required to trigger a free-channel highlight.
 _FREE_HIGHLIGHT_MIN_TP: int = 2
 
+# Delivery-retry sleep callable – replaced in tests to avoid real waits.
+async def _delivery_sleep(secs: float) -> None:
+    await asyncio.sleep(secs)
+
 
 def _signal_from_dict(data: dict) -> Optional[Signal]:
     """Reconstruct a Signal from a Redis-deserialized dict."""
@@ -347,6 +351,7 @@ class SignalRouter:
         text = self._format_signal(signal)
         channel_id = CHANNEL_TELEGRAM_MAP.get(signal.channel, "")
         if channel_id:
+            delivered = False
             try:
                 delivered = await self._send_telegram(channel_id, text)
             except Exception as exc:
@@ -356,13 +361,24 @@ class SignalRouter:
                     signal.signal_id,
                     exc,
                 )
-                return
-            if delivered is False:
-                log.warning(
-                    "Signal delivery was not confirmed for {} {}",
-                    signal.channel,
-                    signal.signal_id,
-                )
+            if not delivered:
+                retries = signal._delivery_retries
+                if retries < 2:
+                    signal._delivery_retries = retries + 1
+                    log.info(
+                        "Re-queuing {} {} (delivery attempt {}/3)",
+                        signal.channel,
+                        signal.signal_id,
+                        retries + 2,
+                    )
+                    await _delivery_sleep(2 ** retries)
+                    await self._queue.put(signal)
+                else:
+                    log.error(
+                        "Signal {} {} permanently lost after 3 delivery attempts",
+                        signal.channel,
+                        signal.signal_id,
+                    )
                 return
             log.info(
                 "Signal posted → {} | {} {}",

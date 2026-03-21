@@ -41,9 +41,15 @@ class TelegramBot:
     async def send_message(self, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool:
         """Send a message to *chat_id*. Returns True on success.
 
-        If the send fails with a 400 "can't parse entities" error (Markdown
-        formatting issue in dynamic content), the message is retried as plain
-        text so the user still receives the signal.
+        Retry behaviour:
+        * **Markdown parse error** (400 + "can't parse entities"): retried once
+          as plain text so the user still receives the signal.
+        * **Rate limit** (429): waits ``parameters.retry_after`` seconds from
+          the response body, then retries (up to 3 total attempts).
+        * **Server errors** (5xx): exponential back-off (1 s, 2 s, 4 s) with up
+          to 3 total attempts.
+        * **Timeout**: exponential back-off, up to 3 total attempts.
+        * **Other 4xx**: returned immediately as False (not recoverable).
         """
         if not self._token:
             log.debug("Telegram token not configured – message not sent")
@@ -51,25 +57,67 @@ class TelegramBot:
         session = await self._ensure_session()
         url = f"{self._base}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
-        try:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status == 200:
-                    return True
-                body = await resp.text()
-                log.warning("Telegram send failed (%s): %s", resp.status, body)
-                # Retry as plain text if Markdown parsing failed
-                if resp.status == 400 and "can't parse entities" in body:
-                    log.info("Retrying message as plain text after Markdown parse failure")
-                    plain_payload = {"chat_id": chat_id, "text": text}
-                    async with session.post(
-                        url, json=plain_payload, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as retry_resp:
-                        if retry_resp.status == 200:
-                            return True
-                        retry_body = await retry_resp.text()
-                        log.warning("Telegram plain-text retry failed (%s): %s", retry_resp.status, retry_body)
-        except Exception as exc:
-            log.error("Telegram send error: %s", exc)
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        return True
+                    body = await resp.text()
+                    log.warning("Telegram send failed (%s): %s", resp.status, body)
+
+                    # Retry as plain text if Markdown parsing failed (400 only)
+                    if resp.status == 400 and "can't parse entities" in body:
+                        log.info("Retrying message as plain text after Markdown parse failure")
+                        plain_payload = {"chat_id": chat_id, "text": text}
+                        async with session.post(
+                            url, json=plain_payload, timeout=aiohttp.ClientTimeout(total=10)
+                        ) as retry_resp:
+                            if retry_resp.status == 200:
+                                return True
+                            retry_body = await retry_resp.text()
+                            log.warning("Telegram plain-text retry failed (%s): %s", retry_resp.status, retry_body)
+                        return False  # 400 errors are not retried further
+
+                    # HTTP 429: rate limited – honor Retry-After from response body
+                    if resp.status == 429:
+                        try:
+                            data = json.loads(body)
+                            retry_after = float(data.get("parameters", {}).get("retry_after", 1))
+                        except (json.JSONDecodeError, AttributeError, TypeError):
+                            retry_after = 1.0
+                        log.info(
+                            "Telegram rate limit (429) – waiting %.1fs before retry (attempt %d/%d)",
+                            retry_after, attempt + 1, max_attempts,
+                        )
+                        await asyncio.sleep(retry_after)
+                        continue
+
+                    # HTTP 5xx: server error – exponential back-off
+                    if resp.status >= 500:
+                        wait = 2 ** attempt  # 1 s, 2 s, 4 s
+                        log.info(
+                            "Telegram server error (%d) – retrying in %ds (attempt %d/%d)",
+                            resp.status, wait, attempt + 1, max_attempts,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+
+                    # Other 4xx: not recoverable
+                    return False
+
+            except asyncio.TimeoutError:
+                wait = 2 ** attempt
+                log.warning(
+                    "Telegram send timeout – retrying in %ds (attempt %d/%d)",
+                    wait, attempt + 1, max_attempts,
+                )
+                await asyncio.sleep(wait)
+                continue
+            except Exception as exc:
+                log.error("Telegram send error: %s", exc)
+                return False
+
         return False
 
     async def send_admin_alert(self, text: str) -> bool:

@@ -85,7 +85,18 @@ class TestSignalRouter:
             monkeypatch.setitem(signal_router_module.CHANNEL_TELEGRAM_MAP, channel, "premium")
 
         queue = asyncio.Queue()
-        send_results = [RuntimeError("telegram down"), True]
+
+        # Patch _delivery_sleep (not asyncio.sleep) so re-queue delays don't slow
+        # the test without affecting the test's own asyncio.sleep() calls.
+        # BTC will be re-queued twice (retries 0→1, 1→2) then permanently lost.
+        # Order of send calls: BTC attempt1 (RuntimeError), ETH attempt1 (True),
+        # BTC attempt2/retry1 (RuntimeError), BTC attempt3/retry2 (RuntimeError → permanent loss).
+        async def instant_sleep(_secs):
+            pass
+
+        monkeypatch.setattr(signal_router_module, "_delivery_sleep", instant_sleep)
+
+        send_results = [RuntimeError("telegram down"), True, RuntimeError("down"), RuntimeError("down")]
 
         async def flaky_send(chat_id: str, text: str):
             result = send_results.pop(0)
@@ -107,8 +118,8 @@ class TestSignalRouter:
         await queue.put(succeeded)
 
         task = asyncio.create_task(router.start())
-        # Allow enough time for both queued signals to be processed sequentially.
-        await asyncio.sleep(0.3)
+        # Allow enough time for both queued signals and all BTC retries to complete.
+        await asyncio.sleep(0.5)
         await router.stop()
         task.cancel()
         try:
@@ -488,7 +499,95 @@ class TestSignalRouter:
         assert sig.symbol not in router._position_lock
 
     @pytest.mark.asyncio
-    async def test_set_free_limit_zero_discards_daily_best(self, router):
+    async def test_failed_delivery_requeues_signal(self, monkeypatch):
+        """A failed delivery re-queues the signal (appears back in queue)."""
+        for channel in ("360_SCALP", "360_RANGE", "360_SWING", "360_THE_TAPE", "360_SELECT"):
+            monkeypatch.setitem(signal_router_module.CHANNEL_TELEGRAM_MAP, channel, "premium")
+
+        # Patch _delivery_sleep to be instant
+        async def instant_sleep(_secs):
+            pass
+
+        monkeypatch.setattr(signal_router_module, "_delivery_sleep", instant_sleep)
+
+        queue = asyncio.Queue()
+        send_call_count = [0]
+
+        # Always fail to deliver; we stop the router after the first failure+requeue
+        async def always_fail(_chat_id: str, _text: str):
+            send_call_count[0] += 1
+            return False
+
+        router = SignalRouter(
+            queue=queue,
+            send_telegram=always_fail,
+            format_signal=lambda sig: f"Signal: {sig.signal_id}",
+        )
+
+        sig = _make_signal(confidence=90)
+        sig.signal_id = "TEST-REQUEUE"
+        await queue.put(sig)
+
+        task = asyncio.create_task(router.start())
+        # Give enough time for first attempt + one re-queue cycle
+        await asyncio.sleep(0.3)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # Signal was attempted at least once and re-queued (retry counter incremented)
+        assert send_call_count[0] >= 1
+        assert sig._delivery_retries >= 1
+        assert "TEST-REQUEUE" not in router.active_signals
+
+    @pytest.mark.asyncio
+    async def test_failed_delivery_permanent_loss_after_max_retries(self, monkeypatch):
+        """Signal is permanently dropped (with log) after 3 failed delivery attempts."""
+        for channel in ("360_SCALP", "360_RANGE", "360_SWING", "360_THE_TAPE", "360_SELECT"):
+            monkeypatch.setitem(signal_router_module.CHANNEL_TELEGRAM_MAP, channel, "premium")
+
+        async def instant_sleep(_secs):
+            pass
+
+        monkeypatch.setattr(signal_router_module, "_delivery_sleep", instant_sleep)
+
+        queue = asyncio.Queue()
+        send_call_count = [0]
+
+        async def always_fail(_chat_id: str, _text: str):
+            send_call_count[0] += 1
+            return False
+
+        router = SignalRouter(
+            queue=queue,
+            send_telegram=always_fail,
+            format_signal=lambda sig: f"Signal: {sig.signal_id}",
+        )
+
+        sig = _make_signal(confidence=90)
+        sig.signal_id = "TEST-PERMANENT-LOSS"
+        await queue.put(sig)
+
+        task = asyncio.create_task(router.start())
+        # Allow sufficient time for all 3 attempts (2 sends + permanent loss on 3rd)
+        await asyncio.sleep(0.5)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        # All 3 send attempts completed (2 re-queues + final permanent loss)
+        assert send_call_count[0] == 3
+        assert sig._delivery_retries == 2
+        assert "TEST-PERMANENT-LOSS" not in router.active_signals
+        assert sig.symbol not in router._position_lock
+
+
         sig = _make_signal(confidence=95)
         router._daily_best = [sig]
         router.set_free_limit(0)

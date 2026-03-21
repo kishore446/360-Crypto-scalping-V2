@@ -172,11 +172,12 @@ def score_order_flow(
     oi_trend: str = "NEUTRAL",
     liq_vol_usd: float = 0.0,
     cvd_divergence: Optional[str] = None,
+    signal_direction: Optional[str] = None,
 ) -> float:
     """Order-flow component (max 15).
 
     Rewards institutional-grade squeeze confirmation (falling OI + liquidations)
-    and CVD divergence signals.
+    and CVD divergence signals aligned with the trade direction.
 
     Parameters
     ----------
@@ -189,13 +190,20 @@ def score_order_flow(
     cvd_divergence:
         ``"BULLISH"``, ``"BEARISH"``, or ``None`` (as returned by
         :func:`src.order_flow.detect_cvd_divergence`).
+    signal_direction:
+        ``"LONG"``, ``"SHORT"``, or ``None``.  When provided, CVD alignment is
+        checked: aligned divergence (LONG+BULLISH or SHORT+BEARISH) earns +5
+        while a contra divergence (LONG+BEARISH or SHORT+BULLISH) applies a −3
+        penalty (total floored at 0).  When ``None`` (backward-compat / no
+        direction context), CVD divergence contributes 0 points.
 
     Returns
     -------
     float
         0–15 score representing order-flow confirmation quality.
         * Squeeze confirmed (OI falling + liquidations) → up to 10.
-        * CVD divergence aligned with signal → +5.
+        * CVD divergence aligned with signal direction → +5.
+        * CVD divergence contra to signal direction → −3 (floored at 0).
     """
     s = 0.0
 
@@ -209,11 +217,18 @@ def score_order_flow(
             liq_bonus = min(liq_vol_usd / _ORDER_FLOW_LIQ_CAP_USD, 1.0) * 5.0
             s += liq_bonus
 
-    # CVD divergence component (+5 when present)
-    if cvd_divergence is not None:
-        s += 5.0
+    # CVD divergence component: requires signal_direction to score
+    if cvd_divergence is not None and signal_direction is not None:
+        aligned = (
+            (signal_direction == "LONG" and cvd_divergence == "BULLISH")
+            or (signal_direction == "SHORT" and cvd_divergence == "BEARISH")
+        )
+        if aligned:
+            s += 5.0
+        else:
+            s -= 3.0
 
-    return min(s, 15.0)
+    return max(min(s, 15.0), 0.0)
 
 
 def get_session_multiplier(now: Optional[datetime] = None) -> float:

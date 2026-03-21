@@ -1513,7 +1513,6 @@ class TestNormalizeCandles:
         """_load_candles must normalize 2-D arrays so downstream bool checks never raise."""
         import numpy as np
         from config import SEED_TIMEFRAMES
-        from src.scanner import Scanner
 
         n = 60
         two_d_candles = {

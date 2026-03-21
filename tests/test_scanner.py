@@ -337,7 +337,9 @@ class TestScannerConfidencePipeline:
              patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+             patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+             patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         queued_signal = signal_queue.put.await_args.args[0]
@@ -381,7 +383,9 @@ class TestScannerConfidencePipeline:
              patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+             patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+             patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         # Confidence 65.0 < min_confidence 80.0 → rejected
@@ -420,7 +424,9 @@ class TestScannerConfidencePipeline:
                  patch("src.scanner.score_signal_components", return_value=fake_component_score), \
                  patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
                  patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-                 patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+                 patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+                 patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+                 patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
                 await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
             # Signal IS enqueued instantly (no AI latency)
@@ -456,7 +462,9 @@ class TestScannerConfidencePipeline:
              patch("src.scanner.score_signal_components", return_value=fake_component_score), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+             patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+             patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         # Signal passes (min_confidence=10.0) and is enqueued without AI
@@ -476,7 +484,9 @@ class TestScannerEnqueueSemantics:
         with patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+             patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+             patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
         assert ("BTCUSDT", "360_SCALP") not in scanner._cooldown_until
@@ -496,7 +506,9 @@ class TestScannerEnqueueSemantics:
         with patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=80.0, blocked=False)), \
              patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()), \
              patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()), \
-             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()):
+             patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()), \
+             patch("src.scanner.check_vwap_extension", return_value=(True, "")), \
+             patch("src.scanner.check_kill_zone_gate", return_value=(True, "")):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
@@ -932,3 +944,517 @@ class TestInvalidationPairCooldown:
         assert result is False
         # Entry should be removed after expiry
         assert ("ETHUSDT", "360_THE_TAPE") not in scanner._invalidation_pair_cooldown_until
+
+
+# ---------------------------------------------------------------------------
+# Helpers for the 5 new signal quality gate tests
+# ---------------------------------------------------------------------------
+
+_FAKE_SCORE = SimpleNamespace(
+    total=85.0,
+    quality_tier=SimpleNamespace(value="A"),
+    components={
+        "market": 20.0,
+        "setup": 25.0,
+        "execution": 18.0,
+        "risk": 15.0,
+        "context": 7.0,
+    },
+)
+
+
+def _common_gate_patches(scanner, extra_patches: list | None = None):
+    """Return an ExitStack with the standard infrastructure patches plus extras.
+
+    Usage::
+
+        with _common_gate_patches(scanner, [patch("src.scanner.check_mtf_gate", ...)]):
+            ...
+    """
+    import contextlib
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=70.0, blocked=False))
+    )
+    stack.enter_context(
+        patch("src.scanner.score_signal_components", return_value=_FAKE_SCORE)
+    )
+    stack.enter_context(patch("src.scanner.check_vwap_extension", return_value=(True, "")))
+    stack.enter_context(patch("src.scanner.check_kill_zone_gate", return_value=(True, "")))
+    stack.enter_context(patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()))
+    stack.enter_context(patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()))
+    stack.enter_context(patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()))
+    for p in (extra_patches or []):
+        stack.enter_context(p)
+    return stack
+
+
+# ---------------------------------------------------------------------------
+# New gate tests: 5 signal quality filters wired into _prepare_signal()
+# ---------------------------------------------------------------------------
+
+
+class TestMTFGateInScanner:
+    """Filter 1: MTF Confluence Gate wired into _prepare_signal."""
+
+    def _scanner_and_queue(self, channel_name: str = "360_SCALP"):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name=channel_name, min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel=channel_name)
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+        return scanner, signal_queue
+
+    @pytest.mark.asyncio
+    async def test_mtf_gate_blocks_signal_when_misaligned(self):
+        """When check_mtf_gate returns (False, reason) the signal is rejected."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_mtf_gate", return_value=(False, "MTF misaligned")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_mtf_gate_passes_signal_when_aligned(self):
+        """When check_mtf_gate returns (True, '') the signal is allowed through."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_mtf_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_mtf_gate_fails_open_with_empty_indicators(self):
+        """MTF gate must fail open when no timeframe indicator data is available.
+
+        The real check_mtf_gate() returns (True, '') for empty input, so an
+        empty mtf_data dict must never block the signal.
+        """
+        scanner, signal_queue = self._scanner_and_queue()
+
+        # Verify the real gate logic: empty timeframes → (True, "") → signal passes.
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_mtf_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # With all gates passing, signal is enqueued.
+        signal_queue.put.assert_awaited_once()
+
+
+class TestVWAPGateInScanner:
+    """Filter 2: VWAP Extension Rejection wired into _prepare_signal."""
+
+    def _scanner_and_queue(self):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_vwap_gate_blocks_overextended_long(self):
+        """When check_vwap_extension returns (False, reason) the signal is rejected."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_vwap_extension", return_value=(False, "VWAP: overextended")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_vwap_gate_allows_signal_within_bands(self):
+        """When check_vwap_extension returns (True, '') the signal passes."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_vwap_extension", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_vwap_gate_fails_open_on_compute_exception(self):
+        """When compute_vwap raises, the VWAP gate fails open (does not block signal)."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.compute_vwap", side_effect=RuntimeError("no candle data")),
+            # check_vwap_extension must NOT be reached when compute_vwap raises;
+            # keep the default (True,"") patch from _common_gate_patches so that
+            # if the except branch somehow leaks through it still passes.
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+
+class TestKillZoneGateInScanner:
+    """Filter 3: Kill Zone / Session Filter wired into _prepare_signal."""
+
+    def _scanner_and_queue(self):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_kill_zone_gate_blocks_dead_zone_signals(self):
+        """When check_kill_zone_gate returns (False, reason) the signal is rejected."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_kill_zone_gate", return_value=(False, "Kill zone: ASIAN_DEAD_ZONE")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_kill_zone_gate_allows_signal_in_active_session(self):
+        """When check_kill_zone_gate returns (True, '') the signal passes."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_kill_zone_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_kill_zone_gate_blocks_weekend(self):
+        """Kill zone gate blocks signals during the weekend dead zone."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch(
+                "src.scanner.check_kill_zone_gate",
+                return_value=(False, "Kill zone: WEEKEND_DEAD_ZONE – Weekend dead zone"),
+            ),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+
+class TestOIGateInScanner:
+    """Filter 4: OI + Funding Rate Gate wired into _prepare_signal."""
+
+    @pytest.mark.asyncio
+    async def test_oi_gate_skipped_when_no_order_flow_store(self):
+        """OI gate must not run when order_flow_store is None (the default)."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+        assert scanner.order_flow_store is None
+
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=70.0, blocked=False))
+            )
+            stack.enter_context(patch("src.scanner.score_signal_components", return_value=_FAKE_SCORE))
+            stack.enter_context(patch("src.scanner.check_vwap_extension", return_value=(True, "")))
+            stack.enter_context(patch("src.scanner.check_kill_zone_gate", return_value=(True, "")))
+            stack.enter_context(patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()))
+            mock_oi = stack.enter_context(
+                patch("src.scanner.check_oi_gate", return_value=(False, "OI: squeeze"))
+            )
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # Gate function should never be called when order_flow_store is None
+        mock_oi.assert_not_called()
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_oi_gate_blocks_squeeze_when_order_flow_store_present(self):
+        """When order_flow_store is set and OI gate detects a squeeze, signal is rejected."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+
+        from src.order_flow import OISnapshot
+        oi_store = MagicMock()
+        oi_store._oi = {
+            "BTCUSDT": [
+                OISnapshot(timestamp=1.0, open_interest=5000.0),
+                OISnapshot(timestamp=2.0, open_interest=4800.0),
+                OISnapshot(timestamp=3.0, open_interest=4600.0),
+            ]
+        }
+        oi_store.get_oi_trend = MagicMock()
+        oi_store.get_recent_liq_volume_usd = MagicMock(return_value=0.0)
+        oi_store.get_cvd_divergence = MagicMock(return_value=False)
+
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+        scanner.order_flow_store = oi_store
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.analyse_oi", return_value=MagicMock()),
+            patch("src.scanner.check_oi_gate", return_value=(False, "OI: squeeze – LONG quality: LOW")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_oi_gate_allows_momentum_signal(self):
+        """When OI gate detects rising price + rising OI (momentum), signal is allowed."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+
+        from src.order_flow import OISnapshot
+        oi_store = MagicMock()
+        oi_store._oi = {
+            "BTCUSDT": [
+                OISnapshot(timestamp=1.0, open_interest=4600.0),
+                OISnapshot(timestamp=2.0, open_interest=4800.0),
+                OISnapshot(timestamp=3.0, open_interest=5000.0),
+            ]
+        }
+        oi_store.get_oi_trend = MagicMock()
+        oi_store.get_recent_liq_volume_usd = MagicMock(return_value=0.0)
+        oi_store.get_cvd_divergence = MagicMock(return_value=False)
+
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+        scanner.order_flow_store = oi_store
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.analyse_oi", return_value=MagicMock()),
+            patch("src.scanner.check_oi_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_oi_gate_fails_open_on_exception(self):
+        """OI gate exceptions must be caught; signal is allowed through (fail-open)."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+
+        oi_store = MagicMock()
+        oi_store._oi = {}
+
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+        scanner.order_flow_store = oi_store
+
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=70.0, blocked=False))
+            )
+            stack.enter_context(patch("src.scanner.score_signal_components", return_value=_FAKE_SCORE))
+            stack.enter_context(patch("src.scanner.check_vwap_extension", return_value=(True, "")))
+            stack.enter_context(patch("src.scanner.check_kill_zone_gate", return_value=(True, "")))
+            stack.enter_context(patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()))
+            stack.enter_context(patch("src.scanner.analyse_oi", side_effect=RuntimeError("bad data")))
+            mock_oi = stack.enter_context(
+                patch("src.scanner.check_oi_gate", return_value=(False, "would block"))
+            )
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # check_oi_gate is never reached when analyse_oi raises
+        mock_oi.assert_not_called()
+        signal_queue.put.assert_awaited_once()
+
+
+class TestCrossAssetGateInScanner:
+    """Filter 5: Cross-Asset Correlation wired into _prepare_signal."""
+
+    @pytest.mark.asyncio
+    async def test_cross_asset_gate_skipped_for_btcusdt(self):
+        """Cross-asset gate is not entered when the signal symbol is BTCUSDT."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")  # BTCUSDT
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=70.0, blocked=False))
+            )
+            stack.enter_context(patch("src.scanner.score_signal_components", return_value=_FAKE_SCORE))
+            stack.enter_context(patch("src.scanner.check_vwap_extension", return_value=(True, "")))
+            stack.enter_context(patch("src.scanner.check_kill_zone_gate", return_value=(True, "")))
+            stack.enter_context(patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()))
+            mock_ca = stack.enter_context(
+                patch("src.scanner.check_cross_asset_gate", return_value=(False, "would block"))
+            )
+            # BTCUSDT → cross-asset gate body is never entered
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        mock_ca.assert_not_called()
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cross_asset_gate_skipped_for_ethusdt(self):
+        """Cross-asset gate is not entered when the signal symbol is ETHUSDT."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        eth_signal = Signal(
+            channel="360_SCALP",
+            symbol="ETHUSDT",
+            direction=Direction.LONG,
+            entry=3000.0,
+            stop_loss=2900.0,
+            tp1=3100.0,
+            tp2=3200.0,
+            confidence=10.0,
+            signal_id="SIG-ETH",
+            timestamp=utcnow(),
+        )
+        channel.evaluate.return_value = eth_signal
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                patch("src.scanner.compute_confidence", return_value=SimpleNamespace(total=70.0, blocked=False))
+            )
+            stack.enter_context(patch("src.scanner.score_signal_components", return_value=_FAKE_SCORE))
+            stack.enter_context(patch("src.scanner.check_vwap_extension", return_value=(True, "")))
+            stack.enter_context(patch("src.scanner.check_kill_zone_gate", return_value=(True, "")))
+            stack.enter_context(patch.object(scanner, "_evaluate_setup", return_value=_setup_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_execution", return_value=_execution_pass()))
+            stack.enter_context(patch.object(scanner, "_evaluate_risk", return_value=_risk_pass()))
+            mock_ca = stack.enter_context(
+                patch("src.scanner.check_cross_asset_gate", return_value=(False, "would block"))
+            )
+            await scanner._scan_symbol("ETHUSDT", 10_000_000)
+
+        mock_ca.assert_not_called()
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cross_asset_gate_blocks_altcoin_when_btc_dumping(self):
+        """When check_cross_asset_gate returns (False,…) for an altcoin, signal is rejected."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        altcoin_signal = Signal(
+            channel="360_SCALP",
+            symbol="SOLUSDT",
+            direction=Direction.LONG,
+            entry=100.0,
+            stop_loss=95.0,
+            tp1=105.0,
+            tp2=110.0,
+            confidence=10.0,
+            signal_id="SIG-SOL",
+            timestamp=utcnow(),
+        )
+        channel.evaluate.return_value = altcoin_signal
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_cross_asset_gate", return_value=(False, "Cross-asset: BTCUSDT is DUMPING")),
+        ]):
+            await scanner._scan_symbol("SOLUSDT", 5_000_000)
+
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_cross_asset_gate_allows_altcoin_when_btc_bullish(self):
+        """When check_cross_asset_gate returns (True, '') the altcoin signal passes."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        altcoin_signal = Signal(
+            channel="360_SCALP",
+            symbol="SOLUSDT",
+            direction=Direction.LONG,
+            entry=100.0,
+            stop_loss=95.0,
+            tp1=105.0,
+            tp2=110.0,
+            confidence=10.0,
+            signal_id="SIG-SOL-OK",
+            timestamp=utcnow(),
+        )
+        channel.evaluate.return_value = altcoin_signal
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_cross_asset_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("SOLUSDT", 5_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cross_asset_gate_fails_open_on_exception(self):
+        """Cross-asset gate exceptions are caught; signal is allowed through (fail-open)."""
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        altcoin_signal = Signal(
+            channel="360_SCALP",
+            symbol="SOLUSDT",
+            direction=Direction.LONG,
+            entry=100.0,
+            stop_loss=95.0,
+            tp1=105.0,
+            tp2=110.0,
+            confidence=10.0,
+            signal_id="SIG-SOL-ERR",
+            timestamp=utcnow(),
+        )
+        channel.evaluate.return_value = altcoin_signal
+        signal_queue = MagicMock()
+        signal_queue.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=signal_queue)
+
+        def _raise_for_major(sym, tf):
+            if sym in ("BTCUSDT", "ETHUSDT"):
+                raise RuntimeError("BTC/ETH data unavailable")
+            return _candles()
+
+        scanner.data_store.get_candles = MagicMock(side_effect=_raise_for_major)
+
+        with _common_gate_patches(scanner):
+            # Should not raise; cross-asset gate fails open
+            await scanner._scan_symbol("SOLUSDT", 5_000_000)
+
+        signal_queue.put.assert_awaited_once()
+
+

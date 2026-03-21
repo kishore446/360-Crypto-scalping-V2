@@ -1063,7 +1063,10 @@ class TestVWAPGateInScanner:
 
     @pytest.mark.asyncio
     async def test_vwap_gate_blocks_overextended_long(self):
-        """When check_vwap_extension returns (False, reason) the signal is rejected."""
+        """When check_vwap_extension returns (False, reason) a soft penalty is applied instead of hard-blocking.
+
+        The signal is still enqueued but with reduced confidence (soft gate).
+        """
         scanner, signal_queue = self._scanner_and_queue()
 
         with _common_gate_patches(scanner, [
@@ -1071,7 +1074,8 @@ class TestVWAPGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Soft penalty: signal is enqueued (not hard-blocked)
+        signal_queue.put.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_vwap_gate_allows_signal_within_bands(self):
@@ -1189,7 +1193,10 @@ class TestOIGateInScanner:
 
     @pytest.mark.asyncio
     async def test_oi_gate_blocks_squeeze_when_order_flow_store_present(self):
-        """When order_flow_store is set and OI gate detects a squeeze, signal is rejected."""
+        """When order_flow_store is set and OI gate detects a squeeze, a soft penalty is applied.
+
+        The signal is still enqueued but with reduced confidence (soft gate).
+        """
         channel = MagicMock()
         channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
         channel.evaluate.return_value = _make_signal(channel="360_SCALP")
@@ -1218,7 +1225,8 @@ class TestOIGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Soft penalty: signal is enqueued (not hard-blocked)
+        signal_queue.put.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_oi_gate_allows_momentum_signal(self):

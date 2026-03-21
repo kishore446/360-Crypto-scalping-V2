@@ -123,7 +123,7 @@ def compute_mtf_confluence(
     """
     direction = signal_direction.upper()
     states: List[TimeframeState] = []
-    aligned = 0
+    aligned: float = 0.0
 
     for tf_label, data in timeframes.items():
         try:
@@ -145,7 +145,9 @@ def compute_mtf_confluence(
 
         wanted = "BULLISH" if direction == "LONG" else "BEARISH"
         if trend == wanted:
-            aligned += 1
+            aligned += 1.0
+        elif trend == "NEUTRAL":
+            aligned += 0.5  # Partial credit — not opposing the direction
 
     total = len(states)
     if total == 0:

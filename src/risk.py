@@ -32,7 +32,7 @@ _MAX_CONCURRENT_SAME_DIRECTION: int = 1
 _MAX_CONCURRENT_PER_SYMBOL: int = 2
 
 # Minimum acceptable Risk:Reward ratio — trades below this floor are hard-rejected
-_MIN_RR_FLOOR: float = 1.2
+_MIN_RR_FLOOR: float = 1.0
 
 
 @dataclass

@@ -94,6 +94,17 @@ _REGIME_CHANNEL_INCOMPATIBLE: Dict[str, List[str]] = {
     "360_SWING": ["VOLATILE", "DIRTY_RANGE"],
 }
 
+# Penalty multiplier applied to soft-gate base penalties depending on live market regime.
+# Trending markets → lenient (clear direction, fewer false signals).
+# Volatile markets → strict (high chaos, amplify quality gates).
+_REGIME_PENALTY_MULTIPLIER: Dict[str, float] = {
+    "TRENDING_UP":   0.6,   # Strong trend = clear direction, lenient penalties
+    "TRENDING_DOWN": 0.6,   # Same — sustained trend, gates matter less
+    "RANGING":       1.0,   # Mean-reversion market, all quality gates at full weight
+    "VOLATILE":      1.5,   # High chaos = more false signals, amplify penalties
+    "QUIET":         0.8,   # Low volume but stable, gates fire often on thin data
+}
+
 
 @dataclass
 class ScanContext:
@@ -1025,6 +1036,8 @@ class Scanner:
         ctx: ScanContext,
     ) -> Tuple[Optional[Any], Optional[bool]]:
         t0_signal = time.monotonic()
+        soft_penalty: float = 0.0  # Accumulated confidence deduction from soft gates
+        _fired_gates: list = []
         chan_name = chan.config.name
         try:
             sig = chan.evaluate(
@@ -1094,6 +1107,16 @@ class Scanner:
             log.debug("MTF gate blocked {} {}: {}", symbol, chan_name, mtf_reason)
             return None, None
 
+        # Resolve regime penalty multiplier for all soft gates below
+        _regime_name = getattr(ctx.regime_result, "regime", None)
+        if _regime_name is None:
+            _regime_key = ""
+        elif hasattr(_regime_name, "value"):
+            _regime_key = _regime_name.value
+        else:
+            _regime_key = str(_regime_name)
+        regime_mult = _REGIME_PENALTY_MULTIPLIER.get(_regime_key, 1.0)
+
         # ── Filter 2: VWAP Extension Rejection ─────────────────────────────
         try:
             _primary_tf = self._get_primary_timeframe(chan_name)
@@ -1108,8 +1131,14 @@ class Scanner:
                 sig.direction.value, sig.entry, _vwap_result
             )
             if not vwap_allowed:
-                log.debug("VWAP gate blocked {} {}: {}", symbol, chan_name, vwap_reason)
-                return None, None
+                _base = 12.0
+                _scaled = round(_base * regime_mult, 1)
+                soft_penalty += _scaled
+                _fired_gates.append("VWAP")
+                log.debug(
+                    "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                    symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, vwap_reason,
+                )
         except Exception as _vwap_exc:
             log.debug("VWAP gate error for {} {} (fail open): {}", symbol, chan_name, _vwap_exc)
 
@@ -1131,8 +1160,14 @@ class Scanner:
                     oi_analysis = analyse_oi(_prices, _oi_values)
                     oi_allowed, oi_reason = check_oi_gate(sig.direction.value, oi_analysis)
                     if not oi_allowed:
-                        log.debug("OI gate blocked {} {}: {}", symbol, chan_name, oi_reason)
-                        return None, None
+                        _base = 15.0
+                        _scaled = round(_base * regime_mult, 1)
+                        soft_penalty += _scaled
+                        _fired_gates.append("OI")
+                        log.debug(
+                            "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                            symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, oi_reason,
+                        )
             except Exception as _oi_exc:
                 log.debug("OI gate error for {} {} (fail open): {}", symbol, chan_name, _oi_exc)
 
@@ -1169,8 +1204,14 @@ class Scanner:
                 sig.direction.value, _ob, sig.entry
             )
             if not spoof_allowed:
-                log.debug("Spoof gate blocked {} {}: {}", symbol, chan_name, spoof_reason)
-                return None, None
+                _base = 10.0
+                _scaled = round(_base * regime_mult, 1)
+                soft_penalty += _scaled
+                _fired_gates.append("SPOOF")
+                log.debug(
+                    "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                    symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, spoof_reason,
+                )
         except Exception as _spoof_exc:
             log.debug(
                 "Spoof gate error for {} {} (fail open): {}", symbol, chan_name, _spoof_exc
@@ -1183,10 +1224,14 @@ class Scanner:
                 sig.direction.value, ctx.candles, _vol_primary_tf
             )
             if not vol_div_allowed:
+                _base = 10.0
+                _scaled = round(_base * regime_mult, 1)
+                soft_penalty += _scaled
+                _fired_gates.append("VOL_DIV")
                 log.debug(
-                    "Volume divergence gate blocked {} {}: {}", symbol, chan_name, vol_div_reason
+                    "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                    symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, vol_div_reason,
                 )
-                return None, None
         except Exception as _vol_div_exc:
             log.debug(
                 "Volume divergence gate error for {} {} (fail open): {}",
@@ -1198,8 +1243,14 @@ class Scanner:
             symbol, sig.direction.value
         )
         if not cluster_allowed:
-            log.debug("Cluster gate blocked {} {}: {}", symbol, chan_name, cluster_reason)
-            return None, None
+            _base = 8.0
+            _scaled = round(_base * regime_mult, 1)
+            soft_penalty += _scaled
+            _fired_gates.append("CLUSTER")
+            log.debug(
+                "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, cluster_reason,
+            )
 
         risk = self._evaluate_risk(sig, ctx, setup, chan_name=chan_name)
         if not risk.passed:
@@ -1276,6 +1327,19 @@ class Scanner:
             )
         sig.confidence = self._clamp_confidence(sig.confidence)
         sig.post_ai_confidence = sig.confidence
+        # Apply accumulated soft-gate confidence penalty (regime-scaled).
+        # A second clamp follows to prevent negative confidence after large penalty sums.
+        if soft_penalty > 0.0:
+            sig.confidence -= soft_penalty
+            log.debug(
+                "Soft-gate penalty applied {} {}: -{:.1f} → {:.1f}",
+                symbol, chan_name, soft_penalty, sig.confidence,
+            )
+        sig.soft_penalty_total = soft_penalty
+        sig.regime_penalty_multiplier = regime_mult
+        sig.soft_gate_flags = ",".join(_fired_gates)
+        # Second clamp: ensures confidence stays in [0, 100] after soft-penalty deduction.
+        sig.confidence = self._clamp_confidence(sig.confidence)
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)
         if (
             sig.confidence < min_conf

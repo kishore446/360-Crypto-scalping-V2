@@ -63,6 +63,11 @@ class Signal:
     # PnL % frozen at the moment the highest TP was hit (used for signal quality stats)
     best_tp_pnl_pct: float = 0.0
 
+    # ---- Soft-penalty gate tracking ----
+    soft_penalty_total: float = 0.0           # Accumulated soft-gate confidence deduction
+    regime_penalty_multiplier: float = 1.0    # Regime multiplier applied to base penalties
+    soft_gate_flags: str = ""                 # Comma-separated list of soft gates that fired
+
     # ---- DCA (Double Entry) fields ----
     entry_2: Optional[float] = None           # 2nd entry price
     entry_2_filled: bool = False              # Whether 2nd entry was taken

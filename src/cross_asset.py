@@ -32,7 +32,7 @@ Design notes
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 from src.utils import get_logger
 

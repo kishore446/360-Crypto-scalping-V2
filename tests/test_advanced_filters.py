@@ -11,7 +11,6 @@ Modules under test
 
 from __future__ import annotations
 
-import math
 from datetime import datetime, timezone
 
 import numpy as np
@@ -22,7 +21,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 from src.mtf import (
-    MTFResult,
     TimeframeState,
     _classify_trend,
     check_mtf_gate,

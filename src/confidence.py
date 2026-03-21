@@ -228,7 +228,7 @@ def score_order_flow(
         else:
             s -= 3.0
 
-    return max(min(s, 15.0), 0.0)
+    return min(max(s, 0.0), 15.0)
 
 
 def get_session_multiplier(now: Optional[datetime] = None) -> float:

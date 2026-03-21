@@ -311,6 +311,11 @@ class TestScoreOrderFlow:
         )
         assert score == pytest.approx(2.0)
 
+    def test_direction_provided_no_cvd_divergence(self):
+        # signal_direction provided but no CVD divergence → CVD component is 0
+        assert score_order_flow(signal_direction="LONG") == pytest.approx(0.0)
+        assert score_order_flow(signal_direction="SHORT") == pytest.approx(0.0)
+
     def test_rising_oi_zero(self):
         # Rising OI → no squeeze bonus (returns 0 for OI component)
         assert score_order_flow(oi_trend="RISING", liq_vol_usd=1_000_000.0) == 0.0

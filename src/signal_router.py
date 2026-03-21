@@ -371,7 +371,7 @@ class SignalRouter:
                         signal.signal_id,
                         retries + 2,
                     )
-                    await _delivery_sleep(2 ** retries)
+                    await _delivery_sleep(2 ** retries)  # 1 s, 2 s for retries 0, 1
                     await self._queue.put(signal)
                 else:
                     log.error(

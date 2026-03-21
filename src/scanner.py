@@ -1094,6 +1094,13 @@ class Scanner:
             log.debug("MTF gate blocked {} {}: {}", symbol, chan_name, mtf_reason)
             return None, None
 
+        # ── Soft-penalty accumulator ─────────────────────────────────────────
+        # Filters 2, 4, 6, 7, 8 deduct from confidence rather than killing the
+        # signal outright.  Strong signals that fail only one marginal gate can
+        # still survive; weak signals that fail multiple gates will drop below
+        # the per-channel min_confidence floor and be rejected there.
+        soft_penalty: float = 0.0
+
         # ── Filter 2: VWAP Extension Rejection ─────────────────────────────
         try:
             _primary_tf = self._get_primary_timeframe(chan_name)
@@ -1108,8 +1115,11 @@ class Scanner:
                 sig.direction.value, sig.entry, _vwap_result
             )
             if not vwap_allowed:
-                log.debug("VWAP gate blocked {} {}: {}", symbol, chan_name, vwap_reason)
-                return None, None
+                soft_penalty += 12.0
+                log.debug(
+                    "SOFT_PENALTY {} {} {:+.0f} (total={:.0f}): {}",
+                    symbol, chan_name, -12.0, soft_penalty, vwap_reason,
+                )
         except Exception as _vwap_exc:
             log.debug("VWAP gate error for {} {} (fail open): {}", symbol, chan_name, _vwap_exc)
 
@@ -1131,8 +1141,11 @@ class Scanner:
                     oi_analysis = analyse_oi(_prices, _oi_values)
                     oi_allowed, oi_reason = check_oi_gate(sig.direction.value, oi_analysis)
                     if not oi_allowed:
-                        log.debug("OI gate blocked {} {}: {}", symbol, chan_name, oi_reason)
-                        return None, None
+                        soft_penalty += 15.0
+                        log.debug(
+                            "SOFT_PENALTY {} {} {:+.0f} (total={:.0f}): {}",
+                            symbol, chan_name, -15.0, soft_penalty, oi_reason,
+                        )
             except Exception as _oi_exc:
                 log.debug("OI gate error for {} {} (fail open): {}", symbol, chan_name, _oi_exc)
 
@@ -1169,8 +1182,11 @@ class Scanner:
                 sig.direction.value, _ob, sig.entry
             )
             if not spoof_allowed:
-                log.debug("Spoof gate blocked {} {}: {}", symbol, chan_name, spoof_reason)
-                return None, None
+                soft_penalty += 10.0
+                log.debug(
+                    "SOFT_PENALTY {} {} {:+.0f} (total={:.0f}): {}",
+                    symbol, chan_name, -10.0, soft_penalty, spoof_reason,
+                )
         except Exception as _spoof_exc:
             log.debug(
                 "Spoof gate error for {} {} (fail open): {}", symbol, chan_name, _spoof_exc
@@ -1183,10 +1199,11 @@ class Scanner:
                 sig.direction.value, ctx.candles, _vol_primary_tf
             )
             if not vol_div_allowed:
+                soft_penalty += 10.0
                 log.debug(
-                    "Volume divergence gate blocked {} {}: {}", symbol, chan_name, vol_div_reason
+                    "SOFT_PENALTY {} {} {:+.0f} (total={:.0f}): {}",
+                    symbol, chan_name, -10.0, soft_penalty, vol_div_reason,
                 )
-                return None, None
         except Exception as _vol_div_exc:
             log.debug(
                 "Volume divergence gate error for {} {} (fail open): {}",
@@ -1198,8 +1215,11 @@ class Scanner:
             symbol, sig.direction.value
         )
         if not cluster_allowed:
-            log.debug("Cluster gate blocked {} {}: {}", symbol, chan_name, cluster_reason)
-            return None, None
+            soft_penalty += 8.0
+            log.debug(
+                "SOFT_PENALTY {} {} {:+.0f} (total={:.0f}): {}",
+                symbol, chan_name, -8.0, soft_penalty, cluster_reason,
+            )
 
         risk = self._evaluate_risk(sig, ctx, setup, chan_name=chan_name)
         if not risk.passed:
@@ -1219,7 +1239,8 @@ class Scanner:
         )
         if legacy_confidence is None:
             return None, cross_verified
-        sig.confidence = legacy_confidence
+        sig.confidence = legacy_confidence - soft_penalty
+        sig.soft_penalty_total = soft_penalty
         self._apply_regime_channel_adjustments(symbol, chan_name, sig, ctx)
         await self._apply_predictive_adjustments(symbol, sig, ctx)
         setup_score = score_signal_components(

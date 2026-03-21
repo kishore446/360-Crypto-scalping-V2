@@ -142,6 +142,51 @@ class TestComputeMTFConfluence:
         assert result.aligned_count == 2
         assert result.is_aligned is True
 
+    def test_neutral_tfs_give_partial_credit(self):
+        """NEUTRAL timeframes contribute 0.5 alignment credit (not 0.0).
+
+        Scenario: 3 NEUTRAL + 1 BULLISH → aligned = 3×0.5 + 1 = 2.5
+        score = 2.5/4 = 0.625 → passes (≥0.5).
+
+        Previously (all-or-nothing), score = 1/4 = 0.25 → would have blocked.
+        """
+        tfs = {
+            # NEUTRAL: fast > slow but close < fast (between the two EMAs)
+            "1m":  {"ema_fast": 102.0, "ema_slow": 100.0, "close": 101.0},  # NEUTRAL
+            "5m":  {"ema_fast": 102.0, "ema_slow": 100.0, "close": 101.0},  # NEUTRAL
+            "15m": {"ema_fast": 102.0, "ema_slow": 100.0, "close": 101.0},  # NEUTRAL
+            "1h":  {"ema_fast": 103.0, "ema_slow": 100.0, "close": 103.5},  # BULLISH
+        }
+        result = compute_mtf_confluence("LONG", tfs, min_score=0.5)
+        assert result.aligned_count == pytest.approx(2.5)
+        assert result.score == pytest.approx(2.5 / 4)
+        assert result.is_aligned is True  # would have been False before the fix
+
+    def test_neutral_tfs_opposing_direction_give_no_credit(self):
+        """NEUTRAL timeframes give 0.5 partial credit to *either* direction because they
+        are neither confirming nor opposing.  A NEUTRAL TF is not actively working against
+        the signal — it is simply not fully aligned.
+
+        Both LONG and SHORT signals receive 0.5 partial credit per NEUTRAL TF, which means
+        ranging/choppy markets are no longer auto-blocked on either side.
+        """
+        tfs = {
+            # NEUTRAL for a LONG direction → 0.5 each for LONG, but 0 for SHORT
+            "1m":  {"ema_fast": 102.0, "ema_slow": 100.0, "close": 101.0},  # NEUTRAL
+            "1h":  {"ema_fast": 102.0, "ema_slow": 100.0, "close": 101.0},  # NEUTRAL
+        }
+        result_long = compute_mtf_confluence("LONG", tfs, min_score=0.5)
+        result_short = compute_mtf_confluence("SHORT", tfs, min_score=0.5)
+
+        # For LONG: 2 × 0.5 = 1.0 / 2 = 0.5 → exactly at threshold → aligned
+        assert result_long.score == pytest.approx(0.5)
+        assert result_long.is_aligned is True
+
+        # For SHORT: NEUTRAL TFs don't meet "BEARISH" → 0 / 2 = 0.0 → NOT aligned
+        # (they also get 0.5 partial credit for SHORT since they're not opposing SHORT either)
+        assert result_short.score == pytest.approx(0.5)
+        assert result_short.is_aligned is True
+
 
 class TestCheckMTFGate:
     """Tests for the pipeline hook check_mtf_gate()."""

@@ -1062,8 +1062,9 @@ class TestVWAPGateInScanner:
         return scanner, sq
 
     @pytest.mark.asyncio
-    async def test_vwap_gate_blocks_overextended_long(self):
-        """When check_vwap_extension returns (False, reason) the signal is rejected."""
+    async def test_vwap_gate_applies_soft_penalty_on_overextended_long(self):
+        """When check_vwap_extension returns (False, reason) a soft penalty is applied
+        but the signal still fires (it is not hard-blocked)."""
         scanner, signal_queue = self._scanner_and_queue()
 
         with _common_gate_patches(scanner, [
@@ -1071,7 +1072,10 @@ class TestVWAPGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Signal is NOT hard-blocked; a -12 soft penalty is applied instead.
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 12.0
 
     @pytest.mark.asyncio
     async def test_vwap_gate_allows_signal_within_bands(self):
@@ -1188,8 +1192,9 @@ class TestOIGateInScanner:
         signal_queue.put.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_oi_gate_blocks_squeeze_when_order_flow_store_present(self):
-        """When order_flow_store is set and OI gate detects a squeeze, signal is rejected."""
+    async def test_oi_gate_applies_soft_penalty_on_squeeze(self):
+        """When order_flow_store is set and OI gate detects a squeeze, a soft penalty
+        is applied but the signal still fires (it is not hard-blocked)."""
         channel = MagicMock()
         channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
         channel.evaluate.return_value = _make_signal(channel="360_SCALP")
@@ -1218,7 +1223,10 @@ class TestOIGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Signal fires with a -15 soft penalty instead of being hard-blocked.
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 15.0
 
     @pytest.mark.asyncio
     async def test_oi_gate_allows_momentum_signal(self):
@@ -1456,5 +1464,254 @@ class TestCrossAssetGateInScanner:
             await scanner._scan_symbol("SOLUSDT", 5_000_000)
 
         signal_queue.put.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Soft-gate tests: Filters 6, 7, 8 (Spoof / Volume Divergence / Cluster)
+# ---------------------------------------------------------------------------
+
+
+class TestSpoofGateInScanner:
+    """Filter 6: Spoof Detection wired into _prepare_signal as a soft penalty."""
+
+    def _scanner_and_queue(self):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_spoof_gate_applies_soft_penalty(self):
+        """When check_spoof_gate returns (False, reason) a -10 soft penalty is applied
+        but the signal still fires — it is NOT hard-blocked."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_spoof_gate", return_value=(False, "Spoof: wall ratio > 5×")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 10.0
+
+    @pytest.mark.asyncio
+    async def test_spoof_gate_no_penalty_when_clean(self):
+        """When check_spoof_gate returns (True, '') no penalty is applied."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_spoof_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 0.0
+
+    @pytest.mark.asyncio
+    async def test_spoof_gate_fails_open_on_exception(self):
+        """Spoof gate exceptions are caught; signal passes with no penalty (fail-open)."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_spoof_gate", side_effect=RuntimeError("OB unavailable")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 0.0
+
+
+class TestVolumeDivergenceGateInScanner:
+    """Filter 7: Volume Divergence wired into _prepare_signal as a soft penalty."""
+
+    def _scanner_and_queue(self):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_volume_divergence_gate_applies_soft_penalty(self):
+        """When check_volume_divergence_gate returns (False, reason) a -10 soft penalty
+        is applied but the signal still fires."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch(
+                "src.scanner.check_volume_divergence_gate",
+                return_value=(False, "Volume divergence: spike not confirmed"),
+            ),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 10.0
+
+    @pytest.mark.asyncio
+    async def test_volume_divergence_gate_no_penalty_when_confirmed(self):
+        """When check_volume_divergence_gate returns (True, '') no penalty is applied."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_volume_divergence_gate", return_value=(True, "")),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 0.0
+
+
+class TestClusterSuppressionGateInScanner:
+    """Filter 8: Cluster Suppression wired into _prepare_signal as a soft penalty."""
+
+    def _scanner_and_queue(self):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_cluster_gate_applies_soft_penalty(self):
+        """When cluster_suppressor.check_cluster_gate returns (False, reason) a -8
+        soft penalty is applied but the signal still fires."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner):
+            scanner.cluster_suppressor.check_cluster_gate = MagicMock(
+                return_value=(False, "Cluster: 85% LONG")
+            )
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 8.0
+
+    @pytest.mark.asyncio
+    async def test_cluster_gate_no_penalty_when_dispersed(self):
+        """When cluster_suppressor.check_cluster_gate returns (True, '') no penalty."""
+        scanner, signal_queue = self._scanner_and_queue()
+
+        with _common_gate_patches(scanner):
+            scanner.cluster_suppressor.check_cluster_gate = MagicMock(
+                return_value=(True, "")
+            )
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Quality preservation: accumulated soft penalties still kill weak signals
+# ---------------------------------------------------------------------------
+
+
+class TestSoftPenaltyQualityPreservation:
+    """Prove that soft penalties preserve quality via the min_confidence floor.
+
+    Uses a passthrough `score_signal_components` stub so that the penalty
+    propagates into the final confidence value.
+    """
+
+    def _score_passthrough(self, **kwargs):
+        """Return `legacy_confidence` as the total so the soft penalty is visible."""
+        legacy_confidence = kwargs["legacy_confidence"]
+        return SimpleNamespace(
+            total=legacy_confidence,
+            quality_tier=SimpleNamespace(value="A"),
+            components={
+                "market": 20.0,
+                "setup": 25.0,
+                "execution": 18.0,
+                "risk": 15.0,
+                "context": 7.0,
+            },
+        )
+
+    def _make_scanner_with_min_conf(self, min_confidence: float):
+        channel = MagicMock()
+        channel.config = SimpleNamespace(name="360_SCALP", min_confidence=min_confidence)
+        channel.evaluate.return_value = _make_signal(channel="360_SCALP")
+        sq = MagicMock()
+        sq.put = AsyncMock(return_value=True)
+        scanner = _make_scan_ready_scanner(channel=channel, signal_queue=sq)
+        return scanner, sq
+
+    @pytest.mark.asyncio
+    async def test_three_soft_gates_kill_weak_signal(self):
+        """VWAP (-12) + Spoof (-10) + Volume Divergence (-10) = -32 total.
+
+        With base confidence 80, final confidence = 48, which is below the
+        SCALP min_confidence of 70 → signal is still rejected by the
+        quality floor, proving quality is preserved.
+        """
+        scanner, signal_queue = self._make_scanner_with_min_conf(70.0)
+
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_vwap_extension", return_value=(False, "overextended")),
+            patch("src.scanner.check_spoof_gate", return_value=(False, "spoof wall")),
+            patch(
+                "src.scanner.check_volume_divergence_gate",
+                return_value=(False, "volume mismatch"),
+            ),
+            patch(
+                "src.scanner.compute_confidence",
+                return_value=SimpleNamespace(total=80.0, blocked=False),
+            ),
+            patch(
+                "src.scanner.score_signal_components",
+                side_effect=self._score_passthrough,
+            ),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # 80 - 32 = 48 < 70 → killed by quality floor, not by binary gate
+        signal_queue.put.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_one_soft_gate_allows_strong_signal(self):
+        """Volume Divergence (-10) with base confidence 82 → final = 72.
+
+        72 is above the SCALP min_confidence of 70 → signal passes.
+        This proves that strong signals still fire despite soft-gate concerns.
+        """
+        scanner, signal_queue = self._make_scanner_with_min_conf(70.0)
+
+        with _common_gate_patches(scanner, [
+            patch(
+                "src.scanner.check_volume_divergence_gate",
+                return_value=(False, "volume mismatch"),
+            ),
+            patch(
+                "src.scanner.compute_confidence",
+                return_value=SimpleNamespace(total=82.0, blocked=False),
+            ),
+            patch(
+                "src.scanner.score_signal_components",
+                side_effect=self._score_passthrough,
+            ),
+        ]):
+            await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # 82 - 10 = 72 ≥ 70 → signal fires
+        signal_queue.put.assert_awaited_once()
+        sig = signal_queue.put.call_args[0][0]
+        assert sig.soft_penalty_total == 10.0
+        assert sig.confidence == pytest.approx(72.0, abs=1.0)
 
 

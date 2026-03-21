@@ -70,7 +70,7 @@ class MTFResult:
 
     signal_direction: str               # "LONG" | "SHORT"
     score: float                        # 0.0 – 1.0  (aligned TFs / total TFs)
-    aligned_count: int                  # number of TFs agreeing with signal
+    aligned_count: float                # TFs agreeing with signal (NEUTRAL counts as 0.5)
     total_count: int                    # total TFs evaluated
     is_aligned: bool                    # score >= MTF_MIN_SCORE
     is_strong: bool                     # score >= MTF_STRONG_SCORE
@@ -123,7 +123,7 @@ def compute_mtf_confluence(
     """
     direction = signal_direction.upper()
     states: List[TimeframeState] = []
-    aligned = 0
+    aligned: float = 0.0
 
     for tf_label, data in timeframes.items():
         try:
@@ -145,7 +145,9 @@ def compute_mtf_confluence(
 
         wanted = "BULLISH" if direction == "LONG" else "BEARISH"
         if trend == wanted:
-            aligned += 1
+            aligned += 1.0
+        elif trend == "NEUTRAL":
+            aligned += 0.5  # Partial credit — not opposing the direction
 
     total = len(states)
     if total == 0:

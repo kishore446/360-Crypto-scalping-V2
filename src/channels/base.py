@@ -62,6 +62,8 @@ class Signal:
     best_tp_hit: int = 0
     # PnL % frozen at the moment the highest TP was hit (used for signal quality stats)
     best_tp_pnl_pct: float = 0.0
+    # Total confidence deducted by soft-penalty gates (for observability / analytics)
+    soft_penalty_total: float = 0.0
 
     # ---- DCA (Double Entry) fields ----
     entry_2: Optional[float] = None           # 2nd entry price

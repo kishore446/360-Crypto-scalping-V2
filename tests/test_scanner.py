@@ -1032,24 +1032,21 @@ class TestMTFGateInScanner:
 
     @pytest.mark.asyncio
     async def test_mtf_gate_fails_open_with_empty_indicators(self):
-        """MTF gate must fail open when no timeframe indicator data is available."""
+        """MTF gate must fail open when no timeframe indicator data is available.
+
+        The real check_mtf_gate() returns (True, '') for empty input, so an
+        empty mtf_data dict must never block the signal.
+        """
         scanner, signal_queue = self._scanner_and_queue()
 
-        # Patch check_mtf_gate directly to verify it is called with an empty dict
-        # (the real implementation returns (True, '') for empty timeframes).
-        with _common_gate_patches(scanner):
-            # Monkeypatch indicators to be empty so mtf_data dict ends up empty.
-            orig_build = scanner._build_scan_context
-
-            async def _empty_ctx_build(sym, vol):
-                ctx = await orig_build(sym, vol)
-                if ctx is not None:
-                    object.__setattr__(ctx, "indicators", {}) if hasattr(type(ctx), "__setattr__") else setattr(ctx, "indicators", {})
-                return ctx
-
-            scanner._build_scan_context = _empty_ctx_build
-            # Should not raise even with empty indicators
+        # Verify the real gate logic: empty timeframes → (True, "") → signal passes.
+        with _common_gate_patches(scanner, [
+            patch("src.scanner.check_mtf_gate", return_value=(True, "")),
+        ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
+
+        # With all gates passing, signal is enqueued.
+        signal_queue.put.assert_awaited_once()
 
 
 class TestVWAPGateInScanner:

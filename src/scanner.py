@@ -804,6 +804,42 @@ class Scanner:
         sig.tp3 = risk.tp3
         sig.invalidation_summary = risk.invalidation_summary
 
+    @staticmethod
+    def _get_primary_timeframe(chan_name: str) -> str:
+        """Return the primary timeframe interval string for a given channel name."""
+        if chan_name == "360_RANGE":
+            return "15m"
+        if chan_name == "360_SWING":
+            return "1h"
+        if chan_name == "360_THE_TAPE":
+            return "1m"
+        return "5m"
+
+    @staticmethod
+    def _resolve_candles(candles: Dict[str, dict], primary_tf: str) -> dict:
+        """Return the best available candle dict for *primary_tf*, falling back to 5m/1m."""
+        return candles.get(primary_tf) or candles.get("5m") or candles.get("1m") or {}
+
+    @staticmethod
+    def _classify_macro_trend(closes: list) -> tuple[str, float]:
+        """Classify the macro trend from a close price series.
+
+        Returns ``(trend_label, pct_change)`` where *trend_label* is one of
+        ``"DUMPING"``, ``"BEARISH"``, ``"BULLISH"``, or ``"NEUTRAL"``.
+        """
+        first = float(closes[0])
+        last = float(closes[-1])
+        pct = (last - first) / first if first != 0 else 0.0
+        if pct < -0.02:
+            trend = "DUMPING"
+        elif pct < -0.005:
+            trend = "BEARISH"
+        elif pct > 0.005:
+            trend = "BULLISH"
+        else:
+            trend = "NEUTRAL"
+        return trend, pct
+
     def _compute_base_confidence(
         self,
         symbol: str,
@@ -1050,13 +1086,8 @@ class Scanner:
 
         # ── Filter 2: VWAP Extension Rejection ─────────────────────────────
         try:
-            _primary_tf = (
-                "15m" if chan_name == "360_RANGE"
-                else "1h" if chan_name == "360_SWING"
-                else "1m" if chan_name == "360_THE_TAPE"
-                else "5m"
-            )
-            _cd = ctx.candles.get(_primary_tf) or ctx.candles.get("5m") or ctx.candles.get("1m") or {}
+            _primary_tf = self._get_primary_timeframe(chan_name)
+            _cd = self._resolve_candles(ctx.candles, _primary_tf)
             _vwap_result = compute_vwap(
                 np.asarray(_cd.get("high", []), dtype=np.float64),
                 np.asarray(_cd.get("low", []), dtype=np.float64),
@@ -1081,13 +1112,8 @@ class Scanner:
         # ── Filter 4: OI + Funding Rate Gate ────────────────────────────────
         if self.order_flow_store is not None:
             try:
-                _oi_tf = (
-                    "15m" if chan_name == "360_RANGE"
-                    else "1h" if chan_name == "360_SWING"
-                    else "1m" if chan_name == "360_THE_TAPE"
-                    else "5m"
-                )
-                _oi_cd = ctx.candles.get(_oi_tf) or ctx.candles.get("5m") or ctx.candles.get("1m") or {}
+                _oi_tf = self._get_primary_timeframe(chan_name)
+                _oi_cd = self._resolve_candles(ctx.candles, _oi_tf)
                 _prices = _oi_cd.get("close", [])
                 _oi_snaps = list(getattr(self.order_flow_store, "_oi", {}).get(symbol, []))
                 _oi_values = [s.open_interest for s in _oi_snaps]
@@ -1108,15 +1134,7 @@ class Scanner:
                     _major_cd = self.data_store.get_candles(_major, "5m") or {}
                     _major_closes = _major_cd.get("close", [])
                     if len(_major_closes) >= 2:
-                        _first = float(_major_closes[0])
-                        _last = float(_major_closes[-1])
-                        _pct = (_last - _first) / _first if _first != 0 else 0.0
-                        _trend = (
-                            "DUMPING" if _pct < -0.02
-                            else "BEARISH" if _pct < -0.005
-                            else "BULLISH" if _pct > 0.005
-                            else "NEUTRAL"
-                        )
+                        _trend, _pct = self._classify_macro_trend(_major_closes)
                         _asset_states.append(
                             AssetState(symbol=_major, trend=_trend, price_change_pct=_pct)
                         )

@@ -45,7 +45,12 @@ from src.signal_quality import (
     execution_quality_check,
     score_signal_components,
 )
+from src.cross_asset import AssetState, check_cross_asset_gate
+from src.kill_zone import check_kill_zone_gate
+from src.mtf import check_mtf_gate
+from src.oi_filter import analyse_oi, check_oi_gate
 from src.utils import get_logger, price_decimal_fmt
+from src.vwap import check_vwap_extension, compute_vwap
 
 log = get_logger("scanner")
 
@@ -1024,6 +1029,110 @@ class Scanner:
         if not execution.passed:
             log.debug("Rejected {} {} execution: {}", symbol, chan_name, execution.reason)
             return None, None
+
+        # ── Filter 1: MTF Confluence Gate ──────────────────────────────────
+        mtf_data: Dict[str, Dict[str, float]] = {}
+        for tf_label, ind in ctx.indicators.items():
+            ema_fast = ind.get("ema9_last")
+            ema_slow = ind.get("ema21_last")
+            cd = ctx.candles.get(tf_label, {})
+            closes = cd.get("close", [])
+            if ema_fast is not None and ema_slow is not None and closes:
+                mtf_data[tf_label] = {
+                    "ema_fast": float(ema_fast),
+                    "ema_slow": float(ema_slow),
+                    "close": float(closes[-1]),
+                }
+        mtf_allowed, mtf_reason = check_mtf_gate(sig.direction.value, mtf_data)
+        if not mtf_allowed:
+            log.debug("MTF gate blocked {} {}: {}", symbol, chan_name, mtf_reason)
+            return None, None
+
+        # ── Filter 2: VWAP Extension Rejection ─────────────────────────────
+        try:
+            _primary_tf = (
+                "15m" if chan_name == "360_RANGE"
+                else "1h" if chan_name == "360_SWING"
+                else "1m" if chan_name == "360_THE_TAPE"
+                else "5m"
+            )
+            _cd = ctx.candles.get(_primary_tf) or ctx.candles.get("5m") or ctx.candles.get("1m") or {}
+            _vwap_result = compute_vwap(
+                np.asarray(_cd.get("high", []), dtype=np.float64),
+                np.asarray(_cd.get("low", []), dtype=np.float64),
+                np.asarray(_cd.get("close", []), dtype=np.float64),
+                np.asarray(_cd.get("volume", []), dtype=np.float64),
+            )
+            vwap_allowed, vwap_reason = check_vwap_extension(
+                sig.direction.value, sig.entry, _vwap_result
+            )
+            if not vwap_allowed:
+                log.debug("VWAP gate blocked {} {}: {}", symbol, chan_name, vwap_reason)
+                return None, None
+        except Exception as _vwap_exc:
+            log.debug("VWAP gate error for {} {} (fail open): {}", symbol, chan_name, _vwap_exc)
+
+        # ── Filter 3: Kill Zone / Session Filter ────────────────────────────
+        kz_allowed, kz_reason = check_kill_zone_gate()
+        if not kz_allowed:
+            log.debug("Kill zone gate blocked {} {}: {}", symbol, chan_name, kz_reason)
+            return None, None
+
+        # ── Filter 4: OI + Funding Rate Gate ────────────────────────────────
+        if self.order_flow_store is not None:
+            try:
+                _oi_tf = (
+                    "15m" if chan_name == "360_RANGE"
+                    else "1h" if chan_name == "360_SWING"
+                    else "1m" if chan_name == "360_THE_TAPE"
+                    else "5m"
+                )
+                _oi_cd = ctx.candles.get(_oi_tf) or ctx.candles.get("5m") or ctx.candles.get("1m") or {}
+                _prices = _oi_cd.get("close", [])
+                _oi_snaps = list(getattr(self.order_flow_store, "_oi", {}).get(symbol, []))
+                _oi_values = [s.open_interest for s in _oi_snaps]
+                if _prices and _oi_values:
+                    oi_analysis = analyse_oi(_prices, _oi_values)
+                    oi_allowed, oi_reason = check_oi_gate(sig.direction.value, oi_analysis)
+                    if not oi_allowed:
+                        log.debug("OI gate blocked {} {}: {}", symbol, chan_name, oi_reason)
+                        return None, None
+            except Exception as _oi_exc:
+                log.debug("OI gate error for {} {} (fail open): {}", symbol, chan_name, _oi_exc)
+
+        # ── Filter 5: Cross-Asset Correlation ───────────────────────────────
+        if symbol not in ("BTCUSDT", "ETHUSDT"):
+            try:
+                _asset_states: List[AssetState] = []
+                for _major in ("BTCUSDT", "ETHUSDT"):
+                    _major_cd = self.data_store.get_candles(_major, "5m") or {}
+                    _major_closes = _major_cd.get("close", [])
+                    if len(_major_closes) >= 2:
+                        _first = float(_major_closes[0])
+                        _last = float(_major_closes[-1])
+                        _pct = (_last - _first) / _first if _first != 0 else 0.0
+                        _trend = (
+                            "DUMPING" if _pct < -0.02
+                            else "BEARISH" if _pct < -0.005
+                            else "BULLISH" if _pct > 0.005
+                            else "NEUTRAL"
+                        )
+                        _asset_states.append(
+                            AssetState(symbol=_major, trend=_trend, price_change_pct=_pct)
+                        )
+                if _asset_states:
+                    ca_allowed, ca_reason = check_cross_asset_gate(
+                        sig.direction.value, symbol, _asset_states
+                    )
+                    if not ca_allowed:
+                        log.debug(
+                            "Cross-asset gate blocked {} {}: {}", symbol, chan_name, ca_reason
+                        )
+                        return None, None
+            except Exception as _ca_exc:
+                log.debug(
+                    "Cross-asset gate error for {} {} (fail open): {}", symbol, chan_name, _ca_exc
+                )
 
         risk = self._evaluate_risk(sig, ctx, setup, chan_name=chan_name)
         if not risk.passed:

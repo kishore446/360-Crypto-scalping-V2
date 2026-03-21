@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.volume_divergence import (
     DECLINE_THRESHOLD,
     MIN_CANDLE_HISTORY,

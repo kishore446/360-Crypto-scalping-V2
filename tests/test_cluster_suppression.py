@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
-from src.cluster_suppression import ClusterSuppressor, _DIRECTION_BIAS_THRESHOLD
+from src.cluster_suppression import ClusterSuppressor
 
 
 # ---------------------------------------------------------------------------

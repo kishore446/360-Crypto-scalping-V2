@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.spoof_detect import (
     LAYER_CONCENTRATION_THRESHOLD,
     MIN_LEVELS_FOR_ANALYSIS,
-    SPOOF_WALL_RATIO_THRESHOLD,
     WALL_TOP_N,
     check_spoof_gate,
 )

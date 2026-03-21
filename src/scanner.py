@@ -1109,7 +1109,12 @@ class Scanner:
 
         # Resolve regime penalty multiplier for all soft gates below
         _regime_name = getattr(ctx.regime_result, "regime", None)
-        _regime_key = _regime_name.value if hasattr(_regime_name, "value") else str(_regime_name)
+        if _regime_name is None:
+            _regime_key = ""
+        elif hasattr(_regime_name, "value"):
+            _regime_key = _regime_name.value
+        else:
+            _regime_key = str(_regime_name)
         regime_mult = _REGIME_PENALTY_MULTIPLIER.get(_regime_key, 1.0)
 
         # ── Filter 2: VWAP Extension Rejection ─────────────────────────────

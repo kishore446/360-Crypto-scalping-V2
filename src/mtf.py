@@ -70,7 +70,7 @@ class MTFResult:
 
     signal_direction: str               # "LONG" | "SHORT"
     score: float                        # 0.0 – 1.0  (aligned TFs / total TFs)
-    aligned_count: int                  # number of TFs agreeing with signal
+    aligned_count: float                # weighted TF alignment (includes 0.5 for NEUTRAL)
     total_count: int                    # total TFs evaluated
     is_aligned: bool                    # score >= MTF_MIN_SCORE
     is_strong: bool                     # score >= MTF_STRONG_SCORE

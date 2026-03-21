@@ -262,18 +262,59 @@ class TestScoreOrderFlow:
         assert score == pytest.approx(7.5)
 
     def test_cvd_divergence_bonus(self):
-        # CVD divergence alone (+5 regardless of OI)
-        assert score_order_flow(cvd_divergence="BULLISH") == pytest.approx(5.0)
-        assert score_order_flow(cvd_divergence="BEARISH") == pytest.approx(5.0)
+        # CVD divergence without signal_direction → no bonus (0.0 for safety)
+        assert score_order_flow(cvd_divergence="BULLISH") == pytest.approx(0.0)
+        assert score_order_flow(cvd_divergence="BEARISH") == pytest.approx(0.0)
 
     def test_squeeze_plus_cvd(self):
-        # Full squeeze (10) + CVD divergence (5) = 15, capped at 15
+        # Full squeeze (10) + no signal_direction → no CVD bonus, score = 10
         score = score_order_flow(
             oi_trend="FALLING",
             liq_vol_usd=500_000.0,
             cvd_divergence="BULLISH",
         )
+        assert score == pytest.approx(10.0)
+
+    def test_cvd_aligned_long(self):
+        # LONG signal + BULLISH CVD divergence → aligned → +5
+        assert score_order_flow(cvd_divergence="BULLISH", signal_direction="LONG") == pytest.approx(5.0)
+
+    def test_cvd_contra_long(self):
+        # LONG signal + BEARISH CVD divergence → contra → −3 floored at 0
+        assert score_order_flow(cvd_divergence="BEARISH", signal_direction="LONG") == pytest.approx(0.0)
+
+    def test_cvd_aligned_short(self):
+        # SHORT signal + BEARISH CVD divergence → aligned → +5
+        assert score_order_flow(cvd_divergence="BEARISH", signal_direction="SHORT") == pytest.approx(5.0)
+
+    def test_cvd_contra_short(self):
+        # SHORT signal + BULLISH CVD divergence → contra → −3 floored at 0
+        assert score_order_flow(cvd_divergence="BULLISH", signal_direction="SHORT") == pytest.approx(0.0)
+
+    def test_squeeze_plus_aligned_cvd(self):
+        # Full squeeze (10) + aligned CVD = 15, capped at 15
+        score = score_order_flow(
+            oi_trend="FALLING",
+            liq_vol_usd=500_000.0,
+            cvd_divergence="BULLISH",
+            signal_direction="LONG",
+        )
         assert score == pytest.approx(15.0)
+
+    def test_squeeze_with_contra_cvd(self):
+        # Partial squeeze (5) + contra CVD penalty (−3) = 2
+        score = score_order_flow(
+            oi_trend="FALLING",
+            liq_vol_usd=0.0,
+            cvd_divergence="BEARISH",
+            signal_direction="LONG",
+        )
+        assert score == pytest.approx(2.0)
+
+    def test_direction_provided_no_cvd_divergence(self):
+        # signal_direction provided but no CVD divergence → CVD component is 0
+        assert score_order_flow(signal_direction="LONG") == pytest.approx(0.0)
+        assert score_order_flow(signal_direction="SHORT") == pytest.approx(0.0)
 
     def test_rising_oi_zero(self):
         # Rising OI → no squeeze bonus (returns 0 for OI component)

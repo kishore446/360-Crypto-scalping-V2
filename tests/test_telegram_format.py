@@ -3,6 +3,7 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 from src.channels.base import Signal
 from src.smc import Direction
@@ -493,3 +494,152 @@ class TestFormatDailyRecap:
     def test_recap_no_top_trades_when_empty(self):
         text = TelegramBot.format_daily_recap(self._make_summary(top=[]))
         assert "Top 3 Trades" not in text
+
+
+# ---------------------------------------------------------------------------
+# send_message retry logic tests
+# ---------------------------------------------------------------------------
+
+
+class TestSendMessageRetry:
+    """Tests for send_message retry behaviour on various HTTP error responses."""
+
+    def _make_bot(self) -> TelegramBot:
+        bot = TelegramBot()
+        bot._token = "test-token"
+        return bot
+
+    @pytest.mark.asyncio
+    async def test_retries_on_429_with_retry_after(self, monkeypatch):
+        """send_message honours retry_after from a 429 response and retries."""
+        import json as _json
+
+        bot = self._make_bot()
+        calls = []
+        sleep_args = []
+
+        async def instant_sleep(secs):
+            sleep_args.append(secs)
+
+        monkeypatch.setattr(asyncio, "sleep", instant_sleep)
+
+        # First response: 429 with retry_after=3; second: 200 success
+        responses = [
+            (429, _json.dumps({"ok": False, "parameters": {"retry_after": 3}})),
+            (200, "{}"),
+        ]
+
+        class FakeResp:
+            def __init__(self, status, body):
+                self.status = status
+                self._body = body
+
+            async def text(self):
+                return self._body
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+        class FakeSession:
+            closed = False
+
+            def post(self, url, **kwargs):
+                status, body = responses.pop(0)
+                calls.append(status)
+                return FakeResp(status, body)
+
+            async def close(self):
+                pass
+
+        bot._session = FakeSession()
+
+        result = await bot.send_message("chat123", "hello")
+        assert result is True
+        assert calls == [429, 200]
+        assert sleep_args == [3.0]
+
+    @pytest.mark.asyncio
+    async def test_retries_on_500_with_exponential_backoff(self, monkeypatch):
+        """send_message retries on 5xx errors with exponential back-off."""
+        bot = self._make_bot()
+        sleep_args = []
+
+        async def instant_sleep(secs):
+            sleep_args.append(secs)
+
+        monkeypatch.setattr(asyncio, "sleep", instant_sleep)
+
+        responses = [
+            (500, "Internal Server Error"),
+            (500, "Internal Server Error"),
+            (200, "{}"),
+        ]
+
+        class FakeResp:
+            def __init__(self, status, body):
+                self.status = status
+                self._body = body
+
+            async def text(self):
+                return self._body
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+        class FakeSession:
+            closed = False
+
+            def post(self, url, **kwargs):
+                status, body = responses.pop(0)
+                return FakeResp(status, body)
+
+            async def close(self):
+                pass
+
+        bot._session = FakeSession()
+
+        result = await bot.send_message("chat123", "hello")
+        assert result is True
+        # Back-off: 2**0=1, 2**1=2
+        assert sleep_args == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_403(self, monkeypatch):
+        """send_message does NOT retry on non-recoverable 4xx errors (e.g. 403)."""
+        bot = self._make_bot()
+        call_count = [0]
+
+        class FakeResp:
+            status = 403
+            _body = "Forbidden"
+
+            async def text(self):
+                return self._body
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+        class FakeSession:
+            closed = False
+
+            def post(self, url, **kwargs):
+                call_count[0] += 1
+                return FakeResp()
+
+            async def close(self):
+                pass
+
+        bot._session = FakeSession()
+
+        result = await bot.send_message("chat123", "hello")
+        assert result is False
+        assert call_count[0] == 1  # no retries

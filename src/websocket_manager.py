@@ -59,9 +59,10 @@ class WSConnection:
 class WebSocketManager:
     """Manages multiple Binance WebSocket connections with resilience."""
 
-    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None, data_store=None) -> None:
+    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None, data_store=None, label: str | None = None) -> None:
         self._on_message = on_message
         self._market = market
+        self._label = label or market
         self._base_url = BINANCE_WS_BASE if market == "spot" else BINANCE_FUTURES_WS_BASE
         self._rest_base_url = BINANCE_REST_BASE if market == "spot" else BINANCE_FUTURES_REST_BASE
         self._heartbeat_interval = WS_HEARTBEAT_INTERVAL_FUTURES if market == "futures" else WS_HEARTBEAT_INTERVAL
@@ -99,7 +100,7 @@ class WebSocketManager:
             conn.task = asyncio.create_task(self._run_connection(conn))
         log.info(
             "WS manager started: {} streams across {} connections ({})",
-            len(streams), len(self._connections), self._market,
+            len(streams), len(self._connections), self._label,
         )
         self._watchdog_task = asyncio.create_task(self._health_watchdog())
 
@@ -128,7 +129,7 @@ class WebSocketManager:
             await self._session.close()
         self._session = None
         self._connections = []
-        log.info("WS manager stopped ({})", self._market)
+        log.info("WS manager stopped ({})", self._label)
 
     # ------------------------------------------------------------------
     # REST fallback for critical pairs
@@ -219,7 +220,7 @@ class WebSocketManager:
         if self._admin_alert:
             asyncio.create_task(
                 self._admin_alert(
-                    f"⚠️ REST fallback activated for {self._market} critical pairs."
+                    f"⚠️ REST fallback activated for {self._label} critical pairs."
                 )
             )
 
@@ -280,7 +281,7 @@ class WebSocketManager:
                         self._last_alert_time = now
                         asyncio.create_task(
                             self._admin_alert(
-                                f"⚠️ WebSocket connection lost ({self._market}, "
+                                f"⚠️ WebSocket connection lost ({self._label}, "
                                 f"attempt {conn.reconnect_attempts + 1}, "
                                 f"total drops: {self._total_drops}). Reconnecting…"
                             )
@@ -304,7 +305,7 @@ class WebSocketManager:
                 if conn.reconnect_attempts % WS_SESSION_RECYCLE_ATTEMPTS == 0:
                     log.warning(
                         "Recycling HTTP session after {} consecutive failures ({})",
-                        conn.reconnect_attempts, self._market,
+                        conn.reconnect_attempts, self._label,
                     )
                     await self._recreate_session()
                 await asyncio.sleep(actual_delay)
@@ -371,7 +372,7 @@ class WebSocketManager:
             try:
                 await self._session.close()
             except Exception as exc:
-                log.debug("Error closing stale session ({}): {}", self._market, exc)
+                log.debug("Error closing stale session ({}): {}", self._label, exc)
         self._session = aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(keepalive_timeout=30)
         )

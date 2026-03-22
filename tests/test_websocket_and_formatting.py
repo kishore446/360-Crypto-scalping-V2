@@ -572,8 +572,10 @@ class TestTotalDropsCounter:
             market="futures",
             admin_alert_callback=fake_alert,
         )
-        # Bypass the cooldown by back-dating _last_alert_time.
-        ws._last_alert_time = 0.0
+        # Bypass the cooldown by back-dating _last_alert_time far enough that
+        # even on a freshly booted CI container (low time.monotonic() value)
+        # the cooldown check `now - _last_alert_time > WS_ALERT_COOLDOWN` passes.
+        ws._last_alert_time = time.monotonic() - WS_ALERT_COOLDOWN - 1.0
 
         # Simulate two consecutive drops.
         conn = WSConnection()
@@ -590,8 +592,8 @@ class TestTotalDropsCounter:
                     f"⚠️ WebSocket connection lost (futures, attempt 1, "
                     f"total drops: {ws._total_drops}). Reconnecting…"
                 )
-            # Advance time to bypass cooldown for the second drop.
-            ws._last_alert_time = 0.0
+            # Reset to allow the second iteration through the cooldown.
+            ws._last_alert_time = time.monotonic() - WS_ALERT_COOLDOWN - 1.0
 
         assert ws._total_drops == 2
         assert len(alerts) == 2
@@ -613,24 +615,19 @@ class TestStalenessMultiplierConfig:
     """Verify WS_STALENESS_MULTIPLIER config constants are correct."""
 
     def test_staleness_multiplier_spot(self):
-        from config import WS_STALENESS_MULTIPLIER
         assert WS_STALENESS_MULTIPLIER == 10
 
     def test_staleness_multiplier_futures_default(self):
-        from config import WS_STALENESS_MULTIPLIER_FUTURES
         assert WS_STALENESS_MULTIPLIER_FUTURES == 15
 
     def test_futures_staleness_multiplier_greater_than_spot(self):
-        from config import WS_STALENESS_MULTIPLIER, WS_STALENESS_MULTIPLIER_FUTURES
         assert WS_STALENESS_MULTIPLIER_FUTURES > WS_STALENESS_MULTIPLIER
 
     def test_spot_manager_uses_spot_multiplier(self):
-        from config import WS_STALENESS_MULTIPLIER
         ws = WebSocketManager(lambda data: None, market="spot")
         assert ws._staleness_multiplier == WS_STALENESS_MULTIPLIER
 
     def test_futures_manager_uses_futures_multiplier(self):
-        from config import WS_STALENESS_MULTIPLIER_FUTURES
         ws = WebSocketManager(lambda data: None, market="futures")
         assert ws._staleness_multiplier == WS_STALENESS_MULTIPLIER_FUTURES
 

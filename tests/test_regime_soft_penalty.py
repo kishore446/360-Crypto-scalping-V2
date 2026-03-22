@@ -386,8 +386,13 @@ class TestHardGatesStillBlock:
         sq.put.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_kill_zone_gate_still_hard_blocks(self):
-        """Kill zone gate still returns None, None regardless of regime."""
+    async def test_kill_zone_applies_soft_penalty(self):
+        """Kill zone gate is now a soft penalty, not a hard block.
+
+        When check_kill_zone_gate returns (False, reason), a soft penalty of
+        10 pts (scaled by regime multiplier) is applied and the signal is still
+        enqueued if it passes the confidence floor.
+        """
         channel = MagicMock()
         channel.config = SimpleNamespace(name="360_SCALP", min_confidence=10.0)
         channel.evaluate.return_value = _make_signal()
@@ -402,7 +407,8 @@ class TestHardGatesStillBlock:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        sq.put.assert_not_awaited()
+        # Soft penalty: signal is still enqueued (not hard-blocked)
+        sq.put.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_cross_asset_gate_still_hard_blocks(self):

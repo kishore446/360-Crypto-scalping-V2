@@ -543,108 +543,21 @@ class TestComputeIndicatorsArrayShape:
 
 
 class TestThesisCooldown:
-    """Tests for the thesis-based cooldown that prevents SL spam loops."""
+    """Thesis-based cooldowns have been removed (all suppression is now handled
+    by the quality-gate confidence floor).  These tests verify that the old
+    state attributes and methods no longer exist on Scanner."""
 
-    def test_no_thesis_cooldown_initially(self):
+    def test_no_thesis_cooldown_dict(self):
         scanner = _make_scanner()
-        assert scanner._thesis_cooldown_until == {}
+        assert not hasattr(scanner, "_thesis_cooldown_until")
 
-    def test_notify_sl_hit_sets_thesis_cooldown(self):
+    def test_no_symbol_sl_cooldown_dict(self):
         scanner = _make_scanner()
-        scanner.notify_sl_hit(
-            symbol="DASHUSDT",
-            channel="360_RANGE",
-            direction="LONG",
-            setup_class="RANGE_REJECTION",
-            hold_duration_seconds=120.0,  # > 30*2=60 → not rapid
-        )
-        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
-        assert key in scanner._thesis_cooldown_until
-        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
-        from config import THESIS_COOLDOWN_AFTER_SL_SECONDS
-        expected = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
-        assert abs(remaining - expected) < 5
+        assert not hasattr(scanner, "_symbol_sl_cooldown_until")
 
-    def test_notify_sl_hit_rapid_sl_triples_cooldown(self):
+    def test_no_notify_sl_hit_method(self):
         scanner = _make_scanner()
-        # hold=10s, threshold=30*2=60s → rapid SL → 3x multiplier
-        scanner.notify_sl_hit(
-            symbol="DASHUSDT",
-            channel="360_RANGE",
-            direction="LONG",
-            setup_class="RANGE_REJECTION",
-            hold_duration_seconds=10.0,
-        )
-        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
-        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
-        from config import THESIS_COOLDOWN_AFTER_SL_SECONDS
-        base = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
-        assert abs(remaining - base * 3) < 5
-
-    def test_notify_sl_hit_also_sets_symbol_sl_cooldown(self):
-        scanner = _make_scanner()
-        scanner.notify_sl_hit(
-            symbol="DASHUSDT",
-            channel="360_RANGE",
-            direction="LONG",
-            setup_class="RANGE_REJECTION",
-            hold_duration_seconds=10.0,
-        )
-        assert "DASHUSDT" in scanner._symbol_sl_cooldown_until
-        remaining = scanner._symbol_sl_cooldown_until["DASHUSDT"] - time.monotonic()
-        assert remaining > 0
-
-    def test_thesis_cooldown_key_matches_setup_class_value(self):
-        """Verify that the thesis cooldown key uses the SetupClass string value."""
-        from src.signal_quality import SetupClass
-        scanner = _make_scanner()
-        scanner._thesis_cooldown_until[
-            ("BTCUSDT", "360_RANGE", "LONG", SetupClass.RANGE_REJECTION.value)
-        ] = time.monotonic() + 7200
-        # The key using the enum value string must be present
-        key = ("BTCUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
-        assert key in scanner._thesis_cooldown_until
-
-    def test_thesis_cooldown_different_setup_class_not_blocked(self):
-        scanner = _make_scanner()
-        scanner._thesis_cooldown_until[
-            ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
-        ] = time.monotonic() + 7200
-        other_key = ("DASHUSDT", "360_RANGE", "LONG", "EXHAUSTION_FADE")
-        assert other_key not in scanner._thesis_cooldown_until
-
-    def test_notify_sl_hit_unknown_channel_uses_default(self):
-        scanner = _make_scanner()
-        scanner.notify_sl_hit(
-            symbol="XYZUSDT",
-            channel="360_UNKNOWN",
-            direction="SHORT",
-            setup_class="MOMENTUM_EXPANSION",
-            hold_duration_seconds=600.0,
-        )
-        key = ("XYZUSDT", "360_UNKNOWN", "SHORT", "MOMENTUM_EXPANSION")
-        assert key in scanner._thesis_cooldown_until
-        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
-        assert remaining > 0  # default 3600s fallback
-
-    def test_rapid_sl_boundary_exactly_at_threshold_is_not_rapid(self):
-        """Hold duration exactly equal to 2× lifespan is NOT considered rapid."""
-        scanner = _make_scanner()
-        from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
-        lifespan = MIN_SIGNAL_LIFESPAN_SECONDS.get("360_RANGE", 30)
-        scanner.notify_sl_hit(
-            symbol="DASHUSDT",
-            channel="360_RANGE",
-            direction="LONG",
-            setup_class="RANGE_REJECTION",
-            hold_duration_seconds=float(lifespan * 2),  # exactly at boundary
-        )
-        key = ("DASHUSDT", "360_RANGE", "LONG", "RANGE_REJECTION")
-        remaining = scanner._thesis_cooldown_until[key] - time.monotonic()
-        base = THESIS_COOLDOWN_AFTER_SL_SECONDS.get("360_RANGE", 7200)
-        # Should be base cooldown (not 3x) since hold == threshold (not strictly less)
-        assert abs(remaining - base) < 5
-
+        assert not hasattr(scanner, "notify_sl_hit")
 
     def test_1d_arrays_still_work(self):
         """Normal 1-D candle arrays continue to produce correct indicators."""
@@ -882,68 +795,20 @@ class TestRegimeStabilityTracker:
 
 
 class TestInvalidationPairCooldown:
-    """Tests for _invalidation_pair_cooldown_until set by set_invalidation_cooldown."""
+    """Invalidation-based cooldowns have been removed.  These tests verify that
+    the old state attributes and methods no longer exist on Scanner."""
 
-    def test_pair_cooldown_initialized_empty(self):
+    def test_no_invalidation_cooldown_dict(self):
         scanner = _make_scanner()
-        assert scanner._invalidation_pair_cooldown_until == {}
+        assert not hasattr(scanner, "_invalidation_cooldown_until")
 
-    def test_set_invalidation_cooldown_also_sets_pair_cooldown(self):
+    def test_no_invalidation_pair_cooldown_dict(self):
         scanner = _make_scanner()
-        scanner.set_invalidation_cooldown("ETHUSDT", "360_THE_TAPE", "LONG")
-        pair_key = ("ETHUSDT", "360_THE_TAPE")
-        assert pair_key in scanner._invalidation_pair_cooldown_until
+        assert not hasattr(scanner, "_invalidation_pair_cooldown_until")
 
-    def test_pair_cooldown_is_half_of_direction_cooldown(self):
+    def test_no_set_invalidation_cooldown_method(self):
         scanner = _make_scanner()
-        scanner.set_invalidation_cooldown("ETHUSDT", "360_THE_TAPE", "LONG")
-        direction_expiry = scanner._invalidation_cooldown_until[
-            ("ETHUSDT", "360_THE_TAPE", "LONG")
-        ]
-        pair_expiry = scanner._invalidation_pair_cooldown_until[("ETHUSDT", "360_THE_TAPE")]
-        full_duration = scanner._INVALIDATION_COOLDOWN_SECONDS.get("360_THE_TAPE", 300)
-        direction_remaining = direction_expiry - time.monotonic()
-        pair_remaining = pair_expiry - time.monotonic()
-        assert abs(direction_remaining - full_duration) < 2
-        assert abs(pair_remaining - full_duration // 2) < 2
-
-    def test_pair_cooldown_blocks_opposite_direction(self):
-        """After LONG invalidated, SHORT is blocked by pair cooldown in _should_skip_channel."""
-        scanner = _make_scanner()
-        scanner.set_invalidation_cooldown("ETHUSDT", "360_THE_TAPE", "LONG")
-        ctx = MagicMock()
-        ctx.pair_quality.passed = True
-        ctx.market_state = MagicMock()
-        ctx.market_state.__eq__ = lambda self, other: False
-        ctx.regime_result.regime.value = "RANGING"
-        scanner.circuit_breaker = None
-        scanner.router.active_signals = {}
-        ctx.is_ranging = False
-        ctx.adx_val = 25.0
-        # _regime_history empty → not unstable
-        result = scanner._should_skip_channel("ETHUSDT", "360_THE_TAPE", ctx)
-        assert result is True
-
-    def test_pair_cooldown_expires_and_allows_signal(self):
-        scanner = _make_scanner()
-        # Inject already-expired pair cooldown
-        scanner._invalidation_pair_cooldown_until[("ETHUSDT", "360_THE_TAPE")] = (
-            time.monotonic() - 1
-        )
-        ctx = MagicMock()
-        ctx.pair_quality.passed = True
-        ctx.market_state = MagicMock()
-        ctx.market_state.__eq__ = lambda self, other: False
-        ctx.regime_result.regime.value = "RANGING"
-        scanner.circuit_breaker = None
-        scanner.router.active_signals = {}
-        ctx.is_ranging = False
-        ctx.adx_val = 25.0
-        # Expired pair cooldown should be cleaned up; no regime instability
-        result = scanner._should_skip_channel("ETHUSDT", "360_THE_TAPE", ctx)
-        assert result is False
-        # Entry should be removed after expiry
-        assert ("ETHUSDT", "360_THE_TAPE") not in scanner._invalidation_pair_cooldown_until
+        assert not hasattr(scanner, "set_invalidation_cooldown")
 
 
 # ---------------------------------------------------------------------------
@@ -1119,7 +984,9 @@ class TestKillZoneGateInScanner:
 
     @pytest.mark.asyncio
     async def test_kill_zone_gate_blocks_dead_zone_signals(self):
-        """When check_kill_zone_gate returns (False, reason) the signal is rejected."""
+        """When check_kill_zone_gate returns (False, reason) a soft penalty is applied
+        instead of hard-blocking.  The signal is still enqueued with reduced confidence.
+        """
         scanner, signal_queue = self._scanner_and_queue()
 
         with _common_gate_patches(scanner, [
@@ -1127,7 +994,8 @@ class TestKillZoneGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Soft penalty: signal is enqueued (not hard-blocked)
+        signal_queue.put.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_kill_zone_gate_allows_signal_in_active_session(self):
@@ -1143,7 +1011,7 @@ class TestKillZoneGateInScanner:
 
     @pytest.mark.asyncio
     async def test_kill_zone_gate_blocks_weekend(self):
-        """Kill zone gate blocks signals during the weekend dead zone."""
+        """Kill zone gate applies a soft penalty for weekend signals (not a hard block)."""
         scanner, signal_queue = self._scanner_and_queue()
 
         with _common_gate_patches(scanner, [
@@ -1154,7 +1022,8 @@ class TestKillZoneGateInScanner:
         ]):
             await scanner._scan_symbol("BTCUSDT", 10_000_000)
 
-        signal_queue.put.assert_not_awaited()
+        # Soft penalty: signal is enqueued with reduced confidence
+        signal_queue.put.assert_awaited_once()
 
 
 class TestOIGateInScanner:

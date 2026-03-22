@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import numpy as np
 
 from config import SEED_TIMEFRAMES, SIGNAL_SCAN_COOLDOWN_SECONDS
-from config import MIN_SIGNAL_LIFESPAN_SECONDS, THESIS_COOLDOWN_AFTER_SL_SECONDS
 from src.binance import BinanceClient
 from src.confidence import (
     ConfidenceInput,
@@ -79,11 +78,6 @@ _RANGE_BORDERLINE_ADX_HIGH: float = 25.0
 
 # Maximum number of symbols scanned concurrently
 _MAX_CONCURRENT_SCANS: int = 10
-
-# Maximum per-symbol SL cooldown set by notify_sl_hit (caps the thesis cooldown
-# duration that flows into the cross-channel _symbol_sl_cooldown_until, to avoid
-# locking a symbol for hours across unrelated theses).
-_MAX_SYMBOL_SL_COOLDOWN_SECONDS: int = 900  # 15 minutes
 
 # Regime-channel compatibility matrix.
 # Maps channel name → list of regimes where that channel is blocked.
@@ -243,23 +237,6 @@ class Scanner:
         # Cooldown tracking: (symbol, channel_name) → monotonic expiry time
         self._cooldown_until: Dict[Tuple[str, str], float] = {}
 
-        # Per-symbol cooldown after a stop-loss: prevents any channel from
-        # firing on the same symbol for a short window after an SL event.
-        self._symbol_sl_cooldown_until: Dict[str, float] = {}
-
-        # Post-invalidation cooldown: (symbol, channel, direction) → monotonic expiry
-        # Prevents rapid re-fire of the same thesis after invalidation.
-        self._invalidation_cooldown_until: Dict[Tuple[str, str, str], float] = {}
-
-        # Post-invalidation pair cooldown: (symbol, channel) → monotonic expiry
-        # Prevents any direction from firing on the same (symbol, channel) pair
-        # for a shorter window after an invalidation (half the direction cooldown).
-        self._invalidation_pair_cooldown_until: Dict[Tuple[str, str], float] = {}
-
-        # Thesis-based cooldown: (symbol, channel, direction, setup_class) → expiry
-        # Prevents the same failing thesis from re-firing after an SL hit.
-        self._thesis_cooldown_until: Dict[Tuple[str, str, str, str], float] = {}
-
         # Regime history: symbol → list of (monotonic_time, regime_value) tuples
         # Used to detect oscillating / unstable regimes (too many flips in window).
         self._regime_history: Dict[str, List[Tuple[float, str]]] = {}
@@ -355,64 +332,12 @@ class Scanner:
 
     def _set_cooldown(self, symbol: str, channel_name: str) -> None:
         """Start the cooldown timer for (symbol, channel)."""
-        cooldown_s = SIGNAL_SCAN_COOLDOWN_SECONDS.get(channel_name, 300)
+        cooldown_s = SIGNAL_SCAN_COOLDOWN_SECONDS.get(channel_name, 60)
         self._cooldown_until[(symbol, channel_name)] = (
             time.monotonic() + cooldown_s
         )
         log.debug(
             "Cooldown set for {} {} ({:.0f}s)", symbol, channel_name, cooldown_s
-        )
-
-    def set_symbol_sl_cooldown(self, symbol: str, duration_s: float = 60.0) -> None:
-        """Apply a short cross-channel cooldown for *symbol* after a stop-loss.
-
-        Called by the TradeMonitor when any signal for *symbol* hits its stop
-        loss.  Prevents every other channel from immediately firing a new signal
-        on the same symbol before the market has had time to stabilise.
-        """
-        self._symbol_sl_cooldown_until[symbol] = time.monotonic() + duration_s
-        log.debug(
-            "Per-symbol SL cooldown set for {} ({:.0f}s)", symbol, duration_s
-        )
-
-    # Post-invalidation cooldown durations per channel (seconds)
-    _INVALIDATION_COOLDOWN_SECONDS: Dict[str, int] = {
-        "360_THE_TAPE": 600,
-        "360_SCALP": 300,
-        "360_RANGE": 300,
-        "360_SWING": 600,
-        "360_SELECT": 600,
-    }
-
-    def set_invalidation_cooldown(
-        self,
-        symbol: str,
-        channel: str,
-        direction: str,
-    ) -> None:
-        """Apply a cooldown for (symbol, channel, direction) after invalidation.
-
-        Prevents the same thesis from re-firing immediately after a signal is
-        invalidated (e.g., EMA crossover kills BNBUSDT SHORT, then it fires again
-        within minutes with the same parameters).
-
-        Also sets a shorter any-direction cooldown on (symbol, channel) so that
-        an opposing direction cannot fire immediately after the invalidation.
-        """
-        duration_s = self._INVALIDATION_COOLDOWN_SECONDS.get(channel, 300)
-        key = (symbol, channel, direction)
-        self._invalidation_cooldown_until[key] = time.monotonic() + duration_s
-        log.debug(
-            "Post-invalidation cooldown set for {} {} {} ({:.0f}s)",
-            symbol, channel, direction, duration_s,
-        )
-        # Pair-level (any-direction) cooldown at half the direction-specific duration
-        pair_duration_s = duration_s // 2
-        pair_key = (symbol, channel)
-        self._invalidation_pair_cooldown_until[pair_key] = time.monotonic() + pair_duration_s
-        log.debug(
-            "Post-invalidation pair cooldown set for {} {} ({:.0f}s)",
-            symbol, channel, pair_duration_s,
         )
 
     def _count_regime_flips(self, symbol: str, window_minutes: int = 30) -> int:
@@ -440,61 +365,6 @@ class Scanner:
         symbol is considered too noisy for TAPE-style signals.
         """
         return self._count_regime_flips(symbol, window_minutes) > max_flips
-
-    def notify_sl_hit(
-        self,
-        symbol: str,
-        channel: str,
-        direction: str,
-        setup_class: str,
-        hold_duration_seconds: float,
-    ) -> None:
-        """Called by the trade monitor when a signal is stopped out.
-
-        Sets a thesis-based cooldown so the same failing setup cannot re-fire
-        immediately.  If the SL was hit very quickly (within 2× the channel's
-        minimum lifespan), the cooldown is multiplied by 3 to reflect that the
-        entry was already invalid at signal generation time.
-
-        Parameters
-        ----------
-        symbol:
-            Trading pair symbol (e.g. ``"DASHUSDT"``).
-        channel:
-            Channel name (e.g. ``"360_RANGE"``).
-        direction:
-            Trade direction ``"LONG"`` or ``"SHORT"``.
-        setup_class:
-            Setup class value (e.g. ``"RANGE_REJECTION"``).
-        hold_duration_seconds:
-            How long the signal was live before hitting SL.
-        """
-        base_cooldown = THESIS_COOLDOWN_AFTER_SL_SECONDS.get(channel, 3600)
-        lifespan_threshold = MIN_SIGNAL_LIFESPAN_SECONDS.get(channel, 30)
-        rapid_sl = hold_duration_seconds < lifespan_threshold * 2
-        if rapid_sl:
-            base_cooldown *= 3
-            log.warning(
-                "Rapid SL detected for {} {} {} (held {:.1f}s < {}s threshold) – "
-                "thesis cooldown set to {:.0f}s",
-                symbol, channel, direction,
-                hold_duration_seconds, lifespan_threshold * 2, base_cooldown,
-            )
-        else:
-            log.debug(
-                "SL hit for {} {} {} (held {:.1f}s) – thesis cooldown set to {:.0f}s",
-                symbol, channel, direction, hold_duration_seconds, base_cooldown,
-            )
-        key = (symbol, channel, direction, setup_class)
-        self._thesis_cooldown_until[key] = time.monotonic() + base_cooldown
-        # Also refresh the per-symbol SL cooldown for a shorter cross-channel window
-        symbol_cooldown = min(base_cooldown, _MAX_SYMBOL_SL_COOLDOWN_SECONDS)
-        self._symbol_sl_cooldown_until[symbol] = (
-            max(
-                self._symbol_sl_cooldown_until.get(symbol, 0.0),
-                time.monotonic() + symbol_cooldown,
-            )
-        )
 
     async def _scan_symbol_bounded(self, sem: asyncio.Semaphore, symbol: str, volume_24h: float) -> None:
         """Acquire *sem* then delegate to :meth:`_scan_symbol`."""
@@ -727,26 +597,6 @@ class Scanner:
         if self._is_in_cooldown(symbol, chan_name):
             log.debug("Cooldown active: skipping {} {}", symbol, chan_name)
             return True
-        # Post-invalidation pair cooldown: any-direction suppression after an
-        # invalidation, so the opposite direction cannot fire immediately.
-        pair_inv_expiry = self._invalidation_pair_cooldown_until.get((symbol, chan_name))
-        if pair_inv_expiry is not None:
-            if time.monotonic() < pair_inv_expiry:
-                log.debug(
-                    "Post-invalidation pair cooldown: skipping {} {}",
-                    symbol, chan_name,
-                )
-                return True
-            del self._invalidation_pair_cooldown_until[(symbol, chan_name)]
-        # Per-symbol SL cooldown: suppress all channels briefly after an SL event
-        sl_expiry = self._symbol_sl_cooldown_until.get(symbol)
-        if sl_expiry is not None:
-            if time.monotonic() < sl_expiry:
-                log.debug(
-                    "Per-symbol SL cooldown active: skipping {} {}", symbol, chan_name
-                )
-                return True
-            del self._symbol_sl_cooldown_until[symbol]
         # Per-symbol circuit breaker: suppress the symbol across all channels
         # when it has accumulated too many consecutive SL hits.
         if self.circuit_breaker is not None and self.circuit_breaker.is_symbol_tripped(symbol):
@@ -1079,35 +929,10 @@ class Scanner:
         if sig is None:
             return None, None
 
-        # Post-invalidation cooldown: suppress same (symbol, channel, direction) thesis
-        inv_key = (symbol, chan_name, sig.direction.value)
-        inv_expiry = self._invalidation_cooldown_until.get(inv_key)
-        if inv_expiry is not None:
-            if time.monotonic() < inv_expiry:
-                log.debug(
-                    "Post-invalidation cooldown: skipping {} {} {}",
-                    symbol, chan_name, sig.direction.value,
-                )
-                return None, None
-            del self._invalidation_cooldown_until[inv_key]
-
         setup = self._evaluate_setup(chan_name, sig, ctx)
         if not setup.channel_compatible or not setup.regime_compatible:
             log.debug("Rejected {} {} setup: {}", symbol, chan_name, setup.reason)
             return None, None
-
-        # Thesis-based cooldown: suppress (symbol, channel, direction, setup_class)
-        # after an SL hit on the same thesis to prevent spam loops.
-        thesis_key = (symbol, chan_name, sig.direction.value, setup.setup_class.value)
-        thesis_expiry = self._thesis_cooldown_until.get(thesis_key)
-        if thesis_expiry is not None:
-            if time.monotonic() < thesis_expiry:
-                log.debug(
-                    "Thesis cooldown active: skipping {} {} {} {}",
-                    symbol, chan_name, sig.direction.value, setup.setup_class.value,
-                )
-                return None, None
-            del self._thesis_cooldown_until[thesis_key]
 
         execution = self._evaluate_execution(sig, ctx, setup)
         if not execution.passed:
@@ -1170,8 +995,14 @@ class Scanner:
         # ── Filter 3: Kill Zone / Session Filter ────────────────────────────
         kz_allowed, kz_reason = check_kill_zone_gate()
         if not kz_allowed:
-            log.debug("Kill zone gate blocked {} {}: {}", symbol, chan_name, kz_reason)
-            return None, None
+            _base = 10.0
+            _scaled = round(_base * regime_mult, 1)
+            soft_penalty += _scaled
+            _fired_gates.append("KZ")
+            log.debug(
+                "SOFT_PENALTY {} {} {:+.1f} (base={:.0f} × regime={:.1f}) total={:.1f}: {}",
+                symbol, chan_name, _scaled, _base, regime_mult, soft_penalty, kz_reason,
+            )
 
         # ── Filter 4: OI + Funding Rate Gate ────────────────────────────────
         if self.order_flow_store is not None:

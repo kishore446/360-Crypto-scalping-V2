@@ -202,18 +202,6 @@ class CryptoSignalEngine:
         self._scanner.confidence_overrides = self._confidence_overrides
         self._scanner.circuit_breaker = self._circuit_breaker
 
-        # Wire the per-symbol SL cooldown callback so the monitor triggers a
-        # short cross-channel cooldown on the scanner after any stop-loss.
-        self.monitor.on_sl_callback = self._scanner.set_symbol_sl_cooldown
-
-        # Wire the post-invalidation cooldown callback so the monitor suppresses
-        # rapid re-fire of the same (symbol, channel, direction) thesis after invalidation.
-        self.monitor.on_invalidation_callback = self._scanner.set_invalidation_cooldown
-
-        # Wire the thesis-based SL cooldown callback so the monitor suppresses
-        # the same failing setup for a longer period after an SL hit.
-        self.monitor.on_thesis_sl_callback = self._scanner.notify_sl_hit
-
         # Wire the free-channel highlight callback so the monitor posts winning
         # trades (TP2+) to the free channel in real-time.
         self.monitor.on_highlight_callback = lambda sig, tp, pnl: asyncio.ensure_future(

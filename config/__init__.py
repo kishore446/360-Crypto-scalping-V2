@@ -274,11 +274,11 @@ CHANNEL_COOLDOWN_SECONDS: Dict[str, int] = {
 # within the cooldown window.
 # ---------------------------------------------------------------------------
 SIGNAL_SCAN_COOLDOWN_SECONDS: Dict[str, int] = {
-    "360_SCALP": int(os.getenv("SCALP_SCAN_COOLDOWN", "300")),      # 5 min
-    "360_SWING": int(os.getenv("SWING_SCAN_COOLDOWN", "1800")),     # 30 min
-    "360_RANGE": int(os.getenv("RANGE_SCAN_COOLDOWN", "900")),      # 15 min
-    "360_THE_TAPE": int(os.getenv("TAPE_SCAN_COOLDOWN", "300")),    # 5 min
-    "360_SELECT": int(os.getenv("SELECT_SCAN_COOLDOWN", "300")),    # 5 min
+    "360_SCALP": int(os.getenv("SCALP_SCAN_COOLDOWN", "60")),
+    "360_SWING": int(os.getenv("SWING_SCAN_COOLDOWN", "60")),
+    "360_RANGE": int(os.getenv("RANGE_SCAN_COOLDOWN", "60")),
+    "360_THE_TAPE": int(os.getenv("TAPE_SCAN_COOLDOWN", "60")),
+    "360_SELECT": int(os.getenv("SELECT_SCAN_COOLDOWN", "60")),
 }
 
 # ---------------------------------------------------------------------------

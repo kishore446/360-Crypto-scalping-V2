@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from config import (
-    BATCH_REQUEST_DELAY,
     GEM_MIN_VOLUME_USD,
     GEM_PAIRS_COUNT,
     PAIR_FETCH_INTERVAL_HOURS,
@@ -113,7 +112,6 @@ class PairManager:
                     quote_asset="USDT",
                     volume_24h_usd=float(t.get("quoteVolume", 0)),
                 ))
-                await asyncio.sleep(BATCH_REQUEST_DELAY * 0.1)
         except Exception as exc:
             log.error("fetch_top_spot_pairs error: %s", exc)
         return pairs
@@ -144,7 +142,6 @@ class PairManager:
                     quote_asset="USDT",
                     volume_24h_usd=float(t.get("quoteVolume", 0)),
                 ))
-                await asyncio.sleep(BATCH_REQUEST_DELAY * 0.1)
         except Exception as exc:
             log.error("fetch_top_futures_pairs error: %s", exc)
         return pairs
@@ -181,7 +178,6 @@ class PairManager:
                     quote_asset="USDT",
                     volume_24h_usd=float(t.get("quoteVolume", 0)),
                 ))
-                await asyncio.sleep(BATCH_REQUEST_DELAY * 0.1)
         except Exception as exc:
             log.error("fetch_gem_universe error: %s", exc)
         log.info("Gem universe fetched – %d pairs (limit=%d, min_vol=$%,.0f)",

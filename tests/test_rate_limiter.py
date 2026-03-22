@@ -5,6 +5,8 @@ Covers:
 - Auto-reset after the 60-second window elapses
 - acquire() blocks (suspends) when the budget is exhausted, then resumes
 - update_from_header() syncs weight from server-reported values
+- set_budget() dynamically adjusts the budget
+- Separate spot/futures limiter singletons are distinct instances
 - Pre-filter logic (_prefilter_pairs) reduces the symbol set
 """
 
@@ -16,7 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.rate_limiter import RateLimiter
+from src.rate_limiter import RateLimiter, spot_rate_limiter, futures_rate_limiter, rate_limiter
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +195,77 @@ class TestUpdateFromHeader:
         # Should not raise; logging happens internally
         rl.update_from_header("85")
         assert rl.used == 85
+
+
+
+# ---------------------------------------------------------------------------
+# set_budget()
+# ---------------------------------------------------------------------------
+
+class TestSetBudget:
+    """set_budget() dynamically adjusts the weight budget."""
+
+    def test_set_budget_changes_budget_property(self):
+        rl = _make_limiter(budget=1000)
+        rl.set_budget(1100)
+        assert rl.budget == 1100
+
+    def test_set_budget_allows_higher_acquire(self):
+        """After raising budget, previously exhausting acquire should succeed."""
+        rl = _make_limiter(budget=100)
+        rl._used = 90
+        # With the old budget, acquiring 20 would block; after raising it won't.
+        rl.set_budget(200)
+        assert rl.remaining >= 110  # 200 - 90
+
+    def test_set_budget_affects_remaining(self):
+        rl = _make_limiter(budget=500)
+        rl._used = 300
+        rl.set_budget(1000)
+        assert rl.remaining == 700
+
+    def test_set_budget_lower_reduces_remaining(self):
+        rl = _make_limiter(budget=1000)
+        rl._used = 0
+        rl.set_budget(500)
+        assert rl.budget == 500
+        assert rl.remaining == 500
+
+
+# ---------------------------------------------------------------------------
+# Separate spot / futures limiter singletons
+# ---------------------------------------------------------------------------
+
+class TestSeparateLimiters:
+    """spot_rate_limiter and futures_rate_limiter are distinct instances."""
+
+    def test_spot_and_futures_are_separate_objects(self):
+        assert spot_rate_limiter is not futures_rate_limiter
+
+    def test_rate_limiter_alias_points_to_spot(self):
+        """Backward-compatible `rate_limiter` should be the spot limiter."""
+        assert rate_limiter is spot_rate_limiter
+
+    def test_spot_limiter_budget_change_does_not_affect_futures(self):
+        original_spot_budget = spot_rate_limiter.budget
+        original_futures_budget = futures_rate_limiter.budget
+        try:
+            spot_rate_limiter.set_budget(999)
+            # Futures budget must be unchanged
+            assert futures_rate_limiter.budget == original_futures_budget
+        finally:
+            # Restore original budgets so other tests aren't affected
+            spot_rate_limiter.set_budget(original_spot_budget)
+
+    def test_binance_client_spot_uses_spot_limiter(self):
+        from src.binance import BinanceClient
+        client = BinanceClient("spot")
+        assert client._rate_limiter is spot_rate_limiter
+
+    def test_binance_client_futures_uses_futures_limiter(self):
+        from src.binance import BinanceClient
+        client = BinanceClient("futures")
+        assert client._rate_limiter is futures_rate_limiter
 
 
 # ---------------------------------------------------------------------------

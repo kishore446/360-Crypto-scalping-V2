@@ -7,9 +7,13 @@ Provides :class:`RateLimiter` which:
   sufficient budget is available so no request ever exceeds the limit.
 - Syncs the authoritative weight counter from the ``X-MBX-USED-WEIGHT-1m``
   response header via :meth:`~RateLimiter.update_from_header`.
+- Supports dynamic budget adjustment via :meth:`~RateLimiter.set_budget`.
 
-A module-level singleton :data:`rate_limiter` is exported and shared by all
-:class:`~src.binance.BinanceClient` instances.
+Two module-level singletons are exported: :data:`spot_rate_limiter` and
+:data:`futures_rate_limiter`.  Binance tracks spot and futures rate limits
+independently, so using separate limiters avoids being overly conservative.
+The legacy :data:`rate_limiter` alias points at :data:`spot_rate_limiter`
+for backward compatibility.
 
 Safety targets
 --------------
@@ -160,6 +164,17 @@ class RateLimiter:
         if time.monotonic() - self._window_start >= self._window_s:
             self._reset()
 
+    def set_budget(self, budget: int) -> None:
+        """Dynamically adjust the weight budget (e.g. for boot vs steady-state).
+
+        Parameters
+        ----------
+        budget:
+            New maximum weight allowed per 60-second window.
+        """
+        self._budget = budget
+        log.info("Rate limiter budget set to %d", budget)
+
     def _reset(self) -> None:
         self._used = 0
         self._window_start = time.monotonic()
@@ -167,6 +182,13 @@ class RateLimiter:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton shared by all BinanceClient instances
+# Module-level singletons — one per Binance rate-limit domain.
+# Binance tracks spot and futures request weight independently, so using
+# separate limiters avoids sharing the budget unnecessarily.
 # ---------------------------------------------------------------------------
-rate_limiter: RateLimiter = RateLimiter()
+spot_rate_limiter: RateLimiter = RateLimiter()
+futures_rate_limiter: RateLimiter = RateLimiter()
+
+# Backward-compatible alias — existing code importing `rate_limiter` will
+# continue to work and will be throttled against the spot budget.
+rate_limiter = spot_rate_limiter

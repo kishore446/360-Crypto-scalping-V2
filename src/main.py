@@ -393,12 +393,18 @@ class CryptoSignalEngine:
 
     async def _pair_refresh_loop(self) -> None:
         """Periodically refresh pairs and seed any newly discovered symbols."""
+        _MAX_NEW_SEEDS_PER_CYCLE = 10
         while True:
             await asyncio.sleep(PAIR_FETCH_INTERVAL_HOURS * 3600)
             try:
                 old_spot, old_futures = self._current_ws_symbol_sets()
                 new_symbols = await self.pair_mgr.refresh_pairs()
-                for sym in new_symbols:
+                if new_symbols:
+                    log.info(
+                        "Discovered %d new pairs — seeding historical data",
+                        len(new_symbols),
+                    )
+                for sym in new_symbols[:_MAX_NEW_SEEDS_PER_CYCLE]:
                     info = self.pair_mgr.pairs.get(sym)
                     if info is None:
                         continue
@@ -411,6 +417,12 @@ class CryptoSignalEngine:
                         log.info("Seeded new pair %s (%s)", sym, info.market)
                     except Exception as exc:
                         log.error("Failed to seed new pair %s: %s", sym, exc)
+                if len(new_symbols) > _MAX_NEW_SEEDS_PER_CYCLE:
+                    log.warning(
+                        "Deferred seeding for %d new pairs (max %d per cycle)",
+                        len(new_symbols) - _MAX_NEW_SEEDS_PER_CYCLE,
+                        _MAX_NEW_SEEDS_PER_CYCLE,
+                    )
                 await self._restart_websockets_if_pair_universe_changed(
                     old_spot, old_futures
                 )

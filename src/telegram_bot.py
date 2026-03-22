@@ -240,7 +240,6 @@ class TelegramBot:
         timestamp: float,
     ) -> str:
         """Format a 360_GEM macro-reversal signal for Telegram."""
-        from src.utils import utcnow
         import datetime
 
         ts_str = datetime.datetime.utcfromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M UTC")

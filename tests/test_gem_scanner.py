@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import patch
 
-import numpy as np
-import pytest
 
 from src.gem_scanner import GemScanner, GemScannerConfig, GemSignal
 

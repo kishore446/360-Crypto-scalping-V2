@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -175,7 +175,7 @@ class GemScanner:
         if avg_vol <= 0:
             return None
 
-        vol_ratio = recent_vol / avg_vol
+        vol_ratio = float(recent_vol / avg_vol)
 
         if vol_ratio < self._config.min_volume_ratio:
             return None

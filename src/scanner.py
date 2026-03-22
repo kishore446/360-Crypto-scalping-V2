@@ -8,7 +8,6 @@ and optional circuit-breaker integration.
 from __future__ import annotations
 
 import asyncio
-import copy
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple

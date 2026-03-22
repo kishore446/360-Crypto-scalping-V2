@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 import aiohttp
 
 from config import BINANCE_FUTURES_REST_BASE, BINANCE_REST_BASE
-from src.rate_limiter import rate_limiter
+from src.rate_limiter import futures_rate_limiter, spot_rate_limiter
 from src.utils import get_logger
 
 log = get_logger("binance_client")
@@ -49,6 +49,12 @@ class BinanceClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._used_weight: int = 0
         self._weight_reset_at: float = time.monotonic() + _WEIGHT_WINDOW_S
+        # Select the appropriate rate-limiter for this market.  Binance tracks
+        # spot and futures weight limits independently, so each market uses its
+        # own budget rather than sharing a single conservative pool.
+        self._rate_limiter = (
+            futures_rate_limiter if market == "futures" else spot_rate_limiter
+        )
 
     # ------------------------------------------------------------------
     # Weight tracking
@@ -101,10 +107,10 @@ class BinanceClient:
         session = await self._ensure_session()
         url = self._base_url + path
 
-        # Throttle proactively: wait until the shared rate-limiter budget has
-        # room for this request.  This prevents bursting 200+ requests at once
-        # and keeps weight consumption well under Binance's 1 200/min cap.
-        await rate_limiter.acquire(weight)
+        # Throttle proactively: wait until the per-market rate-limiter budget
+        # has room for this request.  This prevents bursting 200+ requests at
+        # once and keeps weight consumption well under Binance's 1 200/min cap.
+        await self._rate_limiter.acquire(weight)
         self._consume_weight(weight)
 
         for attempt in range(_MAX_RETRIES):
@@ -122,7 +128,7 @@ class BinanceClient:
                             "x-mbx-used-weight-1m",
                             resp.headers.get("x-mbx-used-weight"),
                         )
-                        rate_limiter.update_from_header(raw_weight)
+                        self._rate_limiter.update_from_header(raw_weight)
                         if raw_weight is not None:
                             try:
                                 self._used_weight = int(raw_weight)

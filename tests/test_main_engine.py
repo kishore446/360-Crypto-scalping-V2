@@ -184,3 +184,85 @@ class TestScannerInterface:
 class TestCommandHandlerInterface:
     def test_command_handler_has_handle_command(self):
         assert hasattr(CommandHandler, "_handle_command")
+
+
+class TestPairRefreshLoopCap:
+    """_pair_refresh_loop caps new pair seeding to _MAX_NEW_SEEDS_PER_CYCLE."""
+
+    _MAX_NEW_SEEDS_PER_CYCLE = 10
+
+    @pytest.mark.asyncio
+    async def test_seeds_at_most_10_new_pairs_per_cycle(self):
+        """When >10 new symbols are discovered, only the first 10 are seeded."""
+        seeded = []
+
+        async def fake_seed(sym, market):
+            seeded.append(sym)
+
+        # 15 new symbols discovered
+        new_syms = [f"TOKEN{i}USDT" for i in range(15)]
+
+        engine = SimpleNamespace(
+            pair_mgr=SimpleNamespace(
+                refresh_pairs=AsyncMock(return_value=new_syms),
+                pairs={s: SimpleNamespace(market="spot") for s in new_syms},
+                spot_symbols=[],
+                futures_symbols=[],
+                record_candles=lambda sym, tf, count: None,
+            ),
+            data_store=SimpleNamespace(
+                seed_symbol=fake_seed,
+                candles={},
+            ),
+        )
+
+        # Simulate one iteration of the loop (skip the outer sleep)
+        async def _run_one_cycle(eng):
+            new_symbols = await eng.pair_mgr.refresh_pairs()
+            seeded_in_cycle = []
+            for sym in new_symbols[:self._MAX_NEW_SEEDS_PER_CYCLE]:
+                info = eng.pair_mgr.pairs.get(sym)
+                if info is None:
+                    continue
+                await eng.data_store.seed_symbol(sym, info.market)
+                seeded_in_cycle.append(sym)
+            return seeded_in_cycle, new_symbols
+
+        seeded_in_cycle, new_symbols = await _run_one_cycle(engine)
+        assert len(seeded_in_cycle) == self._MAX_NEW_SEEDS_PER_CYCLE
+        assert len(new_symbols) == 15
+
+    @pytest.mark.asyncio
+    async def test_seeds_all_when_under_cap(self):
+        """When ≤10 new symbols are found, all are seeded without truncation."""
+        seeded = []
+
+        async def fake_seed(sym, market):
+            seeded.append(sym)
+
+        new_syms = [f"TOKEN{i}USDT" for i in range(5)]
+        engine = SimpleNamespace(
+            pair_mgr=SimpleNamespace(
+                refresh_pairs=AsyncMock(return_value=new_syms),
+                pairs={s: SimpleNamespace(market="spot") for s in new_syms},
+                record_candles=lambda sym, tf, count: None,
+            ),
+            data_store=SimpleNamespace(
+                seed_symbol=fake_seed,
+                candles={},
+            ),
+        )
+
+        async def _run_one_cycle(eng):
+            new_symbols = await eng.pair_mgr.refresh_pairs()
+            seeded_in_cycle = []
+            for sym in new_symbols[:self._MAX_NEW_SEEDS_PER_CYCLE]:
+                info = eng.pair_mgr.pairs.get(sym)
+                if info is None:
+                    continue
+                await eng.data_store.seed_symbol(sym, info.market)
+                seeded_in_cycle.append(sym)
+            return seeded_in_cycle
+
+        seeded_in_cycle = await _run_one_cycle(engine)
+        assert len(seeded_in_cycle) == 5

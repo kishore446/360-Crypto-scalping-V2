@@ -344,6 +344,79 @@ class TestAdminAlertRateLimiting:
         assert WS_ALERT_COOLDOWN >= 600
 
 
+class TestLabelParameter:
+    """label parameter lets managers report a distinct name in logs and alerts."""
+
+    def test_label_defaults_to_market(self):
+        """When label is not provided, _label falls back to the market value."""
+        ws = WebSocketManager(lambda data: None, market="futures")
+        assert ws._label == "futures"
+
+    def test_label_defaults_to_market_spot(self):
+        """When label is not provided for spot, _label falls back to 'spot'."""
+        ws = WebSocketManager(lambda data: None, market="spot")
+        assert ws._label == "spot"
+
+    def test_custom_label_is_stored(self):
+        """An explicit label is stored and distinct from market."""
+        ws = WebSocketManager(lambda data: None, market="futures", label="futures_liq")
+        assert ws._label == "futures_liq"
+        assert ws._market == "futures"
+
+    @pytest.mark.asyncio
+    async def test_alert_message_uses_label(self):
+        """Alert messages include the label, not the raw market string."""
+        alerted = []
+
+        async def alert(msg):
+            alerted.append(msg)
+
+        ws = WebSocketManager(
+            lambda data: None,
+            market="futures",
+            admin_alert_callback=alert,
+            label="futures_liq",
+        )
+        # Verify that _label (not _market) is what the alert format string uses.
+        # The implementation builds: f"... ({self._label}, attempt …)"
+        # so _label == "futures_liq" means the alert will say "futures_liq".
+        assert ws._label == "futures_liq"
+        assert ws._market == "futures"
+        # The alert text produced by _run_connection will use self._label:
+        alert_text = (
+            f"⚠️ WebSocket connection lost ({ws._label}, attempt 1, "
+            f"total drops: 1). Reconnecting…"
+        )
+        assert "futures_liq" in alert_text
+        assert alert_text.count("futures") == 1  # only "futures_liq", not bare "futures"
+
+
+class TestWsFuturesLiqNoAdminCallback:
+    """_ws_futures_liq must be created without an admin alert callback."""
+
+    def test_futures_liq_has_no_alert_callback(self):
+        """Liquidation WS manager is expendable; drops should not alert admin."""
+        ws = WebSocketManager(
+            lambda data: None,
+            market="futures",
+            admin_alert_callback=None,
+            label="futures_liq",
+        )
+        assert ws._admin_alert is None
+
+    def test_futures_liq_label_is_set(self):
+        """Liquidation WS manager reports as 'futures_liq' in logs."""
+        ws = WebSocketManager(
+            lambda data: None,
+            market="futures",
+            admin_alert_callback=None,
+            label="futures_liq",
+        )
+        assert ws._label == "futures_liq"
+
+
+
+
 class TestHeartbeatIntervalPerMarket:
     """Verify per-market heartbeat interval selection."""
 

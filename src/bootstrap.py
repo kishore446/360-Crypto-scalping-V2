@@ -277,11 +277,15 @@ class Bootstrap:
         )
         # Dedicated liquidation WebSocket manager — uses a separate connection
         # pool so that forceOrder event floods cannot stall kline connections.
+        # admin_alert_callback is intentionally None: drops on this manager are
+        # expected during Extreme Fear liquidation cascades and should not spam
+        # the admin with alerts.
         engine._ws_futures_liq = WebSocketManager(
             engine._on_ws_message,
             market="futures",
-            admin_alert_callback=engine.telegram.send_admin_alert,
+            admin_alert_callback=None,
             data_store=engine.data_store,
+            label="futures_liq",
         )
 
         if spot_streams:

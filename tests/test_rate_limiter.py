@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -257,7 +256,6 @@ class TestPrefilterPairs:
         assert result[0][0] == "HIGHVOL"
 
     def test_all_low_volume_returns_empty(self):
-        from config import SCAN_MIN_VOLUME_USD
         scanner = self._make_scanner()
         pairs = [
             self._make_pair("A", 100),

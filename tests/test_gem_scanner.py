@@ -79,7 +79,7 @@ class TestGemScannerDisabled:
 class TestGemScannerHistory:
     def test_insufficient_history_returns_none(self):
         scanner = GemScanner(GemScannerConfig(enabled=True, min_drawdown_pct=70.0))
-        candles = _make_candles(n=30)  # only 30 candles, need ≥ 50
+        candles = _make_candles(n=30)  # only 30 candles, need ≥ 200
         result = scanner.scan("TOKENUSDT", candles)
         assert result is None
 

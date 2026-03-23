@@ -6,6 +6,19 @@ Scans for tokens that have:
 3. Early reversal signals (volume surge + MA crossover on daily)
 
 Publishes to the 360_GEM Telegram channel.
+
+Data requirements
+-----------------
+The scanner requires approximately **1 year of historical data** per symbol:
+
+- ``daily_candles``: ≥200 daily OHLCV candles minimum (≥365 recommended)
+  for proper ATH drawdown detection, EMA(20)/EMA(50) warmup, and 90-day
+  volume averaging.
+- ``weekly_candles`` (optional): ≥52 weekly OHLCV candles for macro
+  ATH detection from weekly highs.  Falls back to daily highs if absent.
+
+The :meth:`HistoricalDataStore.seed_gem_pairs` boot method seeds the
+full 365 daily + 52 weekly candles for all gem-universe pairs.
 """
 
 from __future__ import annotations
@@ -124,8 +137,8 @@ class GemScanner:
         highs = daily_candles.get("high", [])
         volumes = daily_candles.get("volume", [])
 
-        if len(closes) < 50:
-            return None  # Need enough history
+        if len(closes) < 200:
+            return None  # Need ~1 year of daily history for reliable ATH/volume detection
 
         # Use weekly candles for ATH if available, else daily
         ath_source = weekly_candles if weekly_candles else daily_candles

@@ -177,6 +177,13 @@ class MarketRegimeDetector:
             if bb_width_pct <= _BB_WIDTH_QUIET_PCT:
                 return MarketRegime.QUIET
 
+        # Weak trend zone (ADX 20-25) — use EMA slope to decide before the
+        # standard trending/ranging thresholds so the ADX dead zone is resolved.
+        if adx is not None and _ADX_RANGING_MAX < adx < _ADX_TRENDING_MIN:
+            if ema_slope is not None and abs(ema_slope) > ema_slope_threshold:
+                return MarketRegime.TRENDING_UP if ema_slope > 0 else MarketRegime.TRENDING_DOWN
+            return MarketRegime.RANGING
+
         # Trending regime check
         if adx is not None and adx >= _ADX_TRENDING_MIN:
             if ema_slope is not None:

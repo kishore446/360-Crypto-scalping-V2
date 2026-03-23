@@ -26,7 +26,8 @@ _LTF_MAP: Dict[str, str] = {
 }
 
 # Ordered preference for SMC detection timeframes (most sensitive first)
-_SMC_TIMEFRAMES = ("5m", "4h", "15m", "1m")
+# Default: higher timeframes first so institutional sweeps take priority.
+_SMC_TIMEFRAMES: tuple[str, ...] = ("4h", "1h", "15m", "5m", "1m")
 
 # Minimum number of candles required for CVD divergence detection.
 # Must be >= the default lookback passed to detect_cvd_divergence (20).
@@ -71,6 +72,7 @@ class SMCDetector:
         order_flow_store: Optional[OrderFlowStore] = None,
         lookback: int = 50,
         tolerance_pct: float = 0.05,
+        smc_timeframes: Optional[tuple[str, ...]] = None,
     ) -> SMCResult:
         """Run full SMC detection and return an :class:`SMCResult`.
 
@@ -97,14 +99,20 @@ class SMCDetector:
             Wick-close tolerance for sweep detection (percentage).  Defaults to
             0.05.  Use a wider value (e.g. 0.15) for scalp scans to catch
             institutional sweeps that reclaim $100-200 past the swept level.
+        smc_timeframes:
+            Optional ordered tuple of timeframe keys to use for SMC detection.
+            When provided, overrides the module-level :data:`_SMC_TIMEFRAMES`
+            default.  This allows each channel to pass its own preferred order
+            (e.g. scalp channels prefer low TFs first; swing/spot prefer high TFs).
         """
         result = SMCResult()
+        _timeframes = smc_timeframes if smc_timeframes is not None else _SMC_TIMEFRAMES
 
         # ------------------------------------------------------------------
         # SMC detection (sweeps, MSS, FVG) across preferred timeframes
         # ------------------------------------------------------------------
         min_candles = lookback + 1
-        for tf_key in _SMC_TIMEFRAMES:
+        for tf_key in _timeframes:
             cd = candles.get(tf_key)
             if cd is None or len(cd.get("close", [])) < min_candles:
                 continue
@@ -148,7 +156,7 @@ class SMCDetector:
 
             # CVD divergence: check if price/CVD diverge (confirms the sweep)
             tf_key_for_cvd = next(
-                (tf for tf in _SMC_TIMEFRAMES if candles.get(tf) and
+                (tf for tf in _timeframes if candles.get(tf) and
                  len(candles[tf].get("close", [])) >= _CVD_MIN_CANDLES),
                 None,
             )

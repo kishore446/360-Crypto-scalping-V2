@@ -75,10 +75,10 @@ class SwingChannel(BaseChannel):
         # Validate Bollinger rejection
         if direction == Direction.LONG and bb_lower is not None:
             if close_h1 > bb_lower * 1.02:  # must be near lower band
-                pass  # acceptable
+                return None  # Too far from lower band — no BB rejection setup
         if direction == Direction.SHORT and bb_upper is not None:
             if close_h1 < bb_upper * 0.98:
-                pass  # acceptable
+                return None  # Too far from upper band — no BB rejection setup
 
         close = close_h1
         atr_val = ind_h1.get("atr_last", close * 0.003)

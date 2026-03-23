@@ -78,7 +78,8 @@ class TestComputeMTFConfluence:
     def test_all_aligned_long(self):
         result = compute_mtf_confluence("LONG", self._all_bullish_tfs())
         assert result.score == 1.0
-        assert result.aligned_count == 3
+        # aligned_count is now weighted: 1m=0.5 + 15m=1.5 + 1h=2.0 = 4.0
+        assert result.aligned_count == pytest.approx(4.0, abs=0.01)
         assert result.total_count == 3
         assert result.is_aligned is True
         assert result.is_strong is True
@@ -102,10 +103,12 @@ class TestComputeMTFConfluence:
             "15m": {"ema_fast": 99.0, "ema_slow": 100.5, "close": 98.0},    # BEARISH
         }
         result = compute_mtf_confluence("LONG", tfs, min_score=0.5)
-        assert result.aligned_count == 1
+        # With weights: 1m=0.5 (BULLISH→0.5), 15m=1.5 (BEARISH→0); total=2.0
+        # score = 0.5/2.0 = 0.25 → below threshold
+        assert result.aligned_count == pytest.approx(0.5, abs=0.01)
         assert result.total_count == 2
-        assert result.score == 0.5
-        assert result.is_aligned is True  # exactly at threshold
+        assert result.score == pytest.approx(0.25, abs=0.01)
+        assert result.is_aligned is False  # 0.25 < 0.5 threshold
 
     def test_empty_timeframes_returns_zero_score(self):
         result = compute_mtf_confluence("LONG", {})

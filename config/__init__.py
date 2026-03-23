@@ -201,7 +201,7 @@ CHANNEL_SCALP = ChannelConfig(
     sl_pct_range=(0.05, 0.1),
     tp_ratios=[1.0, 1.5, 2.0],
     trailing_atr_mult=1.5,
-    adx_min=20,
+    adx_min=15,
     adx_max=100,
     spread_max=0.02,
     min_confidence=70,
@@ -256,6 +256,70 @@ CHANNEL_SPOT = ChannelConfig(
     dca_weight_1=0.6,
     dca_weight_2=0.4,
     dca_min_momentum=0.2,
+)
+
+# ---------------------------------------------------------------------------
+# New scalp trigger channel configs (Phase 3)
+# ---------------------------------------------------------------------------
+
+CHANNEL_SCALP_FVG = ChannelConfig(
+    name="360_SCALP_FVG",
+    emoji="⚡",
+    timeframes=["5m", "15m"],
+    sl_pct_range=(0.05, 0.15),
+    tp_ratios=[1.5, 2.5, 3.0],
+    trailing_atr_mult=1.5,
+    adx_min=15,
+    adx_max=100,
+    spread_max=0.02,
+    min_confidence=65,
+    min_volume=5_000_000.0,
+    dca_enabled=True,
+)
+
+CHANNEL_SCALP_CVD = ChannelConfig(
+    name="360_SCALP_CVD",
+    emoji="⚡",
+    timeframes=["5m"],
+    sl_pct_range=(0.15, 0.30),
+    tp_ratios=[1.0, 2.0, 3.0],
+    trailing_atr_mult=1.5,
+    adx_min=15,
+    adx_max=100,
+    spread_max=0.02,
+    min_confidence=65,
+    min_volume=5_000_000.0,
+    dca_enabled=True,
+)
+
+CHANNEL_SCALP_VWAP = ChannelConfig(
+    name="360_SCALP_VWAP",
+    emoji="⚡",
+    timeframes=["5m", "15m"],
+    sl_pct_range=(0.10, 0.20),
+    tp_ratios=[1.0, 2.0, 3.0],
+    trailing_atr_mult=1.5,
+    adx_min=0,
+    adx_max=25,
+    spread_max=0.02,
+    min_confidence=65,
+    min_volume=5_000_000.0,
+    dca_enabled=True,
+)
+
+CHANNEL_SCALP_OBI = ChannelConfig(
+    name="360_SCALP_OBI",
+    emoji="⚡",
+    timeframes=["5m"],
+    sl_pct_range=(0.10, 0.20),
+    tp_ratios=[1.0, 1.5, 2.0],
+    trailing_atr_mult=1.5,
+    adx_min=0,
+    adx_max=100,
+    spread_max=0.02,
+    min_confidence=65,
+    min_volume=5_000_000.0,
+    dca_enabled=True,
 )
 
 ALL_CHANNELS: List[ChannelConfig] = [

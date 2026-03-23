@@ -47,6 +47,17 @@ MTF_MIN_SCORE: float = 0.5
 #: Score threshold above which the confluence is considered *strong*.
 MTF_STRONG_SCORE: float = 0.8
 
+#: Timeframe-proportional weights for MTF confluence scoring.
+#: Higher timeframes carry more weight (institutional significance).
+#: Timeframes not in this dict default to 1.0.
+_TF_WEIGHTS: dict[str, float] = {
+    "1m":  0.5,
+    "5m":  1.0,
+    "15m": 1.5,
+    "1h":  2.0,
+    "4h":  3.0,
+}
+
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -124,6 +135,7 @@ def compute_mtf_confluence(
     direction = signal_direction.upper()
     states: List[TimeframeState] = []
     aligned: float = 0.0
+    weighted_total: float = 0.0
 
     for tf_label, data in timeframes.items():
         try:
@@ -143,11 +155,14 @@ def compute_mtf_confluence(
             close=close,
         ))
 
+        weight = _TF_WEIGHTS.get(tf_label, 1.0)
+        weighted_total += weight
+
         wanted = "BULLISH" if direction == "LONG" else "BEARISH"
         if trend == wanted:
-            aligned += 1.0
+            aligned += weight
         elif trend == "NEUTRAL":
-            aligned += 0.5  # Partial credit — not opposing the direction
+            aligned += weight * 0.5  # Partial credit — not opposing the direction
 
     total = len(states)
     if total == 0:
@@ -162,7 +177,7 @@ def compute_mtf_confluence(
             reason="no valid timeframe data provided",
         )
 
-    score = aligned / total
+    score = aligned / weighted_total if weighted_total > 0 else 0.0
     is_aligned = score >= min_score
     is_strong = score >= MTF_STRONG_SCORE
 

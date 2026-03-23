@@ -143,30 +143,36 @@ def detect_liquidity_sweeps(
         # Bearish sweep (wick above recent high, close back inside)
         key_short = (idx, "SHORT")
         if key_short not in seen and h[idx] > recent_high and c[idx] <= recent_high + tol_high:
-            seen.add(key_short)
-            sweeps.append(LiquiditySweep(
-                index=idx,
-                direction=Direction.SHORT,
-                sweep_level=recent_high,
-                close_price=c[idx],
-                wick_high=h[idx],
-                wick_low=l[idx],
-                open_price=float(op[idx]) if op is not None else 0.0,
-            ))
+            # Minimum sweep depth filter: skip micro-sweeps < 0.02%
+            sweep_depth_short = abs(h[idx] - recent_high) / recent_high * 100 if recent_high > 0 else 0.0
+            if sweep_depth_short >= 0.02:
+                seen.add(key_short)
+                sweeps.append(LiquiditySweep(
+                    index=idx,
+                    direction=Direction.SHORT,
+                    sweep_level=recent_high,
+                    close_price=c[idx],
+                    wick_high=h[idx],
+                    wick_low=l[idx],
+                    open_price=float(op[idx]) if op is not None else 0.0,
+                ))
 
         # Bullish sweep (wick below recent low, close back inside)
         key_long = (idx, "LONG")
         if key_long not in seen and l[idx] < recent_low and c[idx] >= recent_low - tol_low:
-            seen.add(key_long)
-            sweeps.append(LiquiditySweep(
-                index=idx,
-                direction=Direction.LONG,
-                sweep_level=recent_low,
-                close_price=c[idx],
-                wick_high=h[idx],
-                wick_low=l[idx],
-                open_price=float(op[idx]) if op is not None else 0.0,
-            ))
+            # Minimum sweep depth filter: skip micro-sweeps < 0.02%
+            sweep_depth_long = abs(l[idx] - recent_low) / recent_low * 100 if recent_low > 0 else 0.0
+            if sweep_depth_long >= 0.02:
+                seen.add(key_long)
+                sweeps.append(LiquiditySweep(
+                    index=idx,
+                    direction=Direction.LONG,
+                    sweep_level=recent_low,
+                    close_price=c[idx],
+                    wick_high=h[idx],
+                    wick_low=l[idx],
+                    open_price=float(op[idx]) if op is not None else 0.0,
+                ))
 
     return sweeps
 

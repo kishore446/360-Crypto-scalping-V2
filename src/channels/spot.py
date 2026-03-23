@@ -60,13 +60,17 @@ class SpotChannel(BaseChannel):
         if close_h4 <= recent_high:
             return None  # No breakout yet
 
-        # Volume expansion: current volume must exceed 20-bar average
+        # Volume expansion: current USD volume must exceed 20-bar average
+        # Use USD-approximated volume (base vol × close price) to avoid
+        # price-change bias when comparing raw base-asset volumes.
         volumes = h4.get("volume", [])
-        if len(volumes) < 20:
+        closes_list = h4.get("close", [])
+        if len(volumes) < 20 or len(closes_list) < 20:
             return None
-        avg_vol = sum(float(v) for v in volumes[-20:-1]) / 19
-        current_vol = float(volumes[-1])
-        if current_vol < avg_vol * 1.2:
+        usd_volumes = [float(v) * float(c) for v, c in zip(volumes[-20:], closes_list[-20:])]
+        avg_usd_vol = sum(usd_volumes[:-1]) / 19
+        current_usd_vol = usd_volumes[-1]
+        if current_usd_vol < avg_usd_vol * 1.2:
             return None  # Insufficient volume expansion
 
         # SMC trigger (optional) — check for bearish MSS that would contradict accumulation

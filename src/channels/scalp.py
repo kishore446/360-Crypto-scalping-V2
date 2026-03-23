@@ -86,6 +86,13 @@ class ScalpChannel(BaseChannel):
             return None
 
         direction = sweep.direction
+
+        # Momentum must agree with sweep direction
+        if direction == Direction.LONG and mom < 0:
+            return None
+        if direction == Direction.SHORT and mom > 0:
+            return None
+
         if not check_ema_alignment(ema_fast, ema_slow, direction.value):
             return None
 

@@ -189,8 +189,8 @@ class Backtester:
     Parameters
     ----------
     channels:
-        List of channel strategy objects to test.  Defaults to all four
-        standard channels (SCALP, SWING, RANGE, TAPE).
+        List of channel strategy objects to test.  Defaults to all three
+        standard channels (SCALP, SWING, SPOT).
     lookahead_candles:
         Number of future candles to use for simulating trade outcomes.
     min_window:

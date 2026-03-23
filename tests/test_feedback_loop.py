@@ -199,11 +199,11 @@ def test_market_boost_applied_when_history_warrants_it():
 def test_adjustment_clamped_to_minus_10():
     loop = FeedbackLoop()
     # Trigger both setup penalty and exec penalty simultaneously
-    _fill_loop(loop, _MIN_SAMPLE_SIZE + 5, "360_TAPE", "BAD", "SL")
+    _fill_loop(loop, _MIN_SAMPLE_SIZE + 5, "360_SPOT", "BAD", "SL")
     for _ in range(_MIN_SAMPLE_SIZE + 5):
-        loop.record_outcome(_outcome(channel="360_TAPE", outcome="SL", execution=10.0))
+        loop.record_outcome(_outcome(channel="360_SPOT", outcome="SL", execution=10.0))
     adj = loop.get_confidence_adjustment(
-        {"execution": 5.0, "market": 5.0}, "360_TAPE", "BAD"
+        {"execution": 5.0, "market": 5.0}, "360_SPOT", "BAD"
     )
     assert adj >= -10.0
 

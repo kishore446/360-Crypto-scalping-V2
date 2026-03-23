@@ -305,7 +305,7 @@ class TelegramBot:
             lines.append(f"Reason: {TelegramBot._escape_md(sig.analyst_reason)}{setup_label}")
         else:
             lines.append(f"Reason: {TelegramBot._escape_md(sig.channel)} signal approaching zone{setup_label}")
-        lines.append("⏳ Waiting for confirmation\\.\\.\\."),
+        lines.append("⏳ Waiting for confirmation\\.\\.\\.")
         lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
         return "\n".join(lines)
 

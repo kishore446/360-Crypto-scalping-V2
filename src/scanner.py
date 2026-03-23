@@ -8,6 +8,7 @@ and optional circuit-breaker integration.
 from __future__ import annotations
 
 import asyncio
+import dataclasses as _dc
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -1369,7 +1370,6 @@ class Scanner:
 
     async def _scan_symbol(self, symbol: str, volume_24h: float) -> None:
         """Run all channel evaluations for one symbol."""
-        import dataclasses as _dc
         ctx = await self._build_scan_context(symbol, volume_24h)
         if ctx is None:
             return

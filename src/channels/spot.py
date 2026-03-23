@@ -32,7 +32,6 @@ class SpotChannel(BaseChannel):
         volume_24h_usd: float,
     ) -> Optional[Signal]:
         h4 = candles.get("4h")
-        d1 = candles.get("1d")
         if h4 is None or len(h4.get("close", [])) < 50:
             return None
 
@@ -70,8 +69,7 @@ class SpotChannel(BaseChannel):
         if current_vol < avg_vol * 1.2:
             return None  # Insufficient volume expansion
 
-        # SMC trigger (optional) — breakout retest or sweep
-        sweeps = smc_data.get("sweeps", [])
+        # SMC trigger (optional) — check for bearish MSS that would contradict accumulation
         mss = smc_data.get("mss")
 
         # Determine direction — spot channel is LONG-biased accumulation

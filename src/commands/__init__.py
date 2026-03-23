@@ -21,11 +21,10 @@ Internally every command is a thin async function decorated with
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from config import TELEGRAM_ADMIN_CHAT_ID
-from src.commands.registry import CommandContext, CommandRegistry, split_message
+from src.commands.registry import CommandContext, CommandRegistry
 from src.utils import get_logger
 
 # Import sub-modules so their @registry.command decorators execute

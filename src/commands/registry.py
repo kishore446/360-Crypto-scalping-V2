@@ -136,7 +136,7 @@ class CommandRegistry:
     def _help_text(self, is_admin: bool) -> str:
         """Auto-generate grouped help from registered commands."""
         groups: Dict[str, List[CommandEntry]] = {}
-        seen: Set[str] = set()
+        seen: set[int] = set()
         for entry in self._commands.values():
             if id(entry) in seen:
                 continue

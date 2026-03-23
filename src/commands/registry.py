@@ -1,6 +1,6 @@
 """Command registry – decorator-based command dispatch.
 
-Replaces the monolithic 1 000-line elif chain with a decorator pattern so that
+Replaces the monolithic 1,000-line elif chain with a decorator pattern so that
 new commands can be added by dropping a single decorated function into the
 relevant module without touching a central dispatch table.
 """

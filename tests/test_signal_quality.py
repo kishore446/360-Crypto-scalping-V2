@@ -79,11 +79,32 @@ def _smc(direction: Direction = Direction.LONG) -> dict:
 
 
 class TestRegimeSetupCompatibility:
-    def test_range_fade_setup_rejected_in_strong_trend(self):
+    def test_scalp_generates_trend_continuation_in_strong_trend(self):
+        """In STRONG_TREND, ScalpChannel should produce a channel-compatible setup."""
         signal = _signal(channel="360_SCALP")
-        # RANGE_FADE is not in REGIME_SETUP_COMPATIBILITY for STRONG_TREND
-        setup = classify_setup("360_SCALP", signal, _indicators(), {"sweeps": [], "mss": None, "fvg": [], "whale_alert": None, "volume_delta_spike": False}, MarketState.STRONG_TREND)
+        setup = classify_setup(
+            "360_SCALP",
+            signal,
+            _indicators(),
+            {"sweeps": [], "mss": None, "fvg": [], "whale_alert": None, "volume_delta_spike": False},
+            MarketState.STRONG_TREND,
+        )
+        # In trending conditions the classifier picks a trend-aligned setup class
+        assert setup.setup_class in {
+            SetupClass.TREND_PULLBACK_CONTINUATION,
+            SetupClass.MOMENTUM_EXPANSION,
+            SetupClass.LIQUIDITY_SWEEP_REVERSAL,
+            SetupClass.BREAKOUT_RETEST,
+        }
         assert setup.channel_compatible is True
+        assert setup.regime_compatible is True
+
+    def test_range_fade_regime_incompatible_in_strong_trend(self):
+        """RANGE_FADE should be regime-incompatible with STRONG_TREND."""
+        from src.signal_quality import REGIME_SETUP_COMPATIBILITY
+        assert SetupClass.RANGE_FADE not in REGIME_SETUP_COMPATIBILITY.get(
+            MarketState.STRONG_TREND, set()
+        )
 
     def test_continuation_rejected_in_dirty_range(self):
         signal = _signal(channel="360_SCALP")

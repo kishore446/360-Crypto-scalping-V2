@@ -55,6 +55,25 @@ DECLINE_THRESHOLD: float = 0.7
 #: Minimum number of historical candles required to compute a meaningful average.
 MIN_CANDLE_HISTORY: int = 11  # 1 last + 10 for average
 
+#: Regime-specific spike thresholds.  Volatile markets tolerate higher spikes
+#: (moves are inherently choppy); quiet markets are stricter.
+_REGIME_SPIKE_THRESHOLD: dict[str, float] = {
+    "VOLATILE":      3.0,
+    "TRENDING_UP":   2.5,
+    "TRENDING_DOWN": 2.5,
+    "RANGING":       2.0,
+    "QUIET":         1.5,
+}
+
+#: Regime-specific decline thresholds.
+_REGIME_DECLINE_THRESHOLD: dict[str, float] = {
+    "VOLATILE":      0.5,
+    "TRENDING_UP":   0.65,
+    "TRENDING_DOWN": 0.65,
+    "RANGING":       0.7,
+    "QUIET":         0.8,
+}
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -95,6 +114,8 @@ def check_volume_divergence_gate(
     direction: str,  # noqa: ARG001 — direction reserved for future directional divergence
     candles: dict[str, dict],
     primary_tf: str,
+    spike_threshold: float = SPIKE_THRESHOLD,
+    regime: str | None = None,
 ) -> tuple[bool, str]:
     """Pipeline gate: detect primary-TF volume spike with higher-TF volume decline.
 
@@ -108,6 +129,18 @@ def check_volume_divergence_gate(
         (``{"close": [...], "volume": [...], ...}``).
     primary_tf:
         The primary timeframe to check (e.g. ``"5m"``).
+    spike_threshold:
+        Primary TF volume ratio above which a spike is declared.  Defaults to
+        :data:`SPIKE_THRESHOLD` (2.0).  Pass a higher value (e.g. 2.5) for
+        channels that tolerate higher volume spikes (e.g. SCALP).  When
+        *regime* is also provided, the regime-specific threshold is used
+        instead (regime takes priority over this parameter).
+    regime:
+        Optional market regime string (e.g. ``"TRENDING_UP"``, ``"RANGING"``).
+        When provided, regime-specific spike and decline thresholds from
+        :data:`_REGIME_SPIKE_THRESHOLD` and :data:`_REGIME_DECLINE_THRESHOLD`
+        are used instead of the fixed constants, letting the gate adapt to
+        current market conditions.
 
     Returns
     -------
@@ -115,6 +148,14 @@ def check_volume_divergence_gate(
         ``(False, reason)`` when a volume divergence pattern is detected;
         ``(True, "")`` otherwise.
     """
+    # Regime-aware threshold selection
+    if regime is not None and regime in _REGIME_SPIKE_THRESHOLD:
+        _spike = _REGIME_SPIKE_THRESHOLD[regime]
+        _decline = _REGIME_DECLINE_THRESHOLD.get(regime, DECLINE_THRESHOLD)
+    else:
+        _spike = spike_threshold
+        _decline = DECLINE_THRESHOLD
+
     higher_tf = _next_higher_tf(primary_tf)
     if higher_tf is None:
         # No higher timeframe available — cannot detect divergence
@@ -142,7 +183,7 @@ def check_volume_divergence_gate(
         primary_tf, p_ratio, higher_tf, h_ratio,
     )
 
-    if p_ratio > SPIKE_THRESHOLD and h_ratio < DECLINE_THRESHOLD:
+    if p_ratio > _spike and h_ratio < _decline:
         return False, (
             f"volume divergence: {primary_tf} spiking {p_ratio:.1f}× "
             f"but {higher_tf} declining {h_ratio:.1f}×"

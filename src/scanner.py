@@ -8,6 +8,7 @@ and optional circuit-breaker integration.
 from __future__ import annotations
 
 import asyncio
+import dataclasses as _dc
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -96,9 +97,12 @@ _MAX_CONCURRENT_SCANS: int = 10
 # SCALP needs movement: block in QUIET (nothing moves).
 # SWING needs sustained trend: block in VOLATILE (chaotic, stops get swept).
 _REGIME_CHANNEL_INCOMPATIBLE: Dict[str, List[str]] = {
-    "360_SCALP": ["QUIET"],
-    "360_SWING": ["VOLATILE", "DIRTY_RANGE"],
-    "360_SPOT": ["VOLATILE"],
+    "360_SCALP":      ["QUIET"],
+    "360_SCALP_FVG":  ["QUIET"],
+    "360_SCALP_CVD":  ["QUIET"],
+    "360_SCALP_OBI":  ["QUIET"],
+    "360_SWING":      ["VOLATILE", "DIRTY_RANGE"],
+    "360_SPOT":       ["VOLATILE"],
 }
 
 # Penalty multiplier applied to soft-gate base penalties depending on live market regime.
@@ -110,6 +114,21 @@ _REGIME_PENALTY_MULTIPLIER: Dict[str, float] = {
     "RANGING":       1.0,   # Mean-reversion market, all quality gates at full weight
     "VOLATILE":      1.5,   # High chaos = more false signals, amplify penalties
     "QUIET":         0.8,   # Low volume but stable, gates fire often on thin data
+}
+
+# Per-channel SMC timeframe preference order.
+# SCALP → low-TF sweeps are valid entry triggers.
+# SWING → high-TF institutional sweeps only.
+# SPOT  → institutional only (4h+).
+# Channels not listed here use the detector's default order.
+_CHANNEL_SMC_TIMEFRAMES: Dict[str, tuple[str, ...]] = {
+    "360_SCALP":      ("1m", "5m", "15m"),
+    "360_SCALP_FVG":  ("5m", "15m"),
+    "360_SCALP_CVD":  ("5m", "15m"),
+    "360_SCALP_VWAP": ("5m", "15m"),
+    "360_SCALP_OBI":  ("5m", "15m"),
+    "360_SWING":      ("4h", "1h", "15m"),
+    "360_SPOT":       ("4h", "1h"),
 }
 
 
@@ -136,6 +155,28 @@ def _normalize_candle_dict(cd: dict) -> dict:
         else:
             normalized[key] = val
     return normalized
+
+
+def classify_signal_tier(confidence: float) -> str:
+    """Classify a signal into a quality tier based on its confidence score.
+
+    Parameters
+    ----------
+    confidence:
+        Signal confidence (0–100 scale).
+
+    Returns
+    -------
+    One of: ``"A+"`` (sniper, 80-100), ``"B"`` (setup, 65-79),
+    ``"WATCHLIST"`` (50-64), ``"FILTERED"`` (< 50).
+    """
+    if confidence >= 80:
+        return "A+"
+    elif confidence >= 65:
+        return "B"
+    elif confidence >= 50:
+        return "WATCHLIST"
+    return "FILTERED"
 
 
 @dataclass
@@ -1051,6 +1092,8 @@ class Scanner:
             return None, None
 
         # ── Filter 1: MTF Confluence Gate ──────────────────────────────────
+        # Relaxed min_score for scalp signals (range-fade setups need less confluence)
+        _mtf_min_score = 0.4 if chan_name == "360_SCALP" else 0.5
         mtf_data: Dict[str, Dict[str, float]] = {}
         for tf_label, ind in ctx.indicators.items():
             ema_fast = ind.get("ema9_last")
@@ -1063,7 +1106,7 @@ class Scanner:
                     "ema_slow": float(ema_slow),
                     "close": float(closes[-1]),
                 }
-        mtf_allowed, mtf_reason = check_mtf_gate(sig.direction.value, mtf_data)
+        mtf_allowed, mtf_reason = check_mtf_gate(sig.direction.value, mtf_data, min_score=_mtf_min_score)
         if not mtf_allowed:
             log.debug("MTF gate blocked {} {}: {}", symbol, chan_name, mtf_reason)
             return None, None
@@ -1104,7 +1147,9 @@ class Scanner:
             log.debug("VWAP gate error for {} {} (fail open): {}", symbol, chan_name, _vwap_exc)
 
         # ── Filter 3: Kill Zone / Session Filter ────────────────────────────
-        kz_allowed, kz_reason = check_kill_zone_gate()
+        # Relaxed minimum multiplier for scalp signals (scalps can trade lower-liquidity windows)
+        _kz_min_mult = 0.40 if chan_name == "360_SCALP" else 0.50
+        kz_allowed, kz_reason = check_kill_zone_gate(minimum_multiplier=_kz_min_mult)
         if not kz_allowed:
             _base = 10.0
             _scaled = round(_base * regime_mult, 1)
@@ -1187,8 +1232,12 @@ class Scanner:
         # ── Filter 7: Cross-Timeframe Volume Divergence ───────────────────
         try:
             _vol_primary_tf = self._get_primary_timeframe(chan_name)
+            # Relaxed spike threshold for scalp signals (volume spikes ARE valid for scalps)
+            _vol_spike_thresh = 2.5 if chan_name == "360_SCALP" else 2.0
             vol_div_allowed, vol_div_reason = check_volume_divergence_gate(
-                sig.direction.value, ctx.candles, _vol_primary_tf
+                sig.direction.value, ctx.candles, _vol_primary_tf,
+                spike_threshold=_vol_spike_thresh,
+                regime=_regime_key if _regime_key else None,
             )
             if not vol_div_allowed:
                 _base = 10.0
@@ -1290,7 +1339,25 @@ class Scanner:
         sig.soft_gate_flags = ",".join(_fired_gates)
         # Second clamp: ensures confidence stays in [0, 100] after soft-penalty deduction.
         sig.confidence = self._clamp_confidence(sig.confidence)
+        # Classify signal into quality tier based on final confidence.
+        sig.signal_tier = classify_signal_tier(sig.confidence)
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)
+        # WATCHLIST tier: signals with confidence 50-64 are kept as WATCHLIST
+        # instead of being discarded.  Only the SCALP channel family generates
+        # watchlist alerts; SWING and SPOT require higher confidence.
+        _scalp_channels = {
+            "360_SCALP", "360_SCALP_FVG", "360_SCALP_CVD",
+            "360_SCALP_VWAP", "360_SCALP_OBI",
+        }
+        _watchlist_confidence = 50.0
+        if (
+            sig.signal_tier == "WATCHLIST"
+            and chan_name in _scalp_channels
+            and sig.confidence >= _watchlist_confidence
+        ):
+            # Keep as WATCHLIST — clear entry/SL/TP for zone-alert-only format
+            self._populate_signal_context(sig, volume_24h, ctx)
+            return sig, cross_verified
         if (
             sig.confidence < min_conf
             or sig.component_scores.get("market", 0.0) < 12.0
@@ -1306,11 +1373,34 @@ class Scanner:
         ctx = await self._build_scan_context(symbol, volume_24h)
         if ctx is None:
             return
+        ticks = self.data_store.ticks.get(symbol, [])
         for chan in self.channels:
             chan_name = chan.config.name
             if self._should_skip_channel(symbol, chan_name, ctx):
                 continue
-            sig, cross_verified = await self._prepare_signal(symbol, volume_24h, chan, ctx)
+            # Re-detect SMC with channel-specific timeframe preference when available.
+            # This ensures scalp channels see low-TF sweeps first while swing/spot
+            # channels only act on high-TF institutional sweeps.
+            _ch_tfs = _CHANNEL_SMC_TIMEFRAMES.get(chan_name)
+            if _ch_tfs is not None:
+                try:
+                    _smc_r = self.smc_detector.detect(
+                        symbol, ctx.candles, ticks, self.order_flow_store,
+                        lookback=SMC_SCALP_LOOKBACK,
+                        tolerance_pct=SMC_SCALP_TOLERANCE_PCT,
+                        smc_timeframes=_ch_tfs,
+                    )
+                    ctx_for_chan = _dc.replace(
+                        ctx,
+                        smc_result=_smc_r,
+                        smc_data=_smc_r.as_dict(),
+                    )
+                except Exception as _exc:
+                    log.debug("Per-channel SMC re-detect failed for {} {}: {}", symbol, chan_name, _exc)
+                    ctx_for_chan = ctx
+            else:
+                ctx_for_chan = ctx
+            sig, cross_verified = await self._prepare_signal(symbol, volume_24h, chan, ctx_for_chan)
             if sig is None:
                 continue
             # Only start scan cooldown after the signal has been accepted by the

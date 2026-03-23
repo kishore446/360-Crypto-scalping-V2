@@ -213,8 +213,16 @@ class TelegramBot:
     @staticmethod
     def format_signal(sig: Signal) -> str:
         """Produce the rich, emoji-laden Telegram message for a signal."""
+        # Route WATCHLIST signals to a distinct, lightweight format
+        if getattr(sig, "signal_tier", "B") == "WATCHLIST":
+            return TelegramBot.format_watchlist_signal(sig)
+
         chan_emojis = {
             "360_SCALP": "⚡",
+            "360_SCALP_FVG": "⚡",
+            "360_SCALP_CVD": "⚡",
+            "360_SCALP_VWAP": "⚡",
+            "360_SCALP_OBI": "⚡",
             "360_SWING": "🏛️",
             "360_SPOT": "📈",
             "360_GEM": "💎",
@@ -279,6 +287,26 @@ class TelegramBot:
             lines.append(f"⏱️ Execution: {TelegramBot._escape_md(sig.execution_note)}")
         lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def format_watchlist_signal(sig: Signal) -> str:
+        """Produce a lightweight WATCHLIST alert message (zone alert, no entry/SL/TP)."""
+        dir_word = sig.direction.value if sig.direction is not None else "LONG"
+        price_str = fmt_price(sig.entry) if sig.entry else "N/A"
+        setup_label = ""
+        if sig.setup_class and sig.setup_class not in ("UNCLASSIFIED",):
+            setup_label = f" | Setup: {TelegramBot._escape_md(sig.setup_class.replace('_', ' ').title())}"
+        lines = [
+            f"🔍 *WATCHLIST* — {TelegramBot._escape_md(sig.symbol)}",
+            f"Zone: *{dir_word}* setup forming near `{price_str}`",
+        ]
+        if sig.analyst_reason:
+            lines.append(f"Reason: {TelegramBot._escape_md(sig.analyst_reason)}{setup_label}")
+        else:
+            lines.append(f"Reason: {TelegramBot._escape_md(sig.channel)} signal approaching zone{setup_label}")
+        lines.append("⏳ Waiting for confirmation\\.\\.\\.")
+        lines.append(f"⏰ Time: `{fmt_ts(sig.timestamp)}`")
         return "\n".join(lines)
 
     @staticmethod

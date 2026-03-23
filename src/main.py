@@ -30,6 +30,10 @@ from src.channels.base import Signal
 from src.channels.scalp import ScalpChannel
 from src.channels.swing import SwingChannel
 from src.channels.spot import SpotChannel
+from src.channels.scalp_fvg import ScalpFVGChannel
+from src.channels.scalp_cvd import ScalpCVDChannel
+from src.channels.scalp_vwap import ScalpVWAPChannel
+from src.channels.scalp_obi import ScalpOBIChannel
 from src.circuit_breaker import CircuitBreaker
 from src.commands import CommandHandler
 from src.detector import SMCDetector
@@ -127,7 +131,15 @@ class CryptoSignalEngine:
         )
 
         # Channel strategies
-        self._channels = [ScalpChannel(), SwingChannel(), SpotChannel()]
+        self._channels = [
+            ScalpChannel(),
+            SwingChannel(),
+            SpotChannel(),
+            ScalpFVGChannel(),
+            ScalpCVDChannel(),
+            ScalpVWAPChannel(),
+            ScalpOBIChannel(),
+        ]
 
         # SMC detector and market regime classifier
         self._smc_detector = SMCDetector()

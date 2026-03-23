@@ -461,7 +461,7 @@ class TestChannelDcaZoneInit:
                 "atr_last": 0.5,
                 "ema200_last": close[-1] - 5,
                 "bb_upper_last": close[-1] + 5,
-                "bb_lower_last": close[-1] - 5,
+                "bb_lower_last": close[-1] - 1,  # close is near lower BB (LONG setup)
             },
         }
         smc_data = {"sweeps": [sweep], "mss": mss}

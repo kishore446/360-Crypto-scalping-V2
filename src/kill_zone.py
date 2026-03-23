@@ -50,6 +50,7 @@ log = get_logger("kill_zone")
 #: High-liquidity session windows: (start_hour, end_hour, name, multiplier)
 _HIGH_LIQUIDITY_SESSIONS: list[tuple[int, int, str, float]] = [
     (7,  9,  "LONDON_OPEN",       0.95),
+    (9,  12, "LONDON_SESSION",    0.90),  # core London — high liquidity
     (12, 16, "NY_LONDON_OVERLAP", 1.00),  # best session
     (16, 20, "NY_SESSION",        0.90),
     (0,  4,  "ASIAN_SESSION",     0.75),

@@ -86,7 +86,7 @@ class TestCryptoSignalEngineInit:
 
     def test_engine_channels_count(self):
         engine = self._make_engine()
-        assert len(engine._channels) == 3  # SCALP, SWING, SPOT
+        assert len(engine._channels) == 7  # SCALP, SWING, SPOT + 4 new scalp triggers
 
     def test_signal_history_starts_empty(self):
         engine = self._make_engine()

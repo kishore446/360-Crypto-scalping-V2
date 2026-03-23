@@ -52,6 +52,15 @@ BEARISH_TREND_LABELS: frozenset[str] = frozenset({
     "CRASH",
 })
 
+#: Trend labels that indicate a strong bullish move — trigger altcoin short pause.
+BULLISH_TREND_LABELS: frozenset[str] = frozenset({
+    "PUMPING",
+    "HIGH_VOLATILITY_UP",
+    "UPTREND",
+    "BULL",
+    "BULLISH",
+})
+
 #: Volatility labels that trigger a downgrade of altcoin long confidence.
 HIGH_VOLATILITY_LABELS: frozenset[str] = frozenset({
     "HIGH",
@@ -121,15 +130,14 @@ def check_cross_asset_gate(
     asset_states: Sequence[AssetState],
     major_symbols: Optional[frozenset[str]] = None,
 ) -> tuple[bool, str]:
-    """Block altcoin LONG signals when major assets are dumping.
+    """Block altcoin LONG signals when major assets are dumping, and altcoin
+    SHORT signals when major assets are pumping.
 
-    This filter only activates when:
-    1. The signal direction is ``"LONG"``.
-    2. At least one major asset (BTC/ETH) has a bearish or
-       high-volatility-down trend state.
-
-    SHORT signals are not blocked — a broader market dump may actually
-    support a short trade.
+    This filter activates when:
+    1. The signal direction is ``"LONG"`` AND at least one major asset has a
+       bearish or high-volatility-down trend state, **OR**
+    2. The signal direction is ``"SHORT"`` AND at least one major asset is in
+       a strongly bullish state (pumping/uptrend).
 
     Parameters
     ----------
@@ -154,9 +162,6 @@ def check_cross_asset_gate(
         return True, ""
 
     direction = signal_direction.upper()
-    if direction != "LONG":
-        # Only apply sneeze filter to LONG signals
-        return True, ""
 
     _major = major_symbols if major_symbols is not None else DEFAULT_MAJOR_SYMBOLS
 
@@ -164,27 +169,41 @@ def check_cross_asset_gate(
     if signal_symbol.upper() in _major:
         return True, ""
 
-    for state in asset_states:
-        if state.symbol.upper() not in _major:
-            continue
+    if direction == "LONG":
+        for state in asset_states:
+            if state.symbol.upper() not in _major:
+                continue
 
-        if state.is_bearish():
-            return (
-                False,
-                (
-                    f"Cross-asset: {state.symbol} is {state.trend.upper()} "
-                    f"– altcoin LONG paused"
-                ),
-            )
+            if state.is_bearish():
+                return (
+                    False,
+                    (
+                        f"Cross-asset: {state.symbol} is {state.trend.upper()} "
+                        f"– altcoin LONG paused"
+                    ),
+                )
 
-        if state.is_high_volatility() and state.trend.upper() not in {"BULLISH", "RANGING", "NEUTRAL"}:
-            return (
-                False,
-                (
-                    f"Cross-asset: {state.symbol} has {state.volatility} volatility "
-                    f"in {state.trend.upper()} regime – altcoin LONG paused"
-                ),
-            )
+            if state.is_high_volatility() and state.trend.upper() not in {"BULLISH", "RANGING", "NEUTRAL"}:
+                return (
+                    False,
+                    (
+                        f"Cross-asset: {state.symbol} has {state.volatility} volatility "
+                        f"in {state.trend.upper()} regime – altcoin LONG paused"
+                    ),
+                )
+
+    elif direction == "SHORT":
+        for state in asset_states:
+            if state.symbol.upper() not in _major:
+                continue
+            if state.trend.upper() in BULLISH_TREND_LABELS:
+                return (
+                    False,
+                    (
+                        f"Cross-asset: {state.symbol} is {state.trend.upper()} "
+                        f"– altcoin SHORT paused"
+                    ),
+                )
 
     return True, ""
 

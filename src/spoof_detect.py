@@ -43,7 +43,7 @@ log = get_logger("spoof_detect")
 
 #: Minimum number of levels on a side to perform analysis (avoid false positives
 #: on thin books with only 1-2 visible levels).
-MIN_LEVELS_FOR_ANALYSIS: int = 4
+MIN_LEVELS_FOR_ANALYSIS: int = 3
 
 #: Number of "top" levels that constitute the "wall" bucket.
 WALL_TOP_N: int = 3
@@ -95,9 +95,19 @@ def _analyse_side(
     concentration : float
         Fraction of total qty held by the top-N levels.  0.0 when no data.
     is_suspicious : bool
-        True when *either* wall_ratio or concentration exceeds its threshold.
+        True when *either* wall_ratio or concentration exceeds its threshold,
+        or when a thin-book single-level dominance is detected.
     """
     if len(levels) < MIN_LEVELS_FOR_ANALYSIS:
+        # Thin-book heuristic: even with 1-3 levels, flag if any single level
+        # has quantity > 5× the average of the other levels.
+        if len(levels) >= 2:
+            qtys = [qty for _, qty in levels]
+            avg_others = sum(qtys) / len(qtys)
+            if avg_others > 0:
+                for qty in qtys:
+                    if qty > 5 * avg_others:
+                        return qty / avg_others, 1.0, True
         return 0.0, 0.0, False
 
     qtys = [qty for _, qty in levels]

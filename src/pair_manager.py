@@ -17,6 +17,7 @@ three tiers:
 from __future__ import annotations
 
 import asyncio
+import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -345,7 +346,8 @@ class PairManager:
         seen_in_fetch: set = set()
 
         # Merge: futures first (higher data quality), then spot
-        for p in futures_raw + spot_raw:
+        # Merge: futures first (higher data quality), then spot
+        for p in itertools.chain(futures_raw, spot_raw):
             if p.symbol not in seen_in_fetch:
                 seen_in_fetch.add(p.symbol)
                 all_fetched.append(p)
@@ -374,7 +376,7 @@ class PairManager:
         # --- Prune delisted / dropped pairs ---
         removed_symbols: List[str] = []
         if PAIR_PRUNE_ENABLED and seen_in_fetch:
-            stale = [sym for sym in list(self.pairs) if sym not in seen_in_fetch]
+            stale = [sym for sym in self.pairs if sym not in seen_in_fetch]
             for sym in stale:
                 removed_symbols.append(sym)
                 del self.pairs[sym]

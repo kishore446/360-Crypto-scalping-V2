@@ -571,13 +571,14 @@ class TestScalpSweepParameters:
         assert sweeps == []
 
     def test_sufficient_candles_with_scalp_lookback(self):
-        """With lookback=20, 25 candles is sufficient for detection."""
+        """With lookback=20, 25 candles is sufficient and a bearish sweep is detected."""
         n = 25
         high = np.ones(n) * 105.0
         low = np.ones(n) * 95.0
         close = np.ones(n) * 100.0
+        # Last candle: wick above recent high, close back within 0.15% tolerance
         high[-1] = 107.0
-        close[-1] = 105.12  # within 0.15% of 105
+        close[-1] = 105.12  # within 0.15% of 105 (tol = 105 * 0.0015 = 0.1575)
         sweeps = detect_liquidity_sweeps(high, low, close, lookback=20, tolerance_pct=0.15)
-        # May or may not detect (depends on volume), but must not crash
-        assert isinstance(sweeps, list)
+        bearish = [s for s in sweeps if s.direction == Direction.SHORT]
+        assert len(bearish) >= 1, "Should detect bearish sweep with 25 candles and lookback=20"

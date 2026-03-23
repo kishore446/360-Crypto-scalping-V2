@@ -627,8 +627,9 @@ class Scanner:
         ticks = self.data_store.ticks.get(symbol, [])
         # Use scalp-optimised sweep detection parameters: shorter lookback catches
         # recent S/R levels; wider tolerance catches institutional sweeps that
-        # reclaim $100-200 past the level.  The full quality pipeline (8 filters,
-        # confidence scoring) still runs on the detected sweeps.
+        # reclaim $100-200 past the level.  The full post-channel quality pipeline
+        # (MTF, VWAP, KillZone, OI, CrossAsset, Spoof, VolDiv, Clustering filters
+        # and confidence scoring) still runs on the detected sweeps.
         smc_result = self.smc_detector.detect(
             symbol, candles, ticks, self.order_flow_store,
             lookback=SMC_SCALP_LOOKBACK,

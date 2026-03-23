@@ -110,15 +110,10 @@ class TestRefreshPairsTierClassification:
     @pytest.mark.asyncio
     async def test_first_pairs_are_tier1(self, monkeypatch):
         """The top TIER1_PAIR_COUNT symbols get assigned TIER1."""
-        import config as cfg
-        monkeypatch.setattr(cfg, "TIER1_PAIR_COUNT", 2)
-        monkeypatch.setattr(cfg, "TIER2_PAIR_COUNT", 4)
-        monkeypatch.setattr(cfg, "PAIR_PRUNE_ENABLED", False)
-
-        # Reload pair_manager module attrs via fresh import
-        import importlib
         import src.pair_manager as pm_mod
-        importlib.reload(pm_mod)
+        monkeypatch.setattr(pm_mod, "TIER1_PAIR_COUNT", 2)
+        monkeypatch.setattr(pm_mod, "TIER2_PAIR_COUNT", 4)
+        monkeypatch.setattr(pm_mod, "PAIR_PRUNE_ENABLED", False)
 
         ticker = _make_ticker_data([
             ("AAUSDT", 1_000_000),
@@ -203,14 +198,10 @@ class TestPairPruning:
     @pytest.mark.asyncio
     async def test_stale_pair_removed_when_pruning_enabled(self, monkeypatch):
         """Pairs absent from the exchange response are pruned when PAIR_PRUNE_ENABLED."""
-        import config as cfg
-        monkeypatch.setattr(cfg, "PAIR_PRUNE_ENABLED", True)
-        monkeypatch.setattr(cfg, "TIER1_PAIR_COUNT", 10)
-        monkeypatch.setattr(cfg, "TIER2_PAIR_COUNT", 20)
-
-        import importlib
         import src.pair_manager as pm_mod
-        importlib.reload(pm_mod)
+        monkeypatch.setattr(pm_mod, "PAIR_PRUNE_ENABLED", True)
+        monkeypatch.setattr(pm_mod, "TIER1_PAIR_COUNT", 10)
+        monkeypatch.setattr(pm_mod, "TIER2_PAIR_COUNT", 20)
 
         # Previously tracked: BTCUSDT + DEADUSDT (no longer on exchange)
         pm = pm_mod.PairManager.__new__(pm_mod.PairManager)
@@ -233,14 +224,10 @@ class TestPairPruning:
     @pytest.mark.asyncio
     async def test_no_pruning_when_disabled(self, monkeypatch):
         """Stale pairs are preserved when PAIR_PRUNE_ENABLED=False."""
-        import config as cfg
-        monkeypatch.setattr(cfg, "PAIR_PRUNE_ENABLED", False)
-        monkeypatch.setattr(cfg, "TIER1_PAIR_COUNT", 10)
-        monkeypatch.setattr(cfg, "TIER2_PAIR_COUNT", 20)
-
-        import importlib
         import src.pair_manager as pm_mod
-        importlib.reload(pm_mod)
+        monkeypatch.setattr(pm_mod, "PAIR_PRUNE_ENABLED", False)
+        monkeypatch.setattr(pm_mod, "TIER1_PAIR_COUNT", 10)
+        monkeypatch.setattr(pm_mod, "TIER2_PAIR_COUNT", 20)
 
         pm = pm_mod.PairManager.__new__(pm_mod.PairManager)
         pm.pairs = {
@@ -274,12 +261,8 @@ class TestCheckPromotions:
 
     def test_tier3_promoted_on_volume_surge(self, monkeypatch):
         """A Tier 3 pair with volume >= surge_multiplier × prev_vol is promoted."""
-        import config as cfg
-        monkeypatch.setattr(cfg, "TIER3_VOLUME_SURGE_MULTIPLIER", 3.0)
-
-        import importlib
         import src.pair_manager as pm_mod
-        importlib.reload(pm_mod)
+        monkeypatch.setattr(pm_mod, "TIER3_VOLUME_SURGE_MULTIPLIER", 3.0)
 
         pm = pm_mod.PairManager.__new__(pm_mod.PairManager)
         pm._spot_client = MagicMock()
@@ -299,12 +282,8 @@ class TestCheckPromotions:
 
     def test_tier3_not_promoted_below_threshold(self, monkeypatch):
         """Tier 3 pair with insufficient volume surge stays in Tier 3."""
-        import config as cfg
-        monkeypatch.setattr(cfg, "TIER3_VOLUME_SURGE_MULTIPLIER", 3.0)
-
-        import importlib
         import src.pair_manager as pm_mod
-        importlib.reload(pm_mod)
+        monkeypatch.setattr(pm_mod, "TIER3_VOLUME_SURGE_MULTIPLIER", 3.0)
 
         pm = pm_mod.PairManager.__new__(pm_mod.PairManager)
         pm._spot_client = MagicMock()
@@ -422,6 +401,7 @@ class TestScannerTier2SkipsScalp:
 
     def _make_scanner(self):
         from src.scanner import Scanner
+        from src.signal_quality import MarketState
 
         scanner = Scanner.__new__(Scanner)
         scanner._scan_cycle_count = 0
@@ -442,11 +422,10 @@ class TestScannerTier2SkipsScalp:
             "TIER1USDT": PairInfo("TIER1USDT", "futures", volume_24h_usd=5_000_000, tier=PairTier.TIER1),
         }
 
-        # Minimal scan context mock
+        # Minimal scan context mock — use a real MarketState value
         ctx = MagicMock()
         ctx.pair_quality.passed = True
-        ctx.market_state = MagicMock()
-        ctx.market_state.__eq__ = lambda self, other: False  # not VOLATILE
+        ctx.market_state = MarketState.STRONG_TREND
         ctx.is_ranging = False
         ctx.adx_val = 30.0
         ctx.regime_result.regime.value = "TRENDING_UP"
@@ -466,11 +445,6 @@ class TestScannerTier2SkipsScalp:
         """_should_skip_channel returns False for a Tier 2 pair on SWING."""
         scanner = self._make_scanner()
         ctx = scanner._ctx
-
-        # VOLATILE_UNSUITABLE check needs a real MarketState comparison
-        from src.signal_quality import MarketState
-        ctx.market_state = MarketState.STRONG_TREND  # clearly not volatile
-
         result = scanner._should_skip_channel("TIER2USDT", "360_SWING", ctx)
         assert result is False, "Tier 2 pair must NOT be skipped for SWING channel"
 
@@ -478,10 +452,6 @@ class TestScannerTier2SkipsScalp:
         """_should_skip_channel returns False for a Tier 1 pair on SCALP."""
         scanner = self._make_scanner()
         ctx = scanner._ctx
-
-        from src.signal_quality import MarketState
-        ctx.market_state = MarketState.STRONG_TREND
-
         result = scanner._should_skip_channel("TIER1USDT", "360_SCALP", ctx)
         assert result is False, "Tier 1 pair must NOT be skipped for SCALP channel"
 

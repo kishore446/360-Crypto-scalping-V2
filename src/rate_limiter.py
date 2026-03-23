@@ -17,9 +17,11 @@ for backward compatibility.
 
 Safety targets
 --------------
-- Normal operation: ~400 weight/min (well under the 1 200/min Binance cap).
+- Spot: budget 5,000/min out of Binance's 6,000/min Spot cap.
+  Leaves ~1,000 weight headroom for WebSocket reconnects and ad-hoc calls.
+- Futures: budget 2,000/min out of Binance's 2,400/min Futures cap.
+  Leaves ~400 weight headroom for reconnects and ad-hoc requests.
 - Burst protection: auto-pause when remaining weight < ``_PAUSE_THRESHOLD``.
-- Leave ~200 weight/min headroom for WebSocket reconnects and ad-hoc requests.
 """
 
 from __future__ import annotations
@@ -35,10 +37,14 @@ log = get_logger("rate_limiter")
 # Binance rolling window duration in seconds
 _WEIGHT_WINDOW_S: float = 60.0
 
-# Default budget: 1 000 out of Binance's 1 200/min limit.  The remaining
-# ~200 units are reserved for WebSocket reconnects, ad-hoc exchange-info
-# calls, and any other requests that bypass the main scan path.
-_DEFAULT_BUDGET: int = 1_000
+# Default budget for Spot: 5,000 out of Binance's 6,000/min Spot limit.
+# The remaining ~1,000 units are reserved for WebSocket reconnects, ad-hoc
+# exchange-info calls, and any other requests that bypass the main scan path.
+_DEFAULT_BUDGET: int = 5_000
+
+# Default budget for Futures: 2,000 out of Binance's 2,400/min Futures limit.
+# The remaining ~400 units are reserved for reconnects and ad-hoc requests.
+_DEFAULT_FUTURES_BUDGET: int = 2_000
 
 # Warn when usage reaches this fraction of the budget
 _WARN_THRESHOLD: float = 0.80
@@ -50,8 +56,9 @@ class RateLimiter:
     Parameters
     ----------
     budget:
-        Maximum weight allowed per 60-second window.  Defaults to 1 000,
-        leaving ~200 weight headroom below Binance's hard 1 200 limit.
+        Maximum weight allowed per 60-second window.  Defaults to 5,000 for
+        Spot (Binance hard cap: 6,000/min) and 2,000 for Futures (hard cap:
+        2,400/min), leaving headroom for reconnects and ad-hoc requests.
     window_s:
         Length of the rolling window in seconds (default 60, matching Binance).
     """
@@ -185,9 +192,11 @@ class RateLimiter:
 # Module-level singletons — one per Binance rate-limit domain.
 # Binance tracks spot and futures request weight independently, so using
 # separate limiters avoids sharing the budget unnecessarily.
+# Spot: 5,000/min budget (Binance hard cap: 6,000/min).
+# Futures: 2,000/min budget (Binance hard cap: 2,400/min).
 # ---------------------------------------------------------------------------
-spot_rate_limiter: RateLimiter = RateLimiter()
-futures_rate_limiter: RateLimiter = RateLimiter()
+spot_rate_limiter: RateLimiter = RateLimiter(budget=_DEFAULT_BUDGET)
+futures_rate_limiter: RateLimiter = RateLimiter(budget=_DEFAULT_FUTURES_BUDGET)
 
 # Backward-compatible alias — existing code importing `rate_limiter` will
 # continue to work and will be throttled against the spot budget.

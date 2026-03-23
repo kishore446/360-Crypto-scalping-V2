@@ -125,6 +125,19 @@ SEED_TIMEFRAMES: List[TimeframeSeed] = [
 ]
 SEED_TICK_LIMIT: int = 5000  # recent trades
 
+# Candle counts for gem scanner daily/weekly seeding (~1 year lookback).
+# These are read from env-vars so they can be tuned without code changes.
+GEM_SEED_DAILY_CANDLES: int = int(os.getenv("GEM_SEED_DAILY_CANDLES", "365"))
+GEM_SEED_WEEKLY_CANDLES: int = int(os.getenv("GEM_SEED_WEEKLY_CANDLES", "52"))
+
+# Timeframes fetched specifically for the gem scanner — daily for 1-year
+# lookback and weekly for macro ATH detection.  Kept separate from
+# SEED_TIMEFRAMES so existing SCALP/SWING/SPOT seeding is unaffected.
+GEM_SEED_TIMEFRAMES: List[TimeframeSeed] = [
+    TimeframeSeed("1d", GEM_SEED_DAILY_CANDLES),
+    TimeframeSeed("1w", GEM_SEED_WEEKLY_CANDLES),
+]
+
 # ---------------------------------------------------------------------------
 # Channel-level risk profiles
 # ---------------------------------------------------------------------------

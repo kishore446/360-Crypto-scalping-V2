@@ -19,9 +19,11 @@ from src.utils import get_logger
 
 log = get_logger("binance_client")
 
-# Binance default rate-limit window (60 s) and request-weight limit
+# Binance default rate-limit window (60 s) and request-weight limits.
+# Spot hard cap: 6,000 weight/min; Futures hard cap: 2,400 weight/min.
 _WEIGHT_WINDOW_S: int = 60
-_DEFAULT_WEIGHT_LIMIT: int = 1_200
+_DEFAULT_WEIGHT_LIMIT: int = 6_000
+_DEFAULT_FUTURES_WEIGHT_LIMIT: int = 2_400
 
 # Retry parameters
 _MAX_RETRIES: int = 5
@@ -48,6 +50,10 @@ class BinanceClient:
         )
         self._session: Optional[aiohttp.ClientSession] = None
         self._used_weight: int = 0
+        # Use the correct hard cap for this market type.
+        self._weight_limit: int = (
+            _DEFAULT_FUTURES_WEIGHT_LIMIT if market == "futures" else _DEFAULT_WEIGHT_LIMIT
+        )
         self._weight_reset_at: float = time.monotonic() + _WEIGHT_WINDOW_S
         # Select the appropriate rate-limiter for this market.  Binance tracks
         # spot and futures weight limits independently, so each market uses its
@@ -64,7 +70,7 @@ class BinanceClient:
     def remaining_weight(self) -> int:
         """Estimated remaining request weight in the current window."""
         self._maybe_reset_weight()
-        return max(0, _DEFAULT_WEIGHT_LIMIT - self._used_weight)
+        return max(0, self._weight_limit - self._used_weight)
 
     def _maybe_reset_weight(self) -> None:
         if time.monotonic() >= self._weight_reset_at:
@@ -109,7 +115,8 @@ class BinanceClient:
 
         # Throttle proactively: wait until the per-market rate-limiter budget
         # has room for this request.  This prevents bursting 200+ requests at
-        # once and keeps weight consumption well under Binance's 1 200/min cap.
+        # once and keeps weight consumption well under Binance's hard cap
+        # (6,000/min Spot, 2,400/min Futures).
         await self._rate_limiter.acquire(weight)
         self._consume_weight(weight)
 
@@ -182,13 +189,24 @@ class BinanceClient:
     ) -> Optional[List[List[Any]]]:
         """Fetch OHLCV klines (candlestick data).
 
-        Weight: 1–10 depending on *limit*.
+        Weight tiers (Binance exact):
+          limit < 100   → weight 1
+          100 ≤ limit < 500  → weight 2
+          500 ≤ limit ≤ 1000 → weight 5
+          limit > 1000       → weight 10
         """
         if self.market == "futures":
             path = "/fapi/v1/klines"
         else:
             path = "/api/v3/klines"
-        weight = max(1, limit // 100)
+        if limit < 100:
+            weight = 1
+        elif limit < 500:
+            weight = 2
+        elif limit <= 1000:
+            weight = 5
+        else:
+            weight = 10
         return await self._get(
             path,
             params={"symbol": symbol, "interval": interval, "limit": limit},

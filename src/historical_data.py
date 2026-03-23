@@ -18,8 +18,10 @@ import numpy as np
 
 from config import (
     BATCH_REQUEST_DELAY,
+    GEM_SEED_TIMEFRAMES,
     SEED_TICK_LIMIT,
     SEED_TIMEFRAMES,
+    TimeframeSeed,
 )
 from src.binance import BinanceClient
 from src.pair_manager import PairManager
@@ -34,8 +36,10 @@ CACHE_DIR = Path("data/cache")
 _TICKS_DIR = CACHE_DIR / "ticks"
 _META_FILE = CACHE_DIR / "metadata.json"
 
-# Maximum candles to retain per symbol-timeframe bucket
-_MAX_CANDLES_PER_BUCKET: int = 500
+# Maximum candles to retain per symbol-timeframe bucket.
+# 1,000 provides headroom for 365 daily gem candles + buffer, and the
+# existing 750-candle 1m/5m seeds used by SCALP/SWING channels.
+_MAX_CANDLES_PER_BUCKET: int = 1_000
 # Seconds per candle interval — used to estimate how many candles are missing
 _INTERVAL_SECONDS: Dict[str, int] = {
     "1m": 60,
@@ -43,6 +47,8 @@ _INTERVAL_SECONDS: Dict[str, int] = {
     "15m": 900,
     "1h": 3_600,
     "4h": 14_400,
+    "1d": 86_400,
+    "1w": 604_800,
 }
 
 # If the cache is older than this many seconds, do a full re-seed for that
@@ -57,7 +63,7 @@ _GAP_BUFFER_CANDLES = 5
 
 # Gap-fill concurrency settings
 _GAP_FILL_DELAY: float = 0.1          # shorter per-call sleep during gap-fill
-_GAP_FILL_CONCURRENT_SYMBOLS: int = 4  # symbols processed in parallel
+_GAP_FILL_CONCURRENT_SYMBOLS: int = 10  # symbols processed in parallel (safe with 5,000/min budget)
 _TICK_REFRESH_AGE_SECS: int = 300      # skip tick refresh if cache is fresher than this
 
 
@@ -154,7 +160,7 @@ class HistoricalDataStore:
         """
         self.candles.setdefault(symbol, {})
 
-        async def _fetch_tf(tf: Any) -> None:
+        async def _fetch_tf(tf: TimeframeSeed) -> None:
             data = await self.fetch_candles(symbol, tf.interval, tf.limit, market)
             if data:
                 if len(data.get("close", [])) > _MAX_CANDLES_PER_BUCKET:
@@ -494,6 +500,58 @@ class HistoricalDataStore:
             combined = np.concatenate([existing.get(key, np.array([])), new_data.get(key, np.array([]))])
             result[key] = combined[-limit:] if len(combined) > limit else combined
         return result
+
+    # ------------------------------------------------------------------
+    # Gem scanner seeding — daily + weekly candles for macro analysis
+    # ------------------------------------------------------------------
+
+    async def seed_gem_symbol(self, symbol: str) -> None:
+        """Seed daily and weekly candles for a single gem-scanner symbol.
+
+        Fetches ~365 daily candles and ~52 weekly candles so the gem scanner
+        has a full year of history for ATH detection, accumulation-base
+        identification, and 90-day volume averaging.  Uses the spot client
+        (daily/weekly data is available on spot endpoints for all USDT pairs).
+        """
+        self.candles.setdefault(symbol, {})
+
+        async def _fetch_tf(tf: TimeframeSeed) -> None:
+            data = await self.fetch_candles(symbol, tf.interval, tf.limit, "spot")
+            if data:
+                if len(data.get("close", [])) > _MAX_CANDLES_PER_BUCKET:
+                    data = {k: v[-_MAX_CANDLES_PER_BUCKET:] for k, v in data.items()}
+                self.candles[symbol][tf.interval] = data
+                log.debug(
+                    "Gem-seeded %s %s: %d candles", symbol, tf.interval, len(data["close"])
+                )
+
+        await asyncio.gather(*[_fetch_tf(tf) for tf in GEM_SEED_TIMEFRAMES])
+        await asyncio.sleep(BATCH_REQUEST_DELAY)
+
+    async def seed_gem_pairs(self, symbols: List[str]) -> None:
+        """Seed daily/weekly historical data for all gem-scanner pairs.
+
+        Up to :data:`_GAP_FILL_CONCURRENT_SYMBOLS` symbols are seeded in
+        parallel.  This is called during boot after the standard
+        :meth:`seed_all` so that the gem scanner has the ~1 year of daily
+        candle history it needs for macro-reversal detection.
+
+        Parameters
+        ----------
+        symbols:
+            List of USDT symbol strings to seed (e.g. ``["BTCUSDT", ...]``).
+        """
+        if not symbols:
+            return
+        log.info("Starting gem scanner seed for %d pairs (daily + weekly) …", len(symbols))
+        semaphore = asyncio.Semaphore(_GAP_FILL_CONCURRENT_SYMBOLS)
+
+        async def _seed_one(sym: str) -> None:
+            async with semaphore:
+                await self.seed_gem_symbol(sym)
+
+        await asyncio.gather(*[_seed_one(sym) for sym in symbols])
+        log.info("Gem scanner seed complete.")
 
     # ------------------------------------------------------------------
     # Helpers

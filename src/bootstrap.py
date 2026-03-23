@@ -24,10 +24,14 @@ from src.websocket_manager import WebSocketManager
 log = get_logger("bootstrap")
 
 # Higher weight budget during boot — no competing scan traffic yet, so we
-# can safely use more of Binance's 1 200/min allowance for fast seeding.
-_BOOT_BUDGET: int = 1_100
-# Normal steady-state budget — leaves headroom for WS reconnects and ad-hoc calls.
-_STEADY_BUDGET: int = 1_000
+# can safely use more of Binance's 6,000/min Spot allowance for fast seeding.
+_BOOT_BUDGET: int = 5_500
+# Normal steady-state Spot budget — leaves ~1,000 headroom for WS reconnects.
+_STEADY_BUDGET: int = 5_000
+
+# Futures budgets — Binance Futures hard cap is 2,400/min.
+_BOOT_BUDGET_FUTURES: int = 2_200
+_STEADY_BUDGET_FUTURES: int = 2_000
 
 
 class Bootstrap:
@@ -115,9 +119,10 @@ class Bootstrap:
         await engine.pair_mgr.refresh_pairs()
 
         # 2. Smart seed — temporarily raise the rate-limit budget since there
-        #    is no competing scan traffic during boot.
+        #    is no competing scan traffic during boot.  Spot and Futures use
+        #    separate budgets matching Binance's independent per-market caps.
         spot_rate_limiter.set_budget(_BOOT_BUDGET)
-        futures_rate_limiter.set_budget(_BOOT_BUDGET)
+        futures_rate_limiter.set_budget(_BOOT_BUDGET_FUTURES)
         cached = engine.data_store.load_snapshot()
         if cached:
             log.info("Disk cache loaded — gap-filling missing data only")
@@ -125,9 +130,9 @@ class Bootstrap:
         else:
             log.info("No disk cache found — performing full historical seed")
             await engine.data_store.seed_all(engine.pair_mgr)
-        # Restore steady-state budget now that seeding is complete.
+        # Restore steady-state budgets now that seeding is complete.
         spot_rate_limiter.set_budget(_STEADY_BUDGET)
-        futures_rate_limiter.set_budget(_STEADY_BUDGET)
+        futures_rate_limiter.set_budget(_STEADY_BUDGET_FUTURES)
 
         # 3. Load predictive model
         await engine.predictive.load_model()

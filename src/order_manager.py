@@ -71,7 +71,7 @@ class OrderManager:
     ) -> Optional[str]:
         """Place a limit (maker) order on the exchange.
 
-        Used by mean-reversion and DCA strategies (``360_SPOT``, ``360_SWING``) to post
+        Used by spot accumulation and swing strategies (``360_SPOT``, ``360_SWING``) to post
         resting bids/offers and capture maker-fee rebates.
 
         Parameters

@@ -238,7 +238,7 @@ CHANNEL_TELEGRAM_MAP: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # WebSocket settings
 # ---------------------------------------------------------------------------
-WS_MAX_STREAMS_PER_CONN: int = 5
+WS_MAX_STREAMS_PER_CONN: int = 50
 WS_HEARTBEAT_INTERVAL: int = 30  # seconds (spot)
 # Futures WS endpoint (fstream.binance.com) is higher-throughput and can delay
 # PONG responses beyond 45 s during liquidation cascades (e.g. Extreme Fear

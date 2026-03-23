@@ -393,12 +393,12 @@ class TestPaperPortfolioManager:
         assert abs(p.total_fees - expected_fee) < 1e-9
 
     def test_select_channel_ignored(self, tmp_path):
-        """Trades for the SELECT channel are silently ignored."""
+        """Trades for an unrecognised channel are silently ignored."""
         mgr = _make_manager(tmp_path)
         mgr.ensure_user("user1")
 
         mgr.record_trade(
-            channel="360_GEM",
+            channel="360_UNKNOWN_SELECT",
             signal_id="sig-select",
             symbol="BTCUSDT",
             direction="LONG",

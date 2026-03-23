@@ -71,7 +71,7 @@ class OrderManager:
     ) -> Optional[str]:
         """Place a limit (maker) order on the exchange.
 
-        Used by mean-reversion and DCA strategies (``360_RANGE``) to post
+        Used by mean-reversion and DCA strategies (``360_SPOT``, ``360_SWING``) to post
         resting bids/offers and capture maker-fee rebates.
 
         Parameters
@@ -121,8 +121,7 @@ class OrderManager:
     ) -> Optional[str]:
         """Place a market (taker) order on the exchange.
 
-        Used by high-frequency strategies (``360_SCALP``, ``360_THE_TAPE``)
-        where immediate fill certainty outweighs the taker-fee cost.
+        Used by high-frequency strategies (``360_SCALP``) where immediate fill certainty outweighs the taker-fee cost.
 
         Parameters
         ----------
@@ -191,7 +190,7 @@ class OrderManager:
         Convenience wrapper that selects limit vs. market order based on the
         signal's channel:
 
-        * ``360_RANGE`` / ``360_SWING`` → :meth:`place_limit_order` (maker)
+        * ``360_SPOT`` / ``360_SWING`` → :meth:`place_limit_order` (maker)
         * All other channels → :meth:`place_market_order` (taker)
 
         Parameters

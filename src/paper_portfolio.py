@@ -120,7 +120,7 @@ class PaperPortfolioManager:
     DEFAULT_RISK_PCT: float = 2.0
     FEE_RATE: float = 0.001  # 0.1% per side (Binance taker)
 
-    CHANNELS = ["360_SCALP", "360_SWING", "360_SPOT"]
+    CHANNELS = ["360_SCALP", "360_SWING", "360_SPOT", "360_GEM"]
 
     def __init__(self, storage_path: str = "data/paper_portfolios.json") -> None:
         self._path = Path(storage_path)

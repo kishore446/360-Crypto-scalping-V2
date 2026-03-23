@@ -16,13 +16,10 @@ import uuid
 
 from config import CHANNEL_SCALP_CVD
 from src.channels.base import BaseChannel, Signal
-from src.cvd import detect_cvd_divergence
 from src.dca import compute_dca_zone
 from src.filters import check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
-
-import numpy as np
 
 # Price must be within this percentage of recent 20-bar high/low to be
 # considered "at support/resistance".

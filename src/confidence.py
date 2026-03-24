@@ -7,11 +7,16 @@ Factors:
   * Spread quality            (0–10)
   * Historical data sufficiency (0–10)
   * Multi-exchange verification (0–5)
+  * On-chain / whale flow     (0–10, whale-aware)
+  * Order flow                (0–20)
+  * AI Sentiment              (0–10, SPOT/GEM only)
   * Correlation / position lock
   * Trading-session multiplier (Asian / EU / US)
 
-AI sentiment is intentionally excluded from signal scoring so that
-high-frequency signals fire with zero external-network latency.
+AI sentiment is active only for SPOT and GEM channels (4h/1d/1w timeframes
+where 10 s of network latency is irrelevant).  SCALP and SWING channels
+always receive a neutral 5.0 sentiment score so they fire with zero
+external-network latency.
 Macro/news AI alerts are handled separately by the MacroWatchdog.
 """
 
@@ -53,35 +58,43 @@ _LIQUIDITY_THRESHOLDS: Dict[str, float] = {
 _CHANNEL_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
     "360_SCALP": {
         "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0, "order_flow": 1.0,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+        "order_flow": 1.0, "sentiment": 0.0,
     },
     "360_SCALP_FVG": {
         "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0, "order_flow": 1.0,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+        "order_flow": 1.0, "sentiment": 0.0,
     },
     "360_SCALP_CVD": {
         "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0, "order_flow": 1.0,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+        "order_flow": 1.0, "sentiment": 0.0,
     },
     "360_SCALP_VWAP": {
         "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0, "order_flow": 1.0,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+        "order_flow": 1.0, "sentiment": 0.0,
     },
     "360_SCALP_OBI": {
         "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0, "order_flow": 1.0,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+        "order_flow": 1.0, "sentiment": 0.0,
     },
     "360_SWING": {
         "smc": 0.7, "trend": 1.4, "liquidity": 1.0, "spread": 0.8,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.2, "order_flow": 0.9,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.2,
+        "order_flow": 0.9, "sentiment": 0.0,
     },
     "360_SPOT": {
         "smc": 0.5, "trend": 1.4, "liquidity": 0.75, "spread": 0.8,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.5, "order_flow": 0.8,
+        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.5,
+        "order_flow": 0.8, "sentiment": 1.0,
     },
     "360_GEM": {
         "smc": 0.2, "trend": 0.8, "liquidity": 0.5, "spread": 0.5,
-        "data_sufficiency": 1.0, "multi_exchange": 0.5, "onchain": 2.0, "order_flow": 0.5,
+        "data_sufficiency": 1.0, "multi_exchange": 0.5, "onchain": 2.0,
+        "order_flow": 0.5, "sentiment": 1.2,
     },
 }
 
@@ -95,8 +108,9 @@ class ConfidenceInput:
     spread_score: float = 0.0       # 0-10
     data_sufficiency: float = 0.0   # 0-10
     multi_exchange: float = 0.0     # 0-5
-    onchain_score: float = 0.0      # 0-5 (populated by score_onchain(); 0 = no data)
+    onchain_score: float = 0.0      # 0-10 (whale-aware; 0 = no data)
     order_flow_score: float = 0.0   # 0-20 (OI squeeze + CVD divergence + funding rate bonus)
+    sentiment_score: float = 0.0    # -1 to +1 from ai_engine.get_ai_insight() (SPOT/GEM only)
     has_enough_history: bool = True
     opposing_position_open: bool = False
 
@@ -155,6 +169,9 @@ def score_trend(
     momentum_positive: bool,
     adx_value: float = 0.0,
     momentum_strength: float = 0.0,
+    macd_histogram: Optional[float] = None,
+    macd_histogram_prev: Optional[float] = None,
+    signal_direction: Optional[str] = None,
 ) -> float:
     """Trend component (max 25).
 
@@ -171,6 +188,13 @@ def score_trend(
         ADX 20-25 = minimal trend, ADX 40+ = strong trend.
     momentum_strength:
         Absolute momentum value for gradient scoring.
+    macd_histogram:
+        Most recent MACD histogram value (MACD line − signal line).
+        Positive = bullish momentum, negative = bearish momentum.
+    macd_histogram_prev:
+        Previous MACD histogram value, used to detect growing/shrinking.
+    signal_direction:
+        ``"LONG"`` or ``"SHORT"`` – used to align MACD bonus/penalty.
     """
     s = 0.0
     if ema_aligned:
@@ -183,7 +207,27 @@ def score_trend(
         # Base 2 + up to 4 based on momentum strength
         mom_bonus = min(abs(momentum_strength) / 1.0, 1.0) * 4.0
         s += 2.0 + mom_bonus
-    return min(s, 25.0)
+
+    # MACD histogram bonus/penalty (up to +3, or −2 for contradiction)
+    if macd_histogram is not None and signal_direction is not None:
+        long_signal = signal_direction == "LONG"
+        hist_aligned = (long_signal and macd_histogram > 0) or (
+            not long_signal and macd_histogram < 0
+        )
+        hist_growing = (
+            macd_histogram_prev is not None
+            and (
+                (long_signal and macd_histogram > macd_histogram_prev)
+                or (not long_signal and macd_histogram < macd_histogram_prev)
+            )
+        )
+        if hist_aligned:
+            bonus = 2.0 + (1.0 if hist_growing else 0.0)
+            s += bonus
+        else:
+            s -= 2.0
+
+    return min(max(s, 0.0), 25.0)
 
 
 def score_liquidity(volume_24h_usd: float, threshold: float = 5_000_000, channel: Optional[str] = None) -> float:
@@ -238,6 +282,34 @@ def score_multi_exchange(verified: Optional[bool] = None) -> float:
     if verified is False:
         return 0.0
     return 2.5  # None → neutral
+
+
+def score_sentiment(sentiment_score: float, channel: Optional[str] = None) -> float:
+    """Sentiment component (max 10). Only active for SPOT and GEM channels.
+
+    Maps a sentiment score of [-1, +1] to a confidence contribution of
+    [0, 10].  For SCALP and SWING channels, always returns 5.0 (neutral)
+    so that high-frequency signals fire with zero external-network latency.
+
+    Parameters
+    ----------
+    sentiment_score:
+        Aggregate sentiment in the range [-1, +1] from
+        :func:`src.ai_engine.get_ai_insight`.  0.0 is neutral.
+    channel:
+        Optional channel name.  When ``"360_SCALP*"`` or ``"360_SWING"``,
+        returns 5.0 regardless of the sentiment value.
+
+    Returns
+    -------
+    float
+        0 (very bearish) → 10 (very bullish); 5.0 is neutral.
+    """
+    if channel is not None and (
+        channel.startswith("360_SCALP") or channel == "360_SWING"
+    ):
+        return 5.0  # neutral — no latency added for short-term channels
+    return round((max(-1.0, min(1.0, sentiment_score)) + 1.0) / 2.0 * 10.0, 2)
 
 
 def score_order_flow(
@@ -407,6 +479,8 @@ def compute_confidence(
         "multi_exchange": inp.multi_exchange * weights.get("multi_exchange", 1.0),
         "onchain": inp.onchain_score * weights.get("onchain", 1.0),
         "order_flow": inp.order_flow_score * weights.get("order_flow", 1.0),
+        "sentiment": score_sentiment(inp.sentiment_score, channel=channel)
+            * weights.get("sentiment", 0.0),
     }
     total = sum(breakdown.values())
 

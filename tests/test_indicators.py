@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi, sma
+from src.indicators import adx, atr, bollinger_bands, ema, macd, momentum, rsi, sma
 
 
 # ---------------------------------------------------------------------------
@@ -160,3 +160,61 @@ class TestMomentum:
         close = np.array([100.0, 99.0, 98.0, 97.0])
         result = momentum(close, 3)
         assert result[3] == pytest.approx(-3.0)
+
+
+# ---------------------------------------------------------------------------
+# MACD
+# ---------------------------------------------------------------------------
+
+
+class TestMACD:
+    def test_returns_three_arrays(self):
+        close = np.linspace(100, 150, 50)
+        result = macd(close)
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        macd_line, signal_line, histogram = result
+        assert len(macd_line) == len(close)
+        assert len(signal_line) == len(close)
+        assert len(histogram) == len(close)
+
+    def test_macd_line_equals_ema_diff(self):
+        np.random.seed(42)
+        close = np.cumsum(np.random.randn(60)) + 100
+        macd_line, signal_line, histogram = macd(close, 12, 26, 9)
+        expected_fast = ema(close, 12)
+        expected_slow = ema(close, 26)
+        expected_macd = expected_fast - expected_slow
+        valid = ~np.isnan(macd_line)
+        np.testing.assert_allclose(macd_line[valid], expected_macd[valid], rtol=1e-10)
+
+    def test_histogram_equals_macd_minus_signal(self):
+        close = np.linspace(100, 200, 60)
+        macd_line, signal_line, histogram = macd(close)
+        valid = ~np.isnan(histogram)
+        np.testing.assert_allclose(
+            histogram[valid],
+            (macd_line - signal_line)[valid],
+            rtol=1e-10,
+        )
+
+    def test_short_input_returns_all_nan(self):
+        close = np.array([100.0, 101.0, 102.0])
+        macd_line, signal_line, histogram = macd(close)
+        assert all(np.isnan(macd_line))
+        assert all(np.isnan(signal_line))
+        assert all(np.isnan(histogram))
+
+    def test_length_preserved(self):
+        close = np.arange(1.0, 101.0)
+        ml, sl, hist = macd(close, 12, 26, 9)
+        assert len(ml) == len(sl) == len(hist) == 100
+
+    def test_valid_values_after_warmup(self):
+        close = np.cumsum(np.random.randn(100)) + 100
+        ml, sl, hist = macd(close, 12, 26, 9)
+        # At least some values should be non-NaN
+        assert not all(np.isnan(ml))
+        assert not all(np.isnan(sl))
+        assert not all(np.isnan(hist))
+

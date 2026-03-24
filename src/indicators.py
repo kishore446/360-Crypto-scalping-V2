@@ -153,6 +153,63 @@ def rsi(close: NDArray, period: int = 14) -> NDArray:
 
 
 # ---------------------------------------------------------------------------
+# MACD (Moving Average Convergence Divergence)
+# ---------------------------------------------------------------------------
+
+def macd(
+    close: NDArray,
+    fast_period: int = 12,
+    slow_period: int = 26,
+    signal_period: int = 9,
+) -> tuple[NDArray, NDArray, NDArray]:
+    """MACD (Moving Average Convergence Divergence).
+
+    Computes the MACD line (fast EMA − slow EMA), the signal line (EMA of
+    the MACD line), and the histogram (MACD − signal).
+
+    Parameters
+    ----------
+    close:
+        Array of closing prices.
+    fast_period:
+        Period for the fast EMA (default 12).
+    slow_period:
+        Period for the slow EMA (default 26).
+    signal_period:
+        Period for the signal-line EMA (default 9).
+
+    Returns
+    -------
+    tuple[NDArray, NDArray, NDArray]
+        ``(macd_line, signal_line, histogram)`` – all the same length as
+        *close*.  Elements are ``NaN`` until enough data is available.
+    """
+    arr = np.asarray(close, dtype=np.float64)
+    n = len(arr)
+    nan_out = np.full(n, np.nan)
+
+    if n < slow_period:
+        return nan_out.copy(), nan_out.copy(), nan_out.copy()
+
+    fast_ema = ema(arr, fast_period)
+    slow_ema = ema(arr, slow_period)
+    macd_line = fast_ema - slow_ema  # NaN wherever slow_ema is NaN
+
+    # Compute signal line as EMA of the valid portion of macd_line
+    signal_line = np.full(n, np.nan)
+    valid_mask = ~np.isnan(macd_line)
+    valid_macd = macd_line[valid_mask]
+    if len(valid_macd) >= signal_period:
+        sig = ema(valid_macd, signal_period)
+        # Map back to original indices
+        indices = np.where(valid_mask)[0]
+        signal_line[indices] = sig
+
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+# ---------------------------------------------------------------------------
 # Bollinger Bands
 # ---------------------------------------------------------------------------
 

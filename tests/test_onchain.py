@@ -70,9 +70,9 @@ class TestNetFlowToScore:
         assert _net_flow_to_score(0, 0, 0) == _NEUTRAL_SCORE
 
     def test_pure_outflow_gives_max_score(self):
-        # All coins leaving exchange → bullish → score near 5
+        # All coins leaving exchange → bullish → score near 10 (new max)
         score = _net_flow_to_score(-1000, 0, 1000)  # net = inflow(0) - outflow(1000) = -1000
-        assert score == pytest.approx(5.0)
+        assert score == pytest.approx(10.0)
 
     def test_pure_inflow_gives_min_score(self):
         # All coins entering exchange → bearish → score near 0
@@ -87,7 +87,7 @@ class TestNetFlowToScore:
         for inflow, outflow in [(100, 900), (500, 500), (900, 100)]:
             net = inflow - outflow
             score = _net_flow_to_score(net, inflow, outflow)
-            assert 0.0 <= score <= 5.0
+            assert 0.0 <= score <= 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ class TestScoreOnchain:
 
     def test_clamps_above_max(self):
         data = OnChainData(symbol="BTC", score=100.0)
-        assert score_onchain(data) == 5.0
+        assert score_onchain(data) == 10.0
 
     def test_clamps_below_zero(self):
         data = OnChainData(symbol="BTC", score=-5.0)

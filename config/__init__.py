@@ -105,6 +105,19 @@ MACRO_WATCHDOG_FEAR_GREED_THRESHOLD_HIGH: int = int(
 # On-chain intelligence — Glassnode (optional)
 ONCHAIN_API_KEY: str = os.getenv("ONCHAIN_API_KEY", "")
 
+# Whale Alert (free tier) — https://whale-alert.io/
+# Optional; without a key on-chain scores fall back to Glassnode-only neutral
+WHALE_ALERT_API_KEY: str = os.getenv("WHALE_ALERT_API_KEY", "")
+
+# Etherscan (free tier, 5 calls/sec) — https://etherscan.io/apis
+ETHERSCAN_API_KEY: str = os.getenv("ETHERSCAN_API_KEY", "")
+
+# Cornix auto-execution signal formatting
+# When true, a Cornix-compatible block is appended to SPOT/GEM/SWING signals
+CORNIX_FORMAT_ENABLED: bool = os.getenv("CORNIX_FORMAT_ENABLED", "false").lower() in (
+    "true", "1", "yes"
+)
+
 # ---------------------------------------------------------------------------
 # Pair management
 # ---------------------------------------------------------------------------

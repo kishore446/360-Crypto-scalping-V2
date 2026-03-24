@@ -43,7 +43,7 @@ from src.confidence import (
     score_spread,
     score_trend,
 )
-from src.indicators import adx, atr, bollinger_bands, ema, momentum, rsi
+from src.indicators import adx, atr, bollinger_bands, ema, macd, momentum, rsi
 from src.onchain import score_onchain
 from src.regime import MarketRegime
 from src.signal_quality import (
@@ -71,6 +71,8 @@ from src.spoof_detect import check_spoof_gate
 from src.utils import get_logger, price_decimal_fmt, utcnow
 from src.volume_divergence import check_volume_divergence_gate
 from src.vwap import check_vwap_extension, compute_vwap
+from src.ai_engine import get_ai_insight
+from src.chart_patterns import detect_patterns, pattern_confidence_bonus
 
 log = get_logger("scanner")
 
@@ -606,6 +608,14 @@ class Scanner:
                 ind["momentum_last"] = (
                     float(mom[-1]) if not np.isnan(mom[-1]) else None
                 )
+            if len(c) >= 35:  # slow_period(26) + signal_period(9)
+                ml, sl_line, hist = macd(c)
+                ind["macd_histogram_last"] = (
+                    float(hist[-1]) if not np.isnan(hist[-1]) else None
+                )
+                ind["macd_histogram_prev"] = (
+                    float(hist[-2]) if len(hist) > 1 and not np.isnan(hist[-2]) else None
+                )
             indicators[tf_key] = ind
         return indicators
 
@@ -951,6 +961,7 @@ class Scanner:
         cross_verified: Optional[bool],
         chan_name: str = "",
         funding_rate: Optional[float] = None,
+        sentiment_score: float = 0.0,
     ) -> Optional[float]:
         # Gate: if OI is rising against the sweep direction, block the signal
         if ctx.smc_data.get("oi_invalidated", False):
@@ -1021,6 +1032,9 @@ class Scanner:
                 ema_aligned, adx_ok, mom_positive,
                 adx_value=ctx.ind_for_predict.get("adx_last") or 0.0,
                 momentum_strength=ctx.ind_for_predict.get("momentum_last") or 0.0,
+                macd_histogram=ctx.ind_for_predict.get("macd_histogram_last"),
+                macd_histogram_prev=ctx.ind_for_predict.get("macd_histogram_prev"),
+                signal_direction=sig.direction.value,
             ),
             liquidity_score=score_liquidity(volume_24h, channel=chan_name),
             spread_score=score_spread(ctx.spread_pct),
@@ -1028,6 +1042,7 @@ class Scanner:
             multi_exchange=score_multi_exchange(verified=cross_verified),
             onchain_score=score_onchain(ctx.onchain_data),
             order_flow_score=of_score,
+            sentiment_score=sentiment_score,
             has_enough_history=self.pair_mgr.has_enough_history(symbol),
             opposing_position_open=any(
                 s.symbol == symbol and s.direction.value != sig.direction.value
@@ -1352,6 +1367,18 @@ class Scanner:
         cross_verified = await self._verify_cross_exchange(
             symbol, sig.direction.value, sig.entry
         )
+
+        # Fetch AI sentiment only for SPOT/GEM channels (4h/1d timeframes where
+        # 10 s of network latency is irrelevant).  SCALP/SWING receive 0.0
+        # (neutral) so the hot path has zero extra latency.
+        sentiment_score = 0.0
+        if chan_name in ("360_SPOT", "360_GEM"):
+            try:
+                ai_result = await get_ai_insight(symbol)
+                sentiment_score = ai_result.score
+            except Exception as _exc:
+                log.debug("Sentiment fetch failed for {}: {}", symbol, _exc)
+
         legacy_confidence = self._compute_base_confidence(
             symbol,
             volume_24h,
@@ -1360,6 +1387,7 @@ class Scanner:
             cross_verified,
             chan_name=chan_name,
             funding_rate=_funding_rate,
+            sentiment_score=sentiment_score,
         )
         if legacy_confidence is None:
             return None, cross_verified
@@ -1393,6 +1421,24 @@ class Scanner:
                 "Feedback adjustment for {} {} {}: {:+.1f} → {:.1f}",
                 symbol, chan_name, setup.setup_class.value, fb_adj, sig.confidence,
             )
+
+        # Chart pattern bonus: detect confirming patterns from primary-TF candles
+        primary_tf = self._get_primary_timeframe(chan_name)
+        primary_candles = self._resolve_candles(ctx.candles, primary_tf)
+        if primary_candles:
+            try:
+                patterns = detect_patterns(primary_candles)
+                pat_bonus = pattern_confidence_bonus(patterns, sig.direction.value)
+                if pat_bonus != 0.0:
+                    sig.confidence += pat_bonus
+                    log.debug(
+                        "Chart pattern bonus {} {}: {:+.2f} (patterns={})",
+                        symbol, chan_name, pat_bonus,
+                        [p["pattern"] for p in patterns],
+                    )
+            except Exception as _exc:
+                log.debug("Chart pattern detection error for {}: {}", symbol, _exc)
+
         # Apply adaptive confidence decay based on signal freshness.
         # apply_confidence_decay clamps the final value to [0, 100].
         sig.confidence = apply_confidence_decay(

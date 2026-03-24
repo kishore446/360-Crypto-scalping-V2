@@ -35,6 +35,7 @@ from src.redis_client import RedisClient
 from src.risk import RiskManager
 from src.smc import Direction
 from src.utils import get_logger
+from src.cornix_formatter import format_cornix_signal
 
 log = get_logger("signal_router")
 
@@ -396,6 +397,16 @@ class SignalRouter:
                     log.warning("Chart generation failed for {}: {}", signal.symbol, exc)
         else:
             text = self._format_signal(signal)
+
+        # Append Cornix auto-execution block when enabled
+        try:
+            from config import CORNIX_FORMAT_ENABLED
+            if CORNIX_FORMAT_ENABLED:
+                cornix_block = format_cornix_signal(signal)
+                if cornix_block:
+                    text = text + "\n\n" + cornix_block
+        except Exception as _exc:
+            log.debug("Cornix format skipped: {}", _exc)
 
         delivered = False
         try:

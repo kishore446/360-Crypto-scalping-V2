@@ -390,8 +390,6 @@ class TestScalpFastPath:
     @pytest.mark.asyncio
     async def test_scalp_skips_cross_exchange_verification(self):
         """_prepare_signal must NOT call _verify_cross_exchange for SCALP channels."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-
         from src.scanner import Scanner
 
         # Build a minimal mock scanner
@@ -424,8 +422,6 @@ class TestScalpFastPath:
     @pytest.mark.asyncio
     async def test_prepare_signal_sets_detected_at(self, monkeypatch):
         """_prepare_signal must set sig.detected_at after evaluate() succeeds."""
-        from unittest.mock import AsyncMock, MagicMock
-
         # Patch the scanner's heavy methods so we can run _prepare_signal in isolation
         # by invoking the actual method with mocked dependencies.  The important thing
         # is that detected_at is set right after evaluate() returns a non-None signal.

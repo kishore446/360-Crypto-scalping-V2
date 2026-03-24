@@ -8,8 +8,10 @@ module degrades gracefully and every public function returns ``None``.
 from __future__ import annotations
 
 import io
+import os
 from typing import Dict, List, Optional, Tuple
 
+import matplotlib.font_manager as fm
 from src.utils import get_logger
 
 log = get_logger("chart_generator")
@@ -17,6 +19,15 @@ log = get_logger("chart_generator")
 try:
     import matplotlib
     matplotlib.use("Agg")
+    # Register Noto Color Emoji as a fallback for emoji glyphs
+    _noto_emoji = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+    if os.path.isfile(_noto_emoji):
+        try:
+            fm.fontManager.addfont(_noto_emoji)
+            matplotlib.rcParams["font.family"] = "sans-serif"
+            matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", "Noto Color Emoji"]
+        except Exception as exc:
+            log.warning("Could not register Noto Color Emoji font: %s", exc)
     import mplfinance as mpf
     import matplotlib.pyplot as plt
     import pandas as pd

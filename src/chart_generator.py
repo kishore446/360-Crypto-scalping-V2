@@ -19,7 +19,6 @@ try:
     matplotlib.use("Agg")
     import mplfinance as mpf
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
     import pandas as pd
     _MPF_AVAILABLE = True
 except ImportError:  # pragma: no cover

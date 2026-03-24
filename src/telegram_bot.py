@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 
@@ -343,7 +343,7 @@ class TelegramBot:
     def format_portfolio_signal(
         sig: Signal,
         narrative: str = "",
-        sector_context: "Optional[Any]" = None,
+        sector_context: Optional[Any] = None,
         risk_label: str = "",
         quality_label: str = "",
     ) -> str:

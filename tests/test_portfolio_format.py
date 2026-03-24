@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.channels.base import Signal
 from src.sector import SectorContext
 from src.smc import Direction

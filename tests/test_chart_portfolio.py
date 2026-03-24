@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.chart_generator import generate_portfolio_chart
 
 

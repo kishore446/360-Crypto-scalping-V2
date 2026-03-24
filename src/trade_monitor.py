@@ -530,10 +530,10 @@ class TradeMonitor:
                 )
                 if self.on_highlight_callback is not None:
                     self.on_highlight_callback(sig, 3, tp3_pnl)
-                # Partial TP3 execution: close remaining 34% of position
+                # Partial TP3 execution: close 34% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.34)
+                        await self._order_manager.close_partial(sig, 0.34, tp_level=3)
                     except Exception as _exc:
                         log.warning("Partial TP3 close failed for {}: {}", sig.symbol, _exc)
                 self._set_realized_pnl(sig, sig.tp3)
@@ -554,10 +554,10 @@ class TradeMonitor:
                     self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
                 # Trailing: move SL to entry (break-even)
                 sig.stop_loss = sig.entry
-                # Partial TP2 execution: close 33% of position
+                # Partial TP2 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.33)
+                        await self._order_manager.close_partial(sig, 0.33, tp_level=2)
                     except Exception as _exc:
                         log.warning("Partial TP2 close failed for {}: {}", sig.symbol, _exc)
             if price >= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
@@ -569,10 +569,10 @@ class TradeMonitor:
                     sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                         entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
                     )
-                # Partial TP1 execution: close 33% of position
+                # Partial TP1 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.33)
+                        await self._order_manager.close_partial(sig, 0.33, tp_level=1)
                     except Exception as _exc:
                         log.warning("Partial TP1 close failed for {}: {}", sig.symbol, _exc)
         else:
@@ -582,10 +582,10 @@ class TradeMonitor:
                 )
                 if self.on_highlight_callback is not None:
                     self.on_highlight_callback(sig, 3, tp3_pnl)
-                # Partial TP3 execution: close remaining 34% of position
+                # Partial TP3 execution: close 34% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.34)
+                        await self._order_manager.close_partial(sig, 0.34, tp_level=3)
                     except Exception as _exc:
                         log.warning("Partial TP3 close failed for {}: {}", sig.symbol, _exc)
                 self._set_realized_pnl(sig, sig.tp3)
@@ -605,10 +605,10 @@ class TradeMonitor:
                 if self.on_highlight_callback is not None:
                     self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
                 sig.stop_loss = sig.entry
-                # Partial TP2 execution: close 33% of position
+                # Partial TP2 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.33)
+                        await self._order_manager.close_partial(sig, 0.33, tp_level=2)
                     except Exception as _exc:
                         log.warning("Partial TP2 close failed for {}: {}", sig.symbol, _exc)
             if price <= sig.tp1 and sig.status not in ("TP1_HIT", "TP2_HIT", "TP3_HIT"):
@@ -620,10 +620,10 @@ class TradeMonitor:
                     sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                         entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
                     )
-                # Partial TP1 execution: close 33% of position
+                # Partial TP1 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
-                        await self._order_manager.close_partial(sig, 0.33)
+                        await self._order_manager.close_partial(sig, 0.33, tp_level=1)
                     except Exception as _exc:
                         log.warning("Partial TP1 close failed for {}: {}", sig.symbol, _exc)
 

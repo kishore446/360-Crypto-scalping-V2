@@ -83,6 +83,10 @@ class OrderManager:
         self._max_position_usd = max_position_usd
         # Track open position sizes for partial TP execution: signal_id → quantity
         self._open_quantities: Dict[str, float] = {}
+        # Track which TP levels have had partial closes executed to prevent
+        # duplicate closes if price oscillates around a TP level.
+        # Maps signal_id → set of TP level numbers already closed (1, 2, 3).
+        self._partial_closed_tps: Dict[str, set] = {}
 
     # ------------------------------------------------------------------
     # Public interface
@@ -289,21 +293,33 @@ class OrderManager:
         )
         return False
 
-    async def close_partial(self, signal: Any, fraction: float) -> Optional[str]:
+    async def close_partial(
+        self,
+        signal: Any,
+        fraction: float,
+        tp_level: int = 0,
+    ) -> Optional[str]:
         """Close a fraction of an open position (partial take-profit execution).
 
         Called by :class:`~src.trade_monitor.TradeMonitor` on TP1/TP2/TP3 hits:
 
-        * TP1: ``fraction=0.33``
-        * TP2: ``fraction=0.33``
-        * TP3: ``fraction=0.34``
+        * TP1: ``fraction=0.33, tp_level=1``
+        * TP2: ``fraction=0.33, tp_level=2``
+        * TP3: ``fraction=0.34, tp_level=3``
+
+        Each TP level can only be closed once per signal.  If price oscillates
+        around a TP level, subsequent calls with the same *tp_level* are
+        no-ops to prevent closing more than the original position.
 
         Parameters
         ----------
         signal:
             The active :class:`~src.channels.base.Signal`.
         fraction:
-            Fraction of the original position to close (0.0–1.0).
+            Fraction of the **original** position size to close (0.0–1.0).
+        tp_level:
+            TP level number (1, 2, or 3). When non-zero, used to guard against
+            duplicate partial closes at the same TP level.
 
         Returns
         -------
@@ -312,6 +328,17 @@ class OrderManager:
         """
         if not self._enabled:
             return None
+
+        # Guard against duplicate partial closes at the same TP level
+        if tp_level > 0:
+            closed_tps = self._partial_closed_tps.setdefault(signal.signal_id, set())
+            if tp_level in closed_tps:
+                log.debug(
+                    "[OrderManager] close_partial: TP%d already closed for %s — skipping",
+                    tp_level, signal.signal_id,
+                )
+                return None
+            closed_tps.add(tp_level)
 
         original_qty = self._open_quantities.get(signal.signal_id, 0.0)
         if original_qty <= 0:
@@ -334,8 +361,8 @@ class OrderManager:
                 )
                 order_id = str(order.get("id", ""))
                 log.info(
-                    "[OrderManager] partial close: %s %s %.2f%% of %s qty=%.6f id=%s",
-                    signal.symbol, side, fraction * 100, signal.signal_id,
+                    "[OrderManager] partial close TP%d: %s %s %.2f%% of original qty=%.6f id=%s",
+                    tp_level, signal.symbol, side, fraction * 100,
                     close_qty, order_id,
                 )
                 return order_id
@@ -347,8 +374,8 @@ class OrderManager:
                 return None
 
         log.info(
-            "[OrderManager] STUB close_partial: {} {} {}% (qty={})",
-            signal.symbol, side, fraction * 100, close_qty,
+            "[OrderManager] STUB close_partial TP{}: {} {} {}% (qty={})",
+            tp_level, signal.symbol, side, fraction * 100, close_qty,
         )
         return None
 

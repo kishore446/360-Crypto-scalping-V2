@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -108,6 +109,14 @@ class Signal:
     entry_momentum_slope: float = 0.0             # EMA slope at entry (% diff)
     last_lifecycle_check: Optional[datetime] = None  # UTC timestamp of last check
     lifecycle_alert_level: str = "GREEN"          # GREEN, YELLOW, RED
+
+    # ---- Latency tracking ----
+    # detected_at: time.time() when channel.evaluate() first returned a non-None signal.
+    # posted_at: time.time() when the signal was successfully delivered to Telegram.
+    # enrichment_latency_ms: difference (ms) between detection and posting.
+    detected_at: Optional[float] = None
+    posted_at: Optional[float] = None
+    enrichment_latency_ms: Optional[float] = None
 
     @property
     def r_multiple(self) -> float:

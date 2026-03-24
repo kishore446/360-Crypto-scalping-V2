@@ -97,6 +97,12 @@ _RANGING_ADX_SUPPRESS_THRESHOLD: float = 15.0
 # Confidence boost applied to SCALP RANGE_FADE setup class when regime is RANGING
 _RANGING_RANGE_FADE_CONF_BOOST: float = 5.0
 
+# SCALP channel names — used for fast-path logic (skip cross-exchange verification).
+_SCALP_CHANNELS: frozenset = frozenset({
+    "360_SCALP", "360_SCALP_FVG", "360_SCALP_CVD",
+    "360_SCALP_VWAP", "360_SCALP_OBI",
+})
+
 # Maximum number of symbols scanned concurrently
 _MAX_CONCURRENT_SCANS: int = 10
 
@@ -1156,6 +1162,9 @@ class Scanner:
         if sig is None:
             return None, None
 
+        # Record wall-clock time of signal detection for latency tracking.
+        sig.detected_at = time.time()
+
         setup = self._evaluate_setup(chan_name, sig, ctx)
         if not setup.channel_compatible or not setup.regime_compatible:
             log.debug("Rejected {} {} setup: {}", symbol, chan_name, setup.reason)
@@ -1366,7 +1375,7 @@ class Scanner:
 
         cross_verified = await self._verify_cross_exchange(
             symbol, sig.direction.value, sig.entry
-        )
+        ) if chan_name not in _SCALP_CHANNELS else None
 
         # Fetch AI sentiment only for SPOT/GEM channels (4h/1d timeframes where
         # 10 s of network latency is irrelevant).  SCALP/SWING receive 0.0
@@ -1468,14 +1477,10 @@ class Scanner:
         # WATCHLIST tier: signals with confidence 50-64 are kept as WATCHLIST
         # instead of being discarded.  Only the SCALP channel family generates
         # watchlist alerts; SWING and SPOT require higher confidence.
-        _scalp_channels = {
-            "360_SCALP", "360_SCALP_FVG", "360_SCALP_CVD",
-            "360_SCALP_VWAP", "360_SCALP_OBI",
-        }
         _watchlist_confidence = 50.0
         if (
             sig.signal_tier == "WATCHLIST"
-            and chan_name in _scalp_channels
+            and chan_name in _SCALP_CHANNELS
             and sig.confidence >= _watchlist_confidence
         ):
             # Keep as WATCHLIST — clear entry/SL/TP for zone-alert-only format

@@ -108,7 +108,7 @@ class ScalpChannel(BaseChannel):
             return None
 
         return self._build_signal(
-            symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "SCALP"
+            symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "SCALP", atr_val=atr_val
         )
 
     # ------------------------------------------------------------------
@@ -164,7 +164,7 @@ class ScalpChannel(BaseChannel):
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val * 0.8)
         sl, tp1, tp2, tp3 = self._calc_levels(close, sl_dist, direction)
 
-        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "RANGE-FADE")
+        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "RANGE-FADE", atr_val=atr_val)
         if sig is not None:
             sig.setup_class = "RANGE_FADE"
         return sig
@@ -238,7 +238,7 @@ class ScalpChannel(BaseChannel):
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val)
         sl, tp1, tp2, tp3 = self._calc_levels(close, sl_dist, direction)
 
-        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "WHALE")
+        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "WHALE", atr_val=atr_val)
         if sig is not None:
             sig.setup_class = "WHALE_MOMENTUM"
         return sig
@@ -273,6 +273,7 @@ class ScalpChannel(BaseChannel):
         tp3: float,
         sl_dist: float,
         id_prefix: str,
+        atr_val: float = 0.0,
     ) -> Optional[Signal]:
         if direction == Direction.LONG and sl >= close:
             return None
@@ -309,5 +310,11 @@ class ScalpChannel(BaseChannel):
         sig.original_tp1 = round(tp1, 8)
         sig.original_tp2 = round(tp2, 8)
         sig.original_tp3 = round(tp3, 8)
+
+        # Entry zone: bracket around close ±ATR×0.3 (or ±sl_dist×0.6 as proxy)
+        # Gives users a limit-order zone to pre-position instead of chasing price.
+        zone_half = (atr_val * 0.3) if atr_val > 0 else (sl_dist * 0.6)
+        sig.entry_zone_low = round(close - zone_half, 8)
+        sig.entry_zone_high = round(close + zone_half, 8)
 
         return sig

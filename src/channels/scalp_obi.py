@@ -165,4 +165,9 @@ class ScalpOBIChannel(BaseChannel):
         sig.original_tp3 = round(tp3, 8)
         sig.setup_class = "OBI_ABSORPTION"
 
+        # Entry zone: bracket around close ±ATR×0.3
+        zone_half = atr_val * 0.3
+        sig.entry_zone_low = round(close - zone_half, 8)
+        sig.entry_zone_high = round(close + zone_half, 8)
+
         return sig

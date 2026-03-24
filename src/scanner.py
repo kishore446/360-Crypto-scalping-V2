@@ -22,6 +22,7 @@ from config import (
     SCAN_MIN_VOLUME_USD,
     SEED_TIMEFRAMES,
     SIGNAL_SCAN_COOLDOWN_SECONDS,
+    SIGNAL_VALID_FOR_MINUTES,
     SMC_SCALP_LOOKBACK,
     SMC_SCALP_TOLERANCE_PCT,
     TIER2_SCAN_EVERY_N_CYCLES,
@@ -1094,6 +1095,8 @@ class Scanner:
         # Attach the cached order book depth snapshot so downstream filters
         # (RiskManager OBI check) can evaluate it without an extra fetch.
         sig.order_book = self._get_order_book_depth(sig.symbol)
+        # How long (minutes) the setup remains actionable — sourced from config.
+        sig.valid_for_minutes = SIGNAL_VALID_FOR_MINUTES.get(sig.channel, 15)
 
     @staticmethod
     def _has_higher_timeframe_alignment(sig: Any, indicators: Dict[str, Dict[str, Any]]) -> bool:
@@ -1573,6 +1576,7 @@ class Scanner:
             signal_id=f"GEM-{uuid.uuid4().hex[:8].upper()}",
             current_price=close,
             original_sl_distance=sl_dist,
+            valid_for_minutes=SIGNAL_VALID_FOR_MINUTES.get(CHANNEL_GEM.name, 1440),
         )
 
         if await self._enqueue_signal(sig):

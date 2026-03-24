@@ -285,7 +285,22 @@ class TelegramBot:
             f"{emoji} *{TelegramBot._escape_md(chan_name)}* │ *{TelegramBot._escape_md(sig.symbol)}* │ *{dir_word}*",
             TelegramBot._escape_md(separator),
             "",
-            f"📍 Entry: `{fmt_price(sig.entry)}`",
+        ]
+
+        # Entry line: show zone if available, otherwise exact price
+        entry_zone_low = getattr(sig, "entry_zone_low", None)
+        entry_zone_high = getattr(sig, "entry_zone_high", None)
+        exec_type = getattr(sig, "execution_type", "LIMIT_ZONE")
+        exec_hint = "limit order" if exec_type == "LIMIT_ZONE" else exec_type.lower()
+        if entry_zone_low is not None and entry_zone_high is not None:
+            lines.append(
+                f"📍 Entry Zone: `{fmt_price(entry_zone_low)}` – `{fmt_price(entry_zone_high)}` \\({TelegramBot._escape_md(exec_hint)}\\)"
+            )
+            lines.append(f"   Mid: `{fmt_price(sig.entry)}`")
+        else:
+            lines.append(f"📍 Entry: `{fmt_price(sig.entry)}`")
+
+        lines += [
             f"🛑 SL: `{fmt_price(sig.stop_loss)}` ({TelegramBot._escape_md(_pct(sig.stop_loss))})",
             f"🎯 TP1: `{fmt_price(sig.tp1)}` ({TelegramBot._escape_md(_pct(sig.tp1))})",
             f"🎯 TP2: `{fmt_price(sig.tp2)}` ({TelegramBot._escape_md(_pct(sig.tp2))})",
@@ -317,6 +332,14 @@ class TelegramBot:
         lines.append(
             f"⏱ Hold: {TelegramBot._escape_md(hold)} | R:R {TelegramBot._escape_md(rr_str)}"
         )
+
+        # Validity window (how long users have to enter the trade)
+        valid_mins = getattr(sig, "valid_for_minutes", None)
+        if valid_mins is not None:
+            exec_label = "LIMIT ORDER" if exec_type == "LIMIT_ZONE" else TelegramBot._escape_md(exec_type)
+            lines.append(
+                f"⏰ Valid for: \\~{valid_mins} min | Execution: {exec_label}"
+            )
 
         # Narrative reason (from liquidity_info + invalidation_summary)
         narrative_parts = []

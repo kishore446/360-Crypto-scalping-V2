@@ -92,13 +92,13 @@ class TestMinimumLifespan:
 
     @pytest.mark.asyncio
     async def test_sl_triggered_after_min_lifespan(self):
-        """A SCALP signal older than 30s whose price is below SL SHOULD be removed."""
+        """A SCALP signal older than 180s whose price is below SL SHOULD be removed."""
         sig = _make_signal(
             channel="360_SCALP",
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,  # past the 30s SCALP minimum
+            age_seconds=200.0,  # past the 180s SCALP minimum
         )
         sig.current_price = 29800.0  # below SL
 
@@ -113,13 +113,13 @@ class TestMinimumLifespan:
 
     @pytest.mark.asyncio
     async def test_swing_min_lifespan_is_longer(self):
-        """A SWING signal at age=15s (< 60s min) should NOT trigger SL."""
+        """A SWING signal at age=15s (< 300s min) should NOT trigger SL."""
         sig = _make_signal(
             channel="360_SWING",
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=15.0,  # below the 60s SWING minimum
+            age_seconds=15.0,  # below the 300s SWING minimum
         )
         sig.current_price = 29800.0  # below SL
 
@@ -190,7 +190,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.setup_class = "BREAKOUT_RETEST"
         sig.market_phase = "STRONG_TREND"
@@ -228,7 +228,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 29800.0  # below SL
 
@@ -253,7 +253,7 @@ class TestOutcomeRecording:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30500.0  # above TP3
 
@@ -282,7 +282,7 @@ class TestOutcomeRecording:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30200.0  # above TP1 but below TP2
 
@@ -303,7 +303,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=30100.0,  # invalid: SL above entry for LONG
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30000.0
 
@@ -324,7 +324,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 29800.0
 
@@ -362,7 +362,7 @@ class TestOutcomeRecording:
             tp1=29850.0,
             tp2=29700.0,
             tp3=29550.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30250.0
 
@@ -387,7 +387,7 @@ class TestOutcomeRecording:
             tp1=29850.0,
             tp2=29700.0,
             tp3=29550.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 29400.0
 
@@ -409,7 +409,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.status = "TP2_HIT"
         sig.stop_loss = sig.entry
@@ -433,7 +433,7 @@ class TestOutcomeRecording:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.status = "TP2_HIT"
         sig.stop_loss = 30120.0
@@ -539,7 +539,7 @@ class TestTrailingStopAfterTP2:
             direction=Direction.LONG,
             entry=30000.0,
             stop_loss=29850.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 29800.0  # below SL
 
@@ -905,7 +905,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         # Simulate TP1 having been hit previously
         sig.best_tp_hit = 1
@@ -944,7 +944,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         # Simulate TP2 having been hit previously
         sig.best_tp_hit = 2
@@ -980,7 +980,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 29800.0  # below SL
 
@@ -1008,7 +1008,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30200.0  # above TP1 but below TP2
 
@@ -1032,7 +1032,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         sig.current_price = 30350.0  # above TP2 but below TP3
 
@@ -1091,7 +1091,7 @@ class TestSignalQualityPnL:
             tp1=29850.0,
             tp2=29700.0,
             tp3=29550.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         # Simulate TP1 having been hit
         sig.best_tp_hit = 1
@@ -1128,7 +1128,7 @@ class TestSignalQualityPnL:
             tp1=30150.0,
             tp2=30300.0,
             tp3=30450.0,
-            age_seconds=35.0,
+            age_seconds=200.0,
         )
         # Simulate TP2 having been hit (signal quality would be +1%)
         sig.best_tp_hit = 2
@@ -1718,7 +1718,7 @@ class TestOnHighlightCallback:
             direction=Direction.LONG,
             entry=30000.0, stop_loss=29850.0,
             tp1=30150.0, tp2=30300.0, tp3=30450.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1738,7 +1738,7 @@ class TestOnHighlightCallback:
             direction=Direction.LONG,
             entry=30000.0, stop_loss=29850.0,
             tp1=30150.0, tp2=30300.0, tp3=30450.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1758,7 +1758,7 @@ class TestOnHighlightCallback:
             direction=Direction.LONG,
             entry=30000.0, stop_loss=29850.0,
             tp1=30150.0, tp2=30300.0, tp3=30450.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1775,7 +1775,7 @@ class TestOnHighlightCallback:
             direction=Direction.LONG,
             entry=30000.0, stop_loss=29850.0,
             tp1=30150.0, tp2=30300.0, tp3=30450.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1792,7 +1792,7 @@ class TestOnHighlightCallback:
             direction=Direction.SHORT,
             entry=30000.0, stop_loss=30150.0,
             tp1=29850.0, tp2=29700.0, tp3=29550.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1812,7 +1812,7 @@ class TestOnHighlightCallback:
             direction=Direction.SHORT,
             entry=30000.0, stop_loss=30150.0,
             tp1=29850.0, tp2=29700.0, tp3=29550.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
         monitor, _, highlight_calls = self._build_monitor(active)
@@ -1833,7 +1833,7 @@ class TestOnHighlightCallback:
             direction=Direction.LONG,
             entry=30000.0, stop_loss=29850.0,
             tp1=30150.0, tp2=30300.0, tp3=30450.0,
-            age_seconds=120.0,
+            age_seconds=200.0,
         )
         active = {sig.signal_id: sig}
 

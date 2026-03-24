@@ -374,6 +374,13 @@ def _build_channel_telegram_map() -> Dict[str, str]:
 CHANNEL_TELEGRAM_MAP: Dict[str, str] = _build_channel_telegram_map()
 
 # ---------------------------------------------------------------------------
+# Portfolio signal channels – channels that use the enhanced portfolio format
+# (narrative, sector comparison, chart image) instead of the compact scalp format.
+# ---------------------------------------------------------------------------
+PORTFOLIO_CHANNELS: set = {"360_SPOT", "360_GEM"}
+CHART_ENABLED_CHANNELS: set = {"360_SPOT", "360_GEM"}
+
+# ---------------------------------------------------------------------------
 # WebSocket settings
 # ---------------------------------------------------------------------------
 WS_MAX_STREAMS_PER_CONN: int = 50

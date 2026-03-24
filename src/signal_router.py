@@ -23,8 +23,10 @@ from config import (
     ALL_CHANNELS,
     CHANNEL_COOLDOWN_SECONDS,
     CHANNEL_TELEGRAM_MAP,
+    CHART_ENABLED_CHANNELS,
     MAX_CONCURRENT_SIGNALS_PER_CHANNEL,
     MAX_SIGNAL_HOLD_SECONDS,
+    PORTFOLIO_CHANNELS,
     TELEGRAM_FREE_CHANNEL_ID,
 )
 from src.channels.base import Signal
@@ -104,6 +106,9 @@ class SignalRouter:
         self._free_signal_date: Optional[date] = None
         # Detect whether queue.get() supports a timeout keyword argument
         self._queue_has_timeout = "timeout" in inspect.signature(queue.get).parameters
+        # Portfolio enrichment (optional — set after construction)
+        self.narrative_builder: Optional[Any] = None
+        self.sector_comparator: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -351,47 +356,77 @@ class SignalRouter:
         signal.risk_label = risk.risk_label
 
         # Format and send to premium channel
-        text = self._format_signal(signal)
         channel_id = CHANNEL_TELEGRAM_MAP.get(signal.channel, "")
-        if channel_id:
-            delivered = False
-            try:
-                delivered = await self._send_telegram(channel_id, text)
-            except Exception as exc:
-                log.warning(
-                    "Signal delivery failed for {} {}: {}",
-                    signal.channel,
-                    signal.signal_id,
-                    exc,
-                )
-            if not delivered:
-                retries = signal._delivery_retries
-                if retries < 2:
-                    signal._delivery_retries = retries + 1
-                    log.info(
-                        "Re-queuing {} {} (delivery attempt {}/3)",
-                        signal.channel,
-                        signal.signal_id,
-                        retries + 2,
-                    )
-                    await _delivery_sleep(2 ** retries)  # 1 s, 2 s for retries 0, 1
-                    await self._queue.put(signal)
-                else:
-                    log.error(
-                        "Signal {} {} permanently lost after 3 delivery attempts",
-                        signal.channel,
-                        signal.signal_id,
-                    )
-                return
-            log.info(
-                "Signal posted → {} | {} {}",
-                signal.channel,
-                signal.symbol,
-                signal.direction.value,
-            )
-        else:
+        if not channel_id:
             log.warning("No Telegram channel configured for {}", signal.channel)
             return
+
+        if signal.channel in PORTFOLIO_CHANNELS:
+            # --- Portfolio (SPOT/GEM) enhanced format ---
+            narrative = ""
+            if self.narrative_builder is not None:
+                try:
+                    context = self._build_narrative_context(signal)
+                    narrative = self.narrative_builder.build_narrative(signal, context)
+                except Exception as exc:
+                    log.warning("Narrative build failed for {}: {}", signal.symbol, exc)
+
+            sector_ctx = None
+            if self.sector_comparator is not None:
+                try:
+                    sector_ctx = self.sector_comparator.get_sector_context(signal.symbol)
+                except Exception as exc:
+                    log.warning("Sector context failed for {}: {}", signal.symbol, exc)
+
+            from src.telegram_bot import TelegramBot
+            text = TelegramBot.format_portfolio_signal(signal, narrative, sector_ctx)
+
+            # Send chart image first (if enabled and available)
+            if signal.channel in CHART_ENABLED_CHANNELS:
+                try:
+                    chart_bytes = self._build_portfolio_chart(signal)
+                    if chart_bytes:
+                        await self._send_photo(channel_id, chart_bytes)
+                except Exception as exc:
+                    log.warning("Chart generation failed for {}: {}", signal.symbol, exc)
+        else:
+            text = self._format_signal(signal)
+
+        delivered = False
+        try:
+            delivered = await self._send_telegram(channel_id, text)
+        except Exception as exc:
+            log.warning(
+                "Signal delivery failed for {} {}: {}",
+                signal.channel,
+                signal.signal_id,
+                exc,
+            )
+        if not delivered:
+            retries = signal._delivery_retries
+            if retries < 2:
+                signal._delivery_retries = retries + 1
+                log.info(
+                    "Re-queuing {} {} (delivery attempt {}/3)",
+                    signal.channel,
+                    signal.signal_id,
+                    retries + 2,
+                )
+                await _delivery_sleep(2 ** retries)  # 1 s, 2 s for retries 0, 1
+                await self._queue.put(signal)
+            else:
+                log.error(
+                    "Signal {} {} permanently lost after 3 delivery attempts",
+                    signal.channel,
+                    signal.signal_id,
+                )
+            return
+        log.info(
+            "Signal posted → {} | {} {}",
+            signal.channel,
+            signal.symbol,
+            signal.direction.value,
+        )
 
         # Register only after confirmed delivery
         self._active_signals[signal.signal_id] = signal
@@ -405,6 +440,93 @@ class SignalRouter:
 
         # Publish a condensed version to the free channel (Phase 4)
         await self._maybe_publish_free_signal(signal)
+
+    # ------------------------------------------------------------------
+    # Portfolio signal enrichment helpers
+    # ------------------------------------------------------------------
+
+    def _build_narrative_context(self, signal: Signal) -> Dict[str, Any]:
+        """Build the context dict for NarrativeBuilder from a signal."""
+        context: Dict[str, Any] = {}
+        # Basic fields extractable from the signal itself
+        if signal.setup_class:
+            context["setup_class"] = signal.setup_class
+        if signal.liquidity_info:
+            context["smc_events"] = [signal.liquidity_info]
+        if signal.risk_label:
+            context["risk"] = signal.risk_label
+        # Sector can be populated if sector_comparator is available
+        if self.sector_comparator is not None:
+            try:
+                context["sector"] = self.sector_comparator.get_sector(signal.symbol)
+            except Exception:
+                pass
+        return context
+
+    def _build_portfolio_chart(self, signal: Signal) -> Optional[bytes]:
+        """Generate a portfolio chart for a signal using data_store candles.
+
+        Returns None if data is unavailable or chart generation fails.
+        """
+        from src.chart_generator import generate_portfolio_chart
+
+        # Attempt to get candle data from sector_comparator's data_store
+        data_store = None
+        if self.sector_comparator is not None:
+            data_store = getattr(self.sector_comparator, "_data_store", None)
+
+        if data_store is None:
+            return None
+
+        try:
+            timeframe = "4h" if signal.channel == "360_SPOT" else "1d"
+            candles = data_store.get_candles(signal.symbol, timeframe)
+            if candles is None:
+                return None
+
+            closes = [float(v) for v in candles.get("close", [])]
+            highs = [float(v) for v in candles.get("high", [])]
+            lows = [float(v) for v in candles.get("low", [])]
+            volumes = [float(v) for v in candles.get("volume", [])]
+
+            tp_levels = [t for t in [signal.tp1, signal.tp2, signal.tp3] if t is not None]
+
+            from src.telegram_bot import TelegramBot
+            chan_name = TelegramBot._CHANNEL_DISPLAY_NAME.get(signal.channel, "SPOT")
+
+            return generate_portfolio_chart(
+                symbol=signal.symbol,
+                closes=closes,
+                highs=highs,
+                lows=lows,
+                volumes=volumes,
+                entry=signal.entry,
+                sl=signal.stop_loss,
+                tp_levels=tp_levels,
+                channel_name=chan_name,
+            )
+        except Exception as exc:
+            log.warning("_build_portfolio_chart failed for {}: {}", signal.symbol, exc)
+            return None
+
+    async def _send_photo(self, channel_id: str, photo_bytes: bytes) -> bool:
+        """Send a chart image to *channel_id*.
+
+        Uses the TelegramBot instance if available via _send_telegram, otherwise
+        calls send_photo directly on a TelegramBot instance.
+        """
+        try:
+            from src.telegram_bot import TelegramBot
+            # Retrieve the bot instance bound to _send_telegram if possible
+            bot = getattr(self._send_telegram, "__self__", None)
+            if isinstance(bot, TelegramBot):
+                return await bot.send_photo(channel_id, photo_bytes)
+            # Fall back to creating a transient bot (token taken from env)
+            tmp_bot = TelegramBot()
+            return await tmp_bot.send_photo(channel_id, photo_bytes)
+        except Exception as exc:
+            log.warning("_send_photo failed: {}", exc)
+            return False
 
     # ------------------------------------------------------------------
     # Free-channel publication (call once/day or on demand)

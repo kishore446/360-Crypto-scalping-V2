@@ -103,6 +103,15 @@ class CryptoSignalEngine:
             redis_client=self._redis_client,
         )
 
+        # Portfolio enrichment: narrative builder and sector comparator
+        from src.narrative import NarrativeBuilder
+        from src.sector import SectorComparator
+        self.router.narrative_builder = NarrativeBuilder()
+        self.router.sector_comparator = SectorComparator(
+            data_store=self.data_store,
+            pair_mgr=self.pair_mgr,
+        )
+
         # Circuit breaker (must be created before TradeMonitor)
         self._circuit_breaker = CircuitBreaker(
             max_consecutive_sl=CIRCUIT_BREAKER_MAX_CONSECUTIVE_SL,

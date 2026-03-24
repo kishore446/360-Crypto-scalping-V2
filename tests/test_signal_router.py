@@ -470,6 +470,58 @@ class TestSignalRouter:
         assert "TEST-SWING-CROSS" in router.active_signals
 
     @pytest.mark.asyncio
+    async def test_spot_gem_signals_never_blocked_by_cap(self, queue, router, sent_messages):
+        """SPOT and GEM signals are never blocked by per-channel caps (cap=999)."""
+        from config import MAX_CONCURRENT_SIGNALS_PER_CHANNEL
+
+        spot_cap = MAX_CONCURRENT_SIGNALS_PER_CHANNEL.get("360_SPOT", 999)
+        gem_cap = MAX_CONCURRENT_SIGNALS_PER_CHANNEL.get("360_GEM", 999)
+
+        # Both caps should be effectively unlimited (999 by default).
+        assert spot_cap >= 999, (
+            f"360_SPOT cap should be 999 (unlimited) but got {spot_cap}. "
+            "SPOT signals have 7-day hold — a lower cap silences the Portfolio channel."
+        )
+        assert gem_cap >= 999, (
+            f"360_GEM cap should be 999 (unlimited) but got {gem_cap}. "
+            "GEM signals have 30-day hold — a lower cap silences the Portfolio channel."
+        )
+
+        # Pre-fill SPOT channel with 10 dummy signals (well above the old cap of 5)
+        for i in range(10):
+            dummy = _make_signal(symbol=f"SPOT{i}USDT", channel="360_SPOT", confidence=90)
+            dummy.signal_id = f"SPOT-DUMMY-{i}"
+            router._active_signals[dummy.signal_id] = dummy
+            router._position_lock[dummy.symbol] = dummy.direction
+
+        # A new SPOT signal for a fresh symbol must still be accepted.
+        sig = Signal(
+            channel="360_SPOT",
+            symbol="NEWSPOTUSDT",
+            direction=Direction.LONG,
+            entry=1.0000,
+            stop_loss=0.9900,
+            tp1=1.0200,
+            tp2=1.0300,
+            confidence=90,
+            signal_id="TEST-SPOT-UNLIMITED",
+            timestamp=utcnow(),
+        )
+        await queue.put(sig)
+        task = asyncio.create_task(router.start())
+        await asyncio.sleep(0.2)
+        await router.stop()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert "TEST-SPOT-UNLIMITED" in router.active_signals, (
+            "SPOT signal was blocked despite cap being 999 — per-channel cap logic is wrong."
+        )
+
+    @pytest.mark.asyncio
     async def test_failed_send_does_not_leave_active_signal_or_lock(self, queue, sent_messages, monkeypatch):
         monkeypatch.setitem(signal_router_module.CHANNEL_TELEGRAM_MAP, "360_SCALP", "premium")
 

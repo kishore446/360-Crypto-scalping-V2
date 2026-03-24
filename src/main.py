@@ -49,6 +49,7 @@ from src.predictive_ai import PredictiveEngine
 from src.regime import MarketRegimeDetector
 from src.scanner import Scanner
 from src.gem_scanner import GemScanner
+from src.signal_lifecycle import SignalLifecycleMonitor
 from src.signal_router import SignalRouter
 from src.telegram_bot import TelegramBot
 from src.telemetry import TelemetryCollector
@@ -158,6 +159,17 @@ class CryptoSignalEngine:
         # Wire regime detector into trade monitor for signal invalidation checks
         self.monitor._regime_detector = self._regime_detector
 
+        # Signal Lifecycle Monitor — actively monitors open SPOT/GEM/SWING
+        # signals and posts periodic human-readable updates to subscribers.
+        # Instantiated here; started as an async task in bootstrap.
+        self._lifecycle_monitor = SignalLifecycleMonitor(
+            router=self.router,
+            data_store=self.data_store,
+            regime_detector=self._regime_detector,
+            send_telegram=self.telegram.send_message,
+            exchange_mgr=None,  # wired after _exchange_mgr is created below
+        )
+
         # Predictive AI engine
         self.predictive = PredictiveEngine()
 
@@ -186,6 +198,8 @@ class CryptoSignalEngine:
         self._exchange_mgr = ExchangeManager(
             second_exchange_url=os.getenv("SECOND_EXCHANGE_URL")
         )
+        # Wire exchange manager into lifecycle monitor now that it exists
+        self._lifecycle_monitor._exchange_mgr = self._exchange_mgr
 
         # WebSocket managers (set during boot)
         self._ws_spot: Optional[WebSocketManager] = None

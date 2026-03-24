@@ -490,7 +490,14 @@ PERFORMANCE_TRACKER_PATH: str = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
-# Max concurrent signals per channel (5 per channel, independently capped)
+# Max concurrent signals per channel.
+#
+# SCALP/SWING: capped for capital protection (leveraged trades).
+# SPOT/GEM:    effectively unlimited (999) — these are portfolio
+#              recommendations with long hold durations (7–30 days).
+#              Capping them silences the Portfolio channel for weeks.
+#              Natural daily throttle comes from GEM_MAX_DAILY_SIGNALS in
+#              the gem scanner, not from a concurrent-position cap.
 # ---------------------------------------------------------------------------
 MAX_CONCURRENT_SIGNALS_PER_CHANNEL: Dict[str, int] = {
     "360_SCALP":      int(os.getenv("MAX_SCALP_SIGNALS", "5")),
@@ -498,10 +505,31 @@ MAX_CONCURRENT_SIGNALS_PER_CHANNEL: Dict[str, int] = {
     "360_SCALP_CVD":  int(os.getenv("MAX_SCALP_CVD_SIGNALS", "3")),
     "360_SCALP_VWAP": int(os.getenv("MAX_SCALP_VWAP_SIGNALS", "3")),
     "360_SCALP_OBI":  int(os.getenv("MAX_SCALP_OBI_SIGNALS", "3")),
-    "360_SWING":      int(os.getenv("MAX_SWING_SIGNALS", "3")),
-    "360_SPOT":       int(os.getenv("MAX_SPOT_SIGNALS", "5")),
-    "360_GEM":        int(os.getenv("MAX_GEM_SIGNALS", "2")),
+    "360_SWING":      int(os.getenv("MAX_SWING_SIGNALS", "10")),
+    "360_SPOT":       int(os.getenv("MAX_SPOT_SIGNALS", "999")),
+    "360_GEM":        int(os.getenv("MAX_GEM_SIGNALS", "999")),
 }
+
+# ---------------------------------------------------------------------------
+# Signal Lifecycle Monitor — background loop that actively monitors every
+# open SPOT, GEM, and SWING signal and posts human-readable updates to
+# the Portfolio / Active Trading channels.
+# ---------------------------------------------------------------------------
+LIFECYCLE_CHECK_INTERVAL: Dict[str, int] = {
+    "360_SWING": int(os.getenv("LIFECYCLE_CHECK_INTERVAL_SWING", "14400")),   # 4 hours
+    "360_SPOT":  int(os.getenv("LIFECYCLE_CHECK_INTERVAL_SPOT",  "21600")),   # 6 hours
+    "360_GEM":   int(os.getenv("LIFECYCLE_CHECK_INTERVAL_GEM",  "43200")),    # 12 hours
+}
+
+# Confidence drop thresholds for lifecycle alert levels.
+# YELLOW fires when confidence drops by >= YELLOW points from entry.
+# RED fires when confidence drops by >= RED points from entry (overrides YELLOW).
+LIFECYCLE_CONFIDENCE_DROP_YELLOW: float = float(
+    os.getenv("LIFECYCLE_CONFIDENCE_DROP_YELLOW", "15.0")
+)
+LIFECYCLE_CONFIDENCE_DROP_RED: float = float(
+    os.getenv("LIFECYCLE_CONFIDENCE_DROP_RED", "25.0")
+)
 
 # ---------------------------------------------------------------------------
 # Anti-noise: minimum signal lifespan before SL/TP checks are applied (secs)

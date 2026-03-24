@@ -24,10 +24,9 @@ Usage
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from src.utils import get_logger
 
@@ -115,12 +114,12 @@ def _pnl_color(pnl: float) -> str:
 
 def _render_html(
     now_str: str,
-    overall: "ChannelStats",  # type: ignore[name-defined]
-    stats_7d: "ChannelStats",  # type: ignore[name-defined]
-    stats_30d: "ChannelStats",  # type: ignore[name-defined]
-    channel_stats: dict,
+    overall: Any,
+    stats_7d: Any,
+    stats_30d: Any,
+    channel_stats: Dict[str, Any],
     top5: List["SignalRecord"],
-    monthly: dict,
+    monthly: Dict[str, Any],
 ) -> str:
     """Produce the full HTML string."""
 

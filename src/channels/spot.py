@@ -129,7 +129,7 @@ class SpotChannel(BaseChannel):
             return None
 
         # SMC: bearish structure contradicts LONG
-        if mss is not None and mss.direction == Direction.SHORT:
+        if mss is not None and getattr(mss, "direction", None) == Direction.SHORT:
             return None
 
         # RSI overbought gate
@@ -203,7 +203,7 @@ class SpotChannel(BaseChannel):
             return None
 
         # SMC: bullish structure contradicts SHORT
-        if mss is not None and mss.direction == Direction.LONG:
+        if mss is not None and getattr(mss, "direction", None) == Direction.LONG:
             return None
 
         # RSI oversold gate: don't short into an already oversold market

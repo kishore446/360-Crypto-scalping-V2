@@ -13,11 +13,9 @@ Feature 8: Cornix auto-execution block (existing formatter, verified wired)
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -568,7 +566,7 @@ class TestShortSpotSignals:
     def test_no_signal_above_ema200_bearish_mss(self) -> None:
         """Bearish MSS above EMA200 should block LONG (existing behaviour preserved)."""
         from src.channels.spot import SpotChannel
-        from src.smc import Direction, MSSSignal
+        from src.smc import Direction
 
         ch = SpotChannel()
         candles = _make_spot_candles_long(n=60, base=200.0)

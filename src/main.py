@@ -494,7 +494,6 @@ class CryptoSignalEngine:
 
     async def _daily_performance_report_loop(self) -> None:
         """Auto-generate an HTML performance report every 24 hours (feature 5)."""
-        import datetime
         _REPORT_INTERVAL_SECONDS = 86400  # 24 hours
         while True:
             await asyncio.sleep(_REPORT_INTERVAL_SECONDS)

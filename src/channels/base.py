@@ -87,6 +87,17 @@ class Signal:
     original_tp2: float = 0.0
     original_tp3: Optional[float] = None
 
+    # ---- Entry zone for limit-order execution ----
+    # Users should place limit orders within this zone rather than chasing
+    # the exact entry price.  Populated by each channel's evaluate() method.
+    entry_zone_low: Optional[float] = None    # Lower bound of limit order zone
+    entry_zone_high: Optional[float] = None   # Upper bound of limit order zone
+    # How long (minutes) the setup remains actionable.  After this window
+    # the signal should no longer be entered even if price is still in zone.
+    valid_for_minutes: int = 15
+    # Tells the user what order type to use (e.g. "LIMIT_ZONE", "MARKET")
+    execution_type: str = "LIMIT_ZONE"
+
     # ---- Delivery retry tracking (router-internal, not shown to users) ----
     _delivery_retries: int = 0
 

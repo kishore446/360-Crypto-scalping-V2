@@ -128,5 +128,8 @@ class SpotChannel(BaseChannel):
             sig.original_tp1 = round(tp1, 8)
             sig.original_tp2 = round(tp2, 8)
             sig.original_tp3 = round(tp3, 8)
+            # Use the DCA zone as the limit-order entry zone for SPOT signals
+            sig.entry_zone_low = dca_lower
+            sig.entry_zone_high = dca_upper
 
         return sig

@@ -209,8 +209,8 @@ CHANNEL_SCALP = ChannelConfig(
     name="360_SCALP",
     emoji="⚡",
     timeframes=["1m", "5m"],
-    sl_pct_range=(0.05, 0.1),
-    tp_ratios=[1.0, 1.5, 2.0],
+    sl_pct_range=(0.20, 0.50),
+    tp_ratios=[1.5, 2.5, 4.0],
     trailing_atr_mult=1.5,
     adx_min=15,
     adx_max=100,
@@ -507,10 +507,25 @@ MAX_CONCURRENT_SIGNALS_PER_CHANNEL: Dict[str, int] = {
 # Anti-noise: minimum signal lifespan before SL/TP checks are applied (secs)
 # ---------------------------------------------------------------------------
 MIN_SIGNAL_LIFESPAN_SECONDS: Dict[str, int] = {
-    "360_SCALP": 30,
-    "360_SWING": 60,
-    "360_SPOT": 120,
+    "360_SCALP": 180,
+    "360_SWING": 300,
+    "360_SPOT": 600,
     "360_GEM": 86400,  # 1 day — macro positions
+}
+
+# ---------------------------------------------------------------------------
+# How long a signal setup remains actionable (minutes).  After this window
+# users should NOT enter the trade even if price is still in zone.
+# ---------------------------------------------------------------------------
+SIGNAL_VALID_FOR_MINUTES: Dict[str, int] = {
+    "360_SCALP":      int(os.getenv("SIGNAL_VALID_SCALP",  "15")),
+    "360_SCALP_FVG":  int(os.getenv("SIGNAL_VALID_SCALP",  "15")),
+    "360_SCALP_CVD":  int(os.getenv("SIGNAL_VALID_SCALP",  "15")),
+    "360_SCALP_VWAP": int(os.getenv("SIGNAL_VALID_SCALP",  "15")),
+    "360_SCALP_OBI":  int(os.getenv("SIGNAL_VALID_SCALP",  "15")),
+    "360_SWING":      int(os.getenv("SIGNAL_VALID_SWING",   "60")),
+    "360_SPOT":       int(os.getenv("SIGNAL_VALID_SPOT",   "240")),
+    "360_GEM":        int(os.getenv("SIGNAL_VALID_GEM",   "1440")),
 }
 
 # ---------------------------------------------------------------------------

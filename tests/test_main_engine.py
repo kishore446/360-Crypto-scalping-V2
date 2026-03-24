@@ -141,6 +141,7 @@ class TestBootstrapInterface:
             _tasks=[task],
             router=SimpleNamespace(stop=AsyncMock()),
             monitor=SimpleNamespace(stop=AsyncMock()),
+            _lifecycle_monitor=SimpleNamespace(stop=AsyncMock()),
             telemetry=SimpleNamespace(stop=AsyncMock()),
             _ws_spot=None,
             _ws_futures=None,

@@ -180,6 +180,7 @@ class Bootstrap:
             asyncio.create_task(engine._snapshot_loop()),
             asyncio.create_task(engine._macro_watchdog.start()),
             asyncio.create_task(engine._liquidation_flush_loop()),
+            asyncio.create_task(engine._lifecycle_monitor.start()),
         ]
 
         # OI poller – background REST polling for Binance Futures Open Interest
@@ -197,6 +198,7 @@ class Bootstrap:
             t.cancel()
         await engine.router.stop()
         await engine.monitor.stop()
+        await engine._lifecycle_monitor.stop()
         await engine.telemetry.stop()
         if engine._ws_spot:
             await engine._ws_spot.stop()

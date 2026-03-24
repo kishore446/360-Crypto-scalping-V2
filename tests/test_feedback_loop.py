@@ -227,7 +227,6 @@ def test_adjustment_clamped_to_plus_15():
 
 def test_time_weight_recent_is_near_one():
     """Very recent outcomes have weight close to 1.0."""
-    from src.feedback_loop import _DECAY_HALF_LIFE_SECONDS
     loop = FeedbackLoop()
     o = _outcome(timestamp=time.monotonic())  # use keyword arg
     # Recent outcome: age ≈ 0 → weight ≈ 1.0
@@ -254,7 +253,6 @@ def test_time_weight_half_life():
 
 def test_win_rate_dominated_by_recent_wins():
     """Time-decay: 10 old losses + 10 very recent wins → win rate > 0.5."""
-    import math
     loop = FeedbackLoop()
     # Old losses (simulated ~14 days ago) — each has weight ≈ 0.25
     for _ in range(10):

@@ -121,7 +121,6 @@ class TestFormatScoreboard:
         }
 
     def test_header_present(self):
-        router = MagicMock(spec=SignalRouter)
         text = SignalRouter._format_scoreboard(self._make_scoreboard())
         assert "360 Crypto" in text
         assert "Weekly Performance" in text

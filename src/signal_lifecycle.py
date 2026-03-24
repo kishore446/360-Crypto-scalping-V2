@@ -19,11 +19,10 @@ lifecycle updates to be meaningful.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 
 from config import (
-    ALL_CHANNELS,
     CHANNEL_TELEGRAM_MAP,
     LIFECYCLE_CHECK_INTERVAL,
     LIFECYCLE_CONFIDENCE_DROP_RED,
@@ -83,7 +82,7 @@ def _compute_rsi(closes: List[float], period: int = 14) -> Optional[float]:
     """
     if len(closes) < period + 1:
         return None
-    gains, losses = [], []
+    gains, losses = [], []  # type: List[float], List[float]
     for i in range(1, period + 1):
         diff = closes[i] - closes[i - 1]
         (gains if diff > 0 else losses).append(abs(diff))
@@ -350,7 +349,6 @@ class SignalLifecycleMonitor:
         # excluding the most recent candle (which we are checking against).
         recent_lows = list(lows[-10:-1])
         recent_highs = list(highs[-10:-1])
-        current_close = float(closes[-1])
         current_low = float(lows[-1])
         current_high = float(highs[-1])
 
@@ -526,7 +524,7 @@ class SignalLifecycleMonitor:
             lines.append(assessment)
 
         if should_close:
-            lines.append(f"⛔ CLOSE RECOMMENDED — thesis invalidated")
+            lines.append("⛔ CLOSE RECOMMENDED — thesis invalidated")
             lines.append(f"Reason: {close_reason}")
         elif alert_level == "RED":
             lines.append("💡 Consider closing — multiple red flags")

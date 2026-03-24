@@ -11,6 +11,7 @@ from src.confidence import (
     score_liquidity,
     score_multi_exchange,
     score_order_flow,
+    score_sentiment,
     score_smc,
     score_spread,
     score_trend,
@@ -494,3 +495,115 @@ class TestGetSessionMultiplierWithChannel:
         r_asian = compute_confidence(inp, session_now=self._ASIAN, channel="360_SPOT")
         r_eu = compute_confidence(inp, session_now=self._EU, channel="360_SPOT")
         assert r_asian.total == r_eu.total
+
+
+
+# ---------------------------------------------------------------------------
+# score_sentiment
+# ---------------------------------------------------------------------------
+
+
+class TestScoreSentiment:
+    def test_neutral_sentiment_gives_five(self):
+        assert score_sentiment(0.0) == pytest.approx(5.0)
+
+    def test_max_bullish_gives_ten(self):
+        assert score_sentiment(1.0) == pytest.approx(10.0)
+
+    def test_max_bearish_gives_zero(self):
+        assert score_sentiment(-1.0) == pytest.approx(0.0)
+
+    def test_scalp_channel_always_neutral(self):
+        """SCALP channels always return 5.0 regardless of sentiment."""
+        for chan in ("360_SCALP", "360_SCALP_FVG", "360_SCALP_CVD"):
+            assert score_sentiment(1.0, channel=chan) == pytest.approx(5.0)
+            assert score_sentiment(-1.0, channel=chan) == pytest.approx(5.0)
+
+    def test_swing_channel_always_neutral(self):
+        """SWING channel returns 5.0 regardless of sentiment."""
+        assert score_sentiment(1.0, channel="360_SWING") == pytest.approx(5.0)
+        assert score_sentiment(-1.0, channel="360_SWING") == pytest.approx(5.0)
+
+    def test_spot_channel_uses_sentiment(self):
+        """SPOT channel uses the actual sentiment value."""
+        assert score_sentiment(1.0, channel="360_SPOT") == pytest.approx(10.0)
+        assert score_sentiment(-1.0, channel="360_SPOT") == pytest.approx(0.0)
+        assert score_sentiment(0.0, channel="360_SPOT") == pytest.approx(5.0)
+
+    def test_gem_channel_uses_sentiment(self):
+        """GEM channel uses the actual sentiment value."""
+        assert score_sentiment(1.0, channel="360_GEM") == pytest.approx(10.0)
+        assert score_sentiment(-1.0, channel="360_GEM") == pytest.approx(0.0)
+
+    def test_sentiment_clamps_to_range(self):
+        """Sentiment values outside [-1, +1] are clamped."""
+        assert score_sentiment(5.0) == pytest.approx(10.0)
+        assert score_sentiment(-5.0) == pytest.approx(0.0)
+
+    def test_sentiment_in_compute_confidence_spot(self):
+        """Sentiment contributes to confidence for SPOT channel."""
+        inp_bull = ConfidenceInput(smc_score=20, trend_score=15, sentiment_score=1.0)
+        inp_bear = ConfidenceInput(smc_score=20, trend_score=15, sentiment_score=-1.0)
+        r_bull = compute_confidence(inp_bull, channel="360_SPOT")
+        r_bear = compute_confidence(inp_bear, channel="360_SPOT")
+        assert r_bull.total > r_bear.total
+
+    def test_sentiment_no_effect_on_scalp(self):
+        """Sentiment has no effect on SCALP channel (weight=0)."""
+        inp_bull = ConfidenceInput(smc_score=20, trend_score=15, sentiment_score=1.0)
+        inp_bear = ConfidenceInput(smc_score=20, trend_score=15, sentiment_score=-1.0)
+        r_bull = compute_confidence(inp_bull, channel="360_SCALP")
+        r_bear = compute_confidence(inp_bear, channel="360_SCALP")
+        assert r_bull.total == r_bear.total
+
+
+# ---------------------------------------------------------------------------
+# score_trend with MACD
+# ---------------------------------------------------------------------------
+
+
+class TestScoreTrendWithMACD:
+    def test_macd_aligned_long_adds_bonus(self):
+        """Positive MACD histogram for LONG adds up to +3 points."""
+        base = score_trend(True, True, True, adx_value=30.0, momentum_strength=0.5)
+        with_macd = score_trend(
+            True, True, True,
+            adx_value=30.0, momentum_strength=0.5,
+            macd_histogram=0.5, macd_histogram_prev=0.3,
+            signal_direction="LONG",
+        )
+        assert with_macd > base
+
+    def test_macd_growing_long_gets_full_bonus(self):
+        """Positive and growing MACD for LONG = +3 bonus."""
+        s = score_trend(
+            True, True, True,
+            adx_value=20.0, momentum_strength=0.0,
+            macd_histogram=1.0, macd_histogram_prev=0.5,
+            signal_direction="LONG",
+        )
+        # base(10+4+2=16) + macd_growing(3) = 19
+        assert s == pytest.approx(19.0)
+
+    def test_macd_contra_long_applies_penalty(self):
+        """Negative MACD for LONG direction = -2 penalty."""
+        s = score_trend(
+            True, False, False,
+            macd_histogram=-0.5, macd_histogram_prev=-0.3,
+            signal_direction="LONG",
+        )
+        # base(10) - 2 = 8
+        assert s == pytest.approx(8.0)
+
+    def test_macd_penalty_floored_at_zero(self):
+        """Score cannot go below 0 even with MACD penalty."""
+        s = score_trend(
+            False, False, False,
+            macd_histogram=-1.0, signal_direction="LONG",
+        )
+        assert s == pytest.approx(0.0)
+
+    def test_no_macd_backward_compat(self):
+        """Old 5-arg call (no MACD) still works identically."""
+        s_old = score_trend(True, True, True, adx_value=40.0, momentum_strength=1.0)
+        assert s_old == pytest.approx(25.0)  # capped at max

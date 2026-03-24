@@ -88,6 +88,136 @@ class NarrativeBuilder:
             log.warning("AI narrative failed, using template: {}", exc)
             return self.build_narrative(signal, context)
 
+    def build_education_narrative(self, signal: Signal, context: Dict[str, Any]) -> str:
+        """Build an educational narrative explaining the signal reasoning.
+
+        Outputs a 5-8 sentence explanation suitable for Telegram, covering:
+        1. Setup classification and what it means
+        2. Quality gates passed and failed
+        3. Current market regime context
+        4. Confidence breakdown (which factors scored highest/lowest)
+        5. Risk management rationale
+
+        Parameters
+        ----------
+        signal:
+            The signal being explained.
+        context:
+            Dict with optional keys:
+            - regime: str
+            - setup_class: str
+            - gates_passed: list[str]
+            - gates_failed: list[tuple[str, float]] — (gate_name, penalty)
+            - confidence_breakdown: dict[str, float]
+            - indicators: dict
+            - entry_zone: str (optional)
+
+        Returns
+        -------
+        str
+            Multi-line educational narrative with Telegram formatting.
+        """
+        try:
+            return self._build_education_template(signal, context)
+        except Exception as exc:
+            log.warning("Education narrative failed: {}", exc)
+            return ""
+
+    def _build_education_template(self, signal: Signal, context: Dict[str, Any]) -> str:
+        """Compose the structured education narrative from context data."""
+        lines: list[str] = []
+        symbol = signal.symbol
+        direction = signal.direction.value
+
+        # Header
+        lines.append(f"📚 *LEARNING MODE — {symbol} {direction}*")
+        lines.append("")
+
+        # 1. Setup classification
+        setup_class = context.get("setup_class") or getattr(signal, "setup_class", "") or "MOMENTUM"
+        setup_label = setup_class.replace("_", " ").title()
+        setup_explanations: Dict[str, str] = {
+            "TREND PULLBACK": (
+                "Price pulled back to EMA support in an uptrend. "
+                "High-probability entry — trend intact but price temporarily discounted."
+            ),
+            "BREAKOUT RETEST": (
+                "Price broke a key level and is retesting it as support. "
+                "Volume confirmation validates the break."
+            ),
+            "RANGE FADE": (
+                "Price is at the range boundary. "
+                "Best in RANGING regime — fades to the opposite boundary."
+            ),
+            "MOMENTUM": (
+                "Strong momentum detected with SMC confluence. "
+                "Aligns with institutional order flow."
+            ),
+        }
+        explanation = setup_explanations.get(setup_label, f"Setup class: {setup_label}.")
+        lines.append(f"🔍 *Setup: {setup_label}* — {explanation}")
+
+        # 2. Gates passed/failed
+        gates_passed: list = context.get("gates_passed") or []
+        gates_failed: list = context.get("gates_failed") or []
+
+        if gates_passed:
+            passed_str = ", ".join(str(g) for g in gates_passed[:5])
+            lines.append(f"✅ *Gates Passed:* {passed_str}.")
+        if gates_failed:
+            failed_parts = []
+            for item in gates_failed[:3]:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    failed_parts.append(f"{item[0]} (−{item[1]:.0f} pts)")
+                else:
+                    failed_parts.append(str(item))
+            lines.append(f"❌ *Gates Failed:* {', '.join(failed_parts)}.")
+
+        # 3. Market regime
+        regime = context.get("regime", "UNKNOWN")
+        regime_label = regime.replace("_", " ").title()
+        regime_notes: Dict[str, str] = {
+            "Trending Up": "Strong uptrend. Favours trend-following LONG setups.",
+            "Trending Down": "Strong downtrend. Favours trend-following SHORT setups.",
+            "Ranging": "Sideways market. Best for mean-reversion / range-fade entries.",
+            "Volatile": "High volatility. Wider stops required; signals need extra confluence.",
+            "Quiet": "Low activity. Breakouts imminent but direction uncertain.",
+        }
+        regime_note = regime_notes.get(regime_label, "Regime context not classified.")
+        lines.append(f"📊 *Regime: {regime_label}* — {regime_note}")
+
+        # 4. Confidence breakdown
+        breakdown: Dict[str, float] = context.get("confidence_breakdown") or {}
+        total_conf = signal.confidence
+        if breakdown:
+            top_items = sorted(breakdown.items(), key=lambda kv: kv[1], reverse=True)[:4]
+            breakdown_str = ", ".join(
+                f"{k.replace('_', ' ').title()} ({v:.0f})" for k, v in top_items
+            )
+            lines.append(
+                f"💯 *Confidence: {total_conf:.0f}/100* — {breakdown_str}."
+            )
+        else:
+            lines.append(f"💯 *Confidence: {total_conf:.0f}/100*")
+
+        # 5. Risk management
+        entry = signal.entry
+        sl = getattr(signal, "stop_loss", None)
+        tp1 = getattr(signal, "tp1", None)
+        risk_parts: list[str] = []
+        if sl is not None and entry > 0:
+            sl_pct = abs(entry - sl) / entry * 100.0
+            risk_parts.append(f"SL at {sl:.4g} ({sl_pct:.1f}% risk)")
+        if tp1 is not None and sl is not None and entry > 0:
+            sl_dist = abs(entry - sl)
+            tp1_dist = abs(tp1 - entry)
+            rr = tp1_dist / sl_dist if sl_dist > 0 else 0.0
+            risk_parts.append(f"TP1 at {tp1:.4g} ({rr:.1f}:1 RR)")
+        if risk_parts:
+            lines.append(f"⚠️ *Risk:* {' — '.join(risk_parts)}.")
+
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

@@ -3,8 +3,11 @@ FROM python:3.12-slim
 # Set UTC timezone for consistent candle timestamps
 ENV TZ=UTC
 
+# Point Matplotlib's config/cache directory to a writable path for non-root users
+ENV MPLCONFIGDIR=/tmp/matplotlib
+
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl \
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata curl fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,7 +20,8 @@ COPY . .
 
 # Create non-root user for security and own the app and logs directories
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
-    && mkdir -p /app/logs && mkdir -p /app/data/cache && chown -R appuser:appgroup /app
+    && mkdir -p /app/logs && mkdir -p /app/data/cache && mkdir -p /tmp/matplotlib \
+    && chown -R appuser:appgroup /app /tmp/matplotlib
 
 USER appuser
 

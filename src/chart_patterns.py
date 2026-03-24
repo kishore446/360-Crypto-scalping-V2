@@ -390,7 +390,7 @@ def detect_patterns(candles: Dict) -> List[Dict]:
             (detect_double_top, (h,)),
             (detect_double_bottom, (lo,)),
             (detect_bollinger_squeeze, (c,)),
-            (lambda h, lo, c: detect_triangle(h, lo, c), (h, lo, c)),
+            (detect_triangle, (h, lo, c)),
         ]:
             try:
                 result = detector(*args)  # type: ignore[operator]

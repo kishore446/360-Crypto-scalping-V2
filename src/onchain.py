@@ -262,8 +262,7 @@ class WhaleAlertClient:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
 
-        import time as _time
-        since = int(_time.time()) - 3600  # last 1 hour
+        since = int(time.time()) - 3600  # last 1 hour
         params: Dict[str, Any] = {
             "api_key": self._api_key,
             "min_value": _WHALE_MIN_USD,

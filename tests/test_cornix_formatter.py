@@ -102,14 +102,17 @@ class TestFormatCornixSignal:
         assert result == ""
 
     def test_returns_empty_when_no_stop_loss(self):
-        sig = _make_signal(stop_loss=0.0)
-        # Override stop_loss to simulate missing value
-        object.__setattr__(sig, "stop_loss", None) if hasattr(type(sig), "__dataclass_fields__") else setattr(sig, "stop_loss", None)
-        try:
-            result = format_cornix_signal(sig)
-            assert result == ""
-        except TypeError:
-            pass  # Some dataclass implementations may not allow None for float fields
+        """format_cornix_signal returns empty string when stop_loss is falsy."""
+        class NoStopSignal:
+            symbol = "BTCUSDT"
+            direction = type("D", (), {"value": "LONG"})()
+            entry = 65000.0
+            stop_loss = None
+            tp1 = tp2 = tp3 = 0.0
+            channel = "360_SPOT"
+            entry_zone = None
+        result = format_cornix_signal(NoStopSignal())  # type: ignore
+        assert result == ""
 
     def test_dca_zone_long_two_entries(self):
         sig = _make_signal(direction="LONG")

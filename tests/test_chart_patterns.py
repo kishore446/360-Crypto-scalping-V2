@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from src.chart_patterns import (
     detect_bollinger_squeeze,

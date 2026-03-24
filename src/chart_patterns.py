@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from src.indicators import bollinger_bands, ema
+from src.indicators import bollinger_bands
 from src.utils import get_logger
 
 log = get_logger("chart_patterns")

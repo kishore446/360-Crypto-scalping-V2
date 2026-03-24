@@ -29,7 +29,7 @@ Leverage: Cross 10x
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from src.channels.base import Signal
 from src.utils import get_logger

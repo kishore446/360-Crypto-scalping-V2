@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.channels.base import Signal
 from src.smc import Direction
 from src.cornix_formatter import format_cornix_signal, _fmt

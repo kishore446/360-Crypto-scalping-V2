@@ -18,7 +18,7 @@ Glassnode free tier, using the optional ``WHALE_ALERT_API_KEY``.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp

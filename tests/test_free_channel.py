@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -128,8 +128,7 @@ class TestMaybePublishFreeSignal:
         router._free_signals_today = {"active": True}
 
         # Simulate a new day
-        from datetime import date as _date, timedelta
-        new_day = _date.today() + timedelta(days=1)
+        new_day = date.today() + timedelta(days=1)
         with patch("src.signal_router.date") as mock_date:
             mock_date.today.return_value = new_day
             sig = _make_signal(channel="360_SCALP", confidence=80.0)

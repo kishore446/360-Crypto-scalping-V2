@@ -13,6 +13,7 @@ from typing import Any, Callable, Coroutine, Dict, Optional
 from config import (
     ALL_CHANNELS,
     CHANNEL_TELEGRAM_MAP,
+    INVALIDATION_CONSECUTIVE_THRESHOLD,
     INVALIDATION_MIN_AGE_SECONDS,
     INVALIDATION_MOMENTUM_THRESHOLD,
     MAX_SIGNAL_HOLD_SECONDS,
@@ -386,10 +387,17 @@ class TradeMonitor:
         if 0 < entry_price < 0.001:
             mom_threshold *= 0.1
         if momentum is not None and abs(momentum) < mom_threshold:
-            return (
-                f"momentum loss (|momentum|={abs(momentum):.3f} < "
-                f"{mom_threshold}) – signal thesis exhausted"
-            )
+            sig.momentum_invalidation_count += 1
+            consecutive_required = INVALIDATION_CONSECUTIVE_THRESHOLD.get(sig.channel, 1)
+            if sig.momentum_invalidation_count >= consecutive_required:
+                return (
+                    f"momentum loss (|momentum|={abs(momentum):.3f} < "
+                    f"{mom_threshold}, {sig.momentum_invalidation_count} consecutive readings)"
+                    " – signal thesis exhausted"
+                )
+            # Not enough consecutive readings yet — don't invalidate
+        else:
+            sig.momentum_invalidation_count = 0  # Reset on recovery
 
         return None
 
@@ -569,6 +577,13 @@ class TradeMonitor:
                     sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                         entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
                     )
+                # Move SL to breakeven + small buffer (15% of TP1 distance) so that a
+                # retrace between TP1 and TP2 never produces a full loss after the thesis
+                # has already been proven by TP1.  Only move SL upward for longs.
+                tp1_dist = abs(sig.tp1 - sig.entry)
+                be_buffer = tp1_dist * 0.15
+                new_be_sl = sig.entry + be_buffer
+                sig.stop_loss = max(sig.stop_loss, new_be_sl)
                 # Partial TP1 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
@@ -620,6 +635,13 @@ class TradeMonitor:
                     sig.best_tp_pnl_pct = calculate_trade_pnl_pct(
                         entry_price=sig.entry, exit_price=sig.tp1, direction=sig.direction.value
                     )
+                # Move SL to breakeven - small buffer (15% of TP1 distance) so that a
+                # retrace between TP1 and TP2 never produces a full loss after the thesis
+                # has already been proven by TP1.  Only move SL downward for shorts.
+                tp1_dist = abs(sig.tp1 - sig.entry)
+                be_buffer = tp1_dist * 0.15
+                new_be_sl = sig.entry - be_buffer
+                sig.stop_loss = min(sig.stop_loss, new_be_sl)
                 # Partial TP1 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
@@ -639,7 +661,14 @@ class TradeMonitor:
         config field (or the global ``TRAILING_ATR_MULTIPLIER`` constant when
         the channel config cannot be found).
 
-        Falls back to ``original_sl_distance * 0.5`` when ATR data is
+        Phase-based tightening: after TP1 the multiplier is reduced to 55% of
+        the base, and after TP2 to 35%, locking progressively more profit.
+
+        Regime-aware adjustment: in trending markets the trail is kept loose
+        (×1.2) to let winners run; in ranging markets it is tightened (×0.7)
+        to protect profit before a range-edge reversal.
+
+        Falls back to ``original_sl_distance * 0.75`` when ATR data is
         unavailable (e.g. candles not yet loaded for this symbol).
         """
         price = sig.current_price
@@ -666,10 +695,46 @@ class TradeMonitor:
                     chan_cfg = next(
                         (c for c in ALL_CHANNELS if c.name == sig.channel), None
                     )
-                    atr_mult = (
+                    base_mult = (
                         chan_cfg.trailing_atr_mult if chan_cfg is not None else TRAILING_ATR_MULTIPLIER
                     )
-                    trail_dist = atr_value * atr_mult
+
+                    # Phase-based tightening: lock more profit as each TP is cleared
+                    if sig.status == "TP2_HIT":
+                        effective_mult = base_mult * 0.35  # Very tight – profit protection
+                    elif sig.status == "TP1_HIT":
+                        effective_mult = base_mult * 0.55  # Tighter after first target
+                    else:
+                        effective_mult = base_mult  # Default for ACTIVE signals
+
+                    # Regime-aware adjustment: loose in trends, tight in ranges
+                    if self._regime_detector is not None:
+                        try:
+                            indicators_for_regime: dict = {}
+                            if self._indicators_fn is not None:
+                                indicators_for_regime = self._indicators_fn(sig.symbol) or {}
+                            elif candles and len(candles.get("close", [])) >= 21:
+                                regime_closes = np.asarray(candles["close"], dtype=np.float64)
+                                ema9_arr = _compute_ema(regime_closes, 9)
+                                ema21_arr = _compute_ema(regime_closes, 21)
+                                indicators_for_regime = {
+                                    "ema9_last": float(ema9_arr[-1]) if len(ema9_arr) else None,
+                                    "ema21_last": float(ema21_arr[-1]) if len(ema21_arr) else None,
+                                }
+                            regime_result = self._regime_detector.classify(indicators_for_regime)
+                            regime_label = regime_result.regime.value if regime_result else "RANGING"
+                            regime_trail_mult = {
+                                "TRENDING_UP": 1.2,
+                                "TRENDING_DOWN": 1.2,
+                                "RANGING": 0.7,
+                                "VOLATILE": 0.9,
+                                "QUIET": 0.8,
+                            }.get(regime_label, 1.0)
+                            effective_mult *= regime_trail_mult
+                        except Exception:
+                            pass  # Fall back to non-regime-adjusted multiplier
+
+                    trail_dist = atr_value * effective_mult
             except Exception:
                 trail_dist = None
 

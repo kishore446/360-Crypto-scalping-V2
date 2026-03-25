@@ -604,10 +604,21 @@ INVALIDATION_MIN_AGE_SECONDS: Dict[str, int] = {
 # Per-channel to account for different timeframe noise levels.
 # SCALP uses 1m/5m candles which have rapid momentum oscillation — use a lower threshold.
 INVALIDATION_MOMENTUM_THRESHOLD: Dict[str, float] = {
-    "360_SCALP": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SCALP", "0.15")),
+    "360_SCALP": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SCALP", "0.10")),
     "360_SWING": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SWING", "0.20")),
     "360_SPOT": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SPOT", "0.30")),
     "360_GEM": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_GEM", "0.50")),
+}
+
+# Number of *consecutive* below-threshold momentum readings required before a
+# signal is invalidated for momentum loss.  A single weak reading is common on
+# 1m/5m candles (price pauses before continuation) — requiring two consecutive
+# readings reduces false kills while still catching genuine exhaustion.
+INVALIDATION_CONSECUTIVE_THRESHOLD: Dict[str, int] = {
+    "360_SCALP": int(os.getenv("INVALIDATION_CONSECUTIVE_THRESHOLD_SCALP", "2")),
+    "360_SWING": int(os.getenv("INVALIDATION_CONSECUTIVE_THRESHOLD_SWING", "1")),
+    "360_SPOT": int(os.getenv("INVALIDATION_CONSECUTIVE_THRESHOLD_SPOT", "1")),
+    "360_GEM": int(os.getenv("INVALIDATION_CONSECUTIVE_THRESHOLD_GEM", "1")),
 }
 
 # ---------------------------------------------------------------------------

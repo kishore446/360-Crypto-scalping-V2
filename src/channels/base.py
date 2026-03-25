@@ -101,6 +101,13 @@ class Signal:
     # ---- Delivery retry tracking (router-internal, not shown to users) ----
     _delivery_retries: int = 0
 
+    # ---- Consecutive momentum invalidation counter ----
+    # Tracks how many consecutive poll cycles momentum has been below the
+    # invalidation threshold.  Resets to 0 when momentum recovers above it.
+    # Used by _check_invalidation() to require multiple consecutive readings
+    # before declaring momentum exhaustion (reduces false kills from 1m pauses).
+    momentum_invalidation_count: int = 0
+
     # ---- Signal Lifecycle Monitor state ----
     # Populated after the signal is posted to Telegram so the lifecycle
     # monitor has a baseline for regime/momentum comparisons.

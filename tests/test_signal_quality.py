@@ -420,8 +420,8 @@ class TestSLCap:
                    "bb_mid_last": 100.0, "bb_lower_last": 90.0},
         }
 
-    def test_scalp_sl_capped_to_1pct(self):
-        """SCALP channel SL must not exceed 1% of entry."""
+    def test_scalp_sl_capped_to_1_5pct(self):
+        """SCALP channel SL must not exceed 1.5% of entry (raised from 1.0% to allow wider structure stops)."""
         sig = self._make_signal_with_wide_structure("360_SCALP")
         risk = build_risk_plan(
             signal=sig,
@@ -433,7 +433,7 @@ class TestSLCap:
             channel="360_SCALP",
         )
         sl_pct = abs(sig.entry - risk.stop_loss) / sig.entry
-        assert sl_pct <= 0.01 + 1e-9, f"SCALP SL pct {sl_pct:.4f} exceeds 1%"
+        assert sl_pct <= 0.015 + 1e-9, f"SCALP SL pct {sl_pct:.4f} exceeds 1.5%"
 
     def test_spot_sl_capped_to_2pct(self):
         """SPOT channel SL must not exceed 2% of entry."""
@@ -478,7 +478,7 @@ class TestSLCap:
             channel="360_SCALP",  # tighter cap overrides signal.channel
         )
         sl_pct = abs(sig.entry - risk.stop_loss) / sig.entry
-        assert sl_pct <= 0.01 + 1e-9
+        assert sl_pct <= 0.015 + 1e-9
 
     def test_no_cap_applied_when_sl_within_limit(self):
         """When the structure-based SL is already within limits, it is not altered."""
@@ -518,4 +518,4 @@ class TestSLCap:
         # For a SHORT, SL is above entry
         if sig.entry != 0:  # entry is always non-zero in practice
             sl_pct = abs(sig.entry - risk.stop_loss) / sig.entry
-            assert sl_pct <= 0.01 + 1e-9
+            assert sl_pct <= 0.015 + 1e-9

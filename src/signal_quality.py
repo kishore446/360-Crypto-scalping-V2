@@ -109,7 +109,11 @@ REGIME_SETUP_COMPATIBILITY: Dict[MarketState, set[SetupClass]] = {
 # Maximum SL distance (as a percentage of entry) allowed per channel.
 # Signals whose structure-based SL would exceed this cap are clamped.
 _MAX_SL_PCT_BY_CHANNEL: Dict[str, float] = {
-    "360_SCALP": 1.0,
+    "360_SCALP": 1.5,
+    "360_SCALP_FVG": 1.0,
+    "360_SCALP_CVD": 1.0,
+    "360_SCALP_VWAP": 1.0,
+    "360_SCALP_OBI": 1.0,
     "360_SWING": 3.0,
     "360_SPOT": 2.0,
 }

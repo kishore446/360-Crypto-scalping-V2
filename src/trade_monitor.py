@@ -43,7 +43,7 @@ _STOP_OUTCOME_MESSAGES = {
 }
 # Seconds of grace after a DCA entry before invalidation checks are allowed.
 # Gives the averaged position time to develop without being killed prematurely.
-_DCA_GRACE_SECONDS = 300
+_DCA_GRACE_SECONDS = 600
 
 
 def _escape_md(text: str) -> str:
@@ -552,8 +552,8 @@ class TradeMonitor:
                 )
                 if self.on_highlight_callback is not None:
                     self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
-                # Trailing: move SL to entry (break-even)
-                sig.stop_loss = sig.entry
+                # Trailing: move SL to TP1 price to protect banked profit while giving TP3 room
+                sig.stop_loss = sig.tp1
                 # Partial TP2 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
@@ -604,7 +604,7 @@ class TradeMonitor:
                 )
                 if self.on_highlight_callback is not None:
                     self.on_highlight_callback(sig, 2, sig.best_tp_pnl_pct)
-                sig.stop_loss = sig.entry
+                sig.stop_loss = sig.tp1
                 # Partial TP2 execution: close 33% of original position size
                 if self._order_manager is not None and self._order_manager.is_enabled:
                     try:
@@ -673,9 +673,9 @@ class TradeMonitor:
             except Exception:
                 trail_dist = None
 
-        # Fall back to fixed 50 % of original SL distance when ATR is unavailable
+        # Fall back to fixed 75 % of original SL distance when ATR is unavailable
         if trail_dist is None:
-            trail_dist = base_dist * 0.5
+            trail_dist = base_dist * 0.75
 
         if sig.direction == Direction.LONG:
             new_sl = price - trail_dist

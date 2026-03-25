@@ -55,32 +55,18 @@ _LIQUIDITY_THRESHOLDS: Dict[str, float] = {
 # are intentionally flat (1.0 everywhere) so they raw-sum identically to
 # the pre-weight behaviour.  SWING, SPOT and GEM profiles tilt weights
 # toward the factors that matter most for each investment horizon.
+_SCALP_DEFAULT_WEIGHTS: Dict[str, float] = {
+    "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
+    "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
+    "order_flow": 1.0, "sentiment": 0.0,
+}
+
 _CHANNEL_WEIGHT_PROFILES: Dict[str, Dict[str, float]] = {
-    "360_SCALP": {
-        "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
-        "order_flow": 1.0, "sentiment": 0.0,
-    },
-    "360_SCALP_FVG": {
-        "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
-        "order_flow": 1.0, "sentiment": 0.0,
-    },
-    "360_SCALP_CVD": {
-        "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
-        "order_flow": 1.0, "sentiment": 0.0,
-    },
-    "360_SCALP_VWAP": {
-        "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
-        "order_flow": 1.0, "sentiment": 0.0,
-    },
-    "360_SCALP_OBI": {
-        "smc": 1.0, "trend": 1.0, "liquidity": 1.0, "spread": 1.0,
-        "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.0,
-        "order_flow": 1.0, "sentiment": 0.0,
-    },
+    "360_SCALP":      _SCALP_DEFAULT_WEIGHTS,
+    "360_SCALP_FVG":  _SCALP_DEFAULT_WEIGHTS,
+    "360_SCALP_CVD":  _SCALP_DEFAULT_WEIGHTS,
+    "360_SCALP_VWAP": _SCALP_DEFAULT_WEIGHTS,
+    "360_SCALP_OBI":  _SCALP_DEFAULT_WEIGHTS,
     "360_SWING": {
         "smc": 0.7, "trend": 1.4, "liquidity": 1.0, "spread": 0.8,
         "data_sufficiency": 1.0, "multi_exchange": 1.0, "onchain": 1.2,

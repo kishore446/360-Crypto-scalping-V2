@@ -11,14 +11,11 @@ Signal ID prefix: "SFVG-"
 from __future__ import annotations
 
 from typing import Dict, Optional
-import uuid
 
 from config import CHANNEL_SCALP_FVG
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
-from src.filters import check_adx, check_spread, check_volume
+from src.channels.base import BaseChannel, Signal, build_channel_signal
+from src.filters import check_adx, check_rsi
 from src.smc import Direction
-from src.utils import utcnow
 
 # Maximum distance from FVG zone boundary (as fraction of zone width) to be
 # considered "retesting" the zone.  0.5 means price must be within 50% of the
@@ -67,9 +64,7 @@ class ScalpFVGChannel(BaseChannel):
         ind = indicators.get(tf, {})
         if not check_adx(ind.get("adx_last"), self.config.adx_min):
             return None
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         fvg_zones = smc_data.get("fvg", [])
@@ -125,12 +120,8 @@ class ScalpFVGChannel(BaseChannel):
                 return None  # Zone >60% filled, weak bounce expected
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = ind.get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(ind.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         gap_high = float(retest_zone.gap_high)
         gap_low = float(retest_zone.gap_low)
@@ -159,46 +150,17 @@ class ScalpFVGChannel(BaseChannel):
         if direction == Direction.SHORT and sl <= close:
             return None
 
-        sig = Signal(
-            channel=self.config.name,
+        return build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Aggressive",
-            timestamp=utcnow(),
-            signal_id=f"SFVG-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SFVG",
+            atr_val=atr_val,
+            setup_class="FVG_RETEST",
         )
-
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
-        sig.setup_class = "FVG_RETEST"
-
-        # Direction-biased entry zone: LONGs bias below close (buy on dips),
-        # SHORTs bias above close (sell on rallies).
-        zone_width = atr_val * 0.4
-        if direction == Direction.LONG:
-            sig.entry_zone_low = round(close - zone_width * 0.7, 8)
-            sig.entry_zone_high = round(close + zone_width * 0.3, 8)
-        else:
-            sig.entry_zone_low = round(close - zone_width * 0.3, 8)
-            sig.entry_zone_high = round(close + zone_width * 0.7, 8)
-
-        return sig

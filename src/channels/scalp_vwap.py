@@ -12,15 +12,12 @@ Signal ID prefix: "SVWP-"
 from __future__ import annotations
 
 from typing import Dict, Optional
-import uuid
 
 from config import CHANNEL_SCALP_VWAP
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
-from src.filters import check_spread, check_volume
+from src.channels.base import BaseChannel, Signal, build_channel_signal
+from src.filters import check_rsi
 from src.regime import MarketRegime
 from src.smc import Direction
-from src.utils import utcnow
 from src.vwap import compute_vwap
 
 # Minimum volume ratio (current / average) required to confirm the bounce
@@ -72,9 +69,7 @@ class ScalpVWAPChannel(BaseChannel):
         if cd is None or len(cd.get("close", [])) < 20:
             return None
 
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         ind = indicators.get(tf, {})
@@ -120,12 +115,8 @@ class ScalpVWAPChannel(BaseChannel):
             return None
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = ind.get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(ind.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         # SL: beyond ±2SD band
         if direction == Direction.LONG:
@@ -151,49 +142,22 @@ class ScalpVWAPChannel(BaseChannel):
         if direction == Direction.SHORT and sl <= close:
             return None
 
-        sig = Signal(
-            channel=self.config.name,
+        atr_val = ind.get("atr_last", close * 0.002)
+
+        sig = build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Aggressive",
-            timestamp=utcnow(),
-            signal_id=f"SVWP-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SVWP",
+            atr_val=atr_val,
+            vwap_price=vwap_mid,
+            setup_class="VWAP_BOUNCE",
         )
-
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
-        sig.setup_class = "VWAP_BOUNCE"
-
-        # Direction-biased entry zone: LONGs bias below close (buy on dips),
-        # SHORTs bias above close (sell on rallies).
-        # 0.002 (0.2%) matches the fallback already used in _evaluate_tf above
-        # and is conservative enough to remain valid for ranging/VWAP setups.
-        atr_val = ind.get("atr_last", close * 0.002)
-        zone_width = atr_val * 0.4
-        if direction == Direction.LONG:
-            sig.entry_zone_low = round(close - zone_width * 0.7, 8)
-            sig.entry_zone_high = round(close + zone_width * 0.3, 8)
-        else:
-            sig.entry_zone_low = round(close - zone_width * 0.3, 8)
-            sig.entry_zone_high = round(close + zone_width * 0.7, 8)
 
         return sig

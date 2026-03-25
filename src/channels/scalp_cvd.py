@@ -15,7 +15,7 @@ from typing import Dict, Optional
 
 from config import CHANNEL_SCALP_CVD
 from src.channels.base import BaseChannel, Signal, build_channel_signal
-from src.filters import check_spread, check_volume
+from src.filters import check_rsi
 from src.smc import Direction
 
 # Price must be within this percentage of recent 20-bar high/low to be
@@ -42,9 +42,7 @@ class ScalpCVDChannel(BaseChannel):
         if m5 is None or len(m5.get("close", [])) < 21:
             return None
 
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         ind = indicators.get("5m", {})
@@ -82,12 +80,8 @@ class ScalpCVDChannel(BaseChannel):
             return None
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = ind.get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(ind.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         atr_val = ind.get("atr_last", close * 0.002)
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val * 0.8)

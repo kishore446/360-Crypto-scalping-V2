@@ -10,15 +10,12 @@ Risk    : SL 0.05–0.1 %, TP1 0.5–1R, TP2 1–1.5R, TP3 optional 20 %, Traili
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-import uuid
 
 
 from config import CHANNEL_SCALP
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
-from src.filters import check_adx, check_ema_alignment, check_spread, check_volume
+from src.channels.base import BaseChannel, Signal, build_channel_signal
+from src.filters import check_adx, check_ema_alignment, check_rsi
 from src.smc import Direction
-from src.utils import utcnow
 
 # WHALE_MOMENTUM thresholds (absorbed from former TapeChannel)
 _WHALE_DELTA_MIN_RATIO: float = 2.0
@@ -66,9 +63,7 @@ class ScalpChannel(BaseChannel):
         ind = indicators.get("5m", {})
         if not check_adx(ind.get("adx_last"), self.config.adx_min):
             return None
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         ema_fast = ind.get("ema9_last")
@@ -97,12 +92,8 @@ class ScalpChannel(BaseChannel):
         direction = sweep.direction
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = ind.get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(ind.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         # Momentum must agree with sweep direction
         if direction == Direction.LONG and mom < 0:
@@ -121,8 +112,18 @@ class ScalpChannel(BaseChannel):
         if direction == Direction.SHORT and sl <= close:
             return None
 
-        return self._build_signal(
-            symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "SCALP", atr_val=atr_val
+        return build_channel_signal(
+            config=self.config,
+            symbol=symbol,
+            direction=direction,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SCALP",
+            atr_val=atr_val,
         )
 
     # ------------------------------------------------------------------
@@ -152,9 +153,7 @@ class ScalpChannel(BaseChannel):
         if adx_val is not None and adx_val > 22:
             return None
 
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         bb_upper = ind.get("bb_upper_last")
@@ -194,7 +193,19 @@ class ScalpChannel(BaseChannel):
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val * 0.8)
         sl, tp1, tp2, tp3 = self._calc_levels(close, sl_dist, direction)
 
-        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "RANGE-FADE", atr_val=atr_val)
+        sig = build_channel_signal(
+            config=self.config,
+            symbol=symbol,
+            direction=direction,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="RANGE-FADE",
+            atr_val=atr_val,
+        )
         if sig is not None:
             sig.setup_class = "RANGE_FADE"
         return sig
@@ -218,9 +229,7 @@ class ScalpChannel(BaseChannel):
         if whale is None and not delta_spike:
             return None
 
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         m1 = candles.get("1m")
@@ -251,12 +260,8 @@ class ScalpChannel(BaseChannel):
             return None
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = indicators.get("1m", {}).get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(indicators.get("1m", {}).get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         # Order book imbalance check
         order_book = smc_data.get("order_book")
@@ -276,7 +281,19 @@ class ScalpChannel(BaseChannel):
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val)
         sl, tp1, tp2, tp3 = self._calc_levels(close, sl_dist, direction)
 
-        sig = self._build_signal(symbol, direction, close, sl, tp1, tp2, tp3, sl_dist, "WHALE", atr_val=atr_val)
+        sig = build_channel_signal(
+            config=self.config,
+            symbol=symbol,
+            direction=direction,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="WHALE",
+            atr_val=atr_val,
+        )
         if sig is not None:
             sig.setup_class = "WHALE_MOMENTUM"
         return sig
@@ -299,72 +316,3 @@ class ScalpChannel(BaseChannel):
             tp2 = close - sl_dist * self.config.tp_ratios[1]
             tp3 = close - sl_dist * self.config.tp_ratios[2]
         return sl, tp1, tp2, tp3
-
-    def _build_signal(
-        self,
-        symbol: str,
-        direction: Direction,
-        close: float,
-        sl: float,
-        tp1: float,
-        tp2: float,
-        tp3: float,
-        sl_dist: float,
-        id_prefix: str,
-        atr_val: float = 0.0,
-        vwap_price: float = 0.0,
-    ) -> Optional[Signal]:
-        if direction == Direction.LONG and sl >= close:
-            return None
-        if direction == Direction.SHORT and sl <= close:
-            return None
-
-        sig = Signal(
-            channel=self.config.name,
-            symbol=symbol,
-            direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Aggressive",
-            timestamp=utcnow(),
-            signal_id=f"{id_prefix}-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
-        )
-
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
-
-        # Direction-biased entry zone: LONGs bias below close (buy on dips),
-        # SHORTs bias above close (sell on rallies).
-        zone_width = (atr_val * 0.4) if atr_val > 0 else (sl_dist * 0.6)
-
-        # Volume-weighted anchoring: blend zone centre toward VWAP when close.
-        if vwap_price > 0 and abs(vwap_price - close) < zone_width:
-            zone_center = close * 0.6 + vwap_price * 0.4
-        else:
-            zone_center = close
-
-        if direction == Direction.LONG:
-            sig.entry_zone_low = round(zone_center - zone_width * 0.7, 8)
-            sig.entry_zone_high = round(zone_center + zone_width * 0.3, 8)
-        else:
-            sig.entry_zone_low = round(zone_center - zone_width * 0.3, 8)
-            sig.entry_zone_high = round(zone_center + zone_width * 0.7, 8)
-
-        return sig

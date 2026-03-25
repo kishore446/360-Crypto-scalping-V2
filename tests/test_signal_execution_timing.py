@@ -18,7 +18,7 @@ from config import (
     MIN_SIGNAL_LIFESPAN_SECONDS,
     SIGNAL_VALID_FOR_MINUTES,
 )
-from src.channels.base import Direction, Signal
+from src.channels.base import Direction, Signal, build_channel_signal
 from src.channels.scalp import ScalpChannel
 from src.telegram_bot import TelegramBot
 from src.utils import utcnow
@@ -162,7 +162,7 @@ class TestSignalDataclassNewFields:
 # ---------------------------------------------------------------------------
 
 class TestScalpChannelEntryZone:
-    """ScalpChannel._build_signal must populate entry_zone_low/high."""
+    """build_channel_signal must populate entry_zone_low/high."""
 
     def _make_scalp_signal(
         self,
@@ -183,7 +183,8 @@ class TestScalpChannelEntryZone:
             tp2 = close - sl_dist * chan.config.tp_ratios[1]
             tp3 = close - sl_dist * chan.config.tp_ratios[2]
 
-        return chan._build_signal(
+        return build_channel_signal(
+            config=chan.config,
             symbol="BTCUSDT",
             direction=direction,
             close=close,

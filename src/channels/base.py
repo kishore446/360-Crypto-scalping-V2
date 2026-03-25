@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from config import ChannelConfig
 from src.dca import compute_dca_zone
+from src.filters import check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -145,6 +146,13 @@ class BaseChannel:
 
     def __init__(self, config: ChannelConfig) -> None:
         self.config = config
+
+    def _pass_basic_filters(self, spread_pct: float, volume_24h_usd: float) -> bool:
+        """Return True if basic spread/volume filters pass."""
+        return (
+            check_spread(spread_pct, self.config.spread_max)
+            and check_volume(volume_24h_usd, self.config.min_volume)
+        )
 
     def evaluate(
         self,

@@ -12,14 +12,11 @@ Signal ID prefix: "SCVD-"
 from __future__ import annotations
 
 from typing import Dict, Optional
-import uuid
 
 from config import CHANNEL_SCALP_CVD
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
+from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import check_spread, check_volume
 from src.smc import Direction
-from src.utils import utcnow
 
 # Price must be within this percentage of recent 20-bar high/low to be
 # considered "at support/resistance".
@@ -111,41 +108,17 @@ class ScalpCVDChannel(BaseChannel):
         if direction == Direction.SHORT and sl <= close:
             return None
 
-        sig = Signal(
-            channel=self.config.name,
+        return build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Aggressive",
-            timestamp=utcnow(),
-            signal_id=f"SCVD-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SCVD",
+            atr_val=atr_val,
+            setup_class="CVD_DIVERGENCE",
         )
-
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
-        sig.setup_class = "CVD_DIVERGENCE"
-
-        # Entry zone: bracket around close ±ATR×0.3
-        zone_half = atr_val * 0.3
-        sig.entry_zone_low = round(close - zone_half, 8)
-        sig.entry_zone_high = round(close + zone_half, 8)
-
-        return sig

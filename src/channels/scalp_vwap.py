@@ -183,12 +183,17 @@ class ScalpVWAPChannel(BaseChannel):
         sig.original_tp3 = round(tp3, 8)
         sig.setup_class = "VWAP_BOUNCE"
 
-        # Entry zone: bracket around close ±ATR×0.3
+        # Direction-biased entry zone: LONGs bias below close (buy on dips),
+        # SHORTs bias above close (sell on rallies).
         # 0.002 (0.2%) matches the fallback already used in _evaluate_tf above
         # and is conservative enough to remain valid for ranging/VWAP setups.
         atr_val = ind.get("atr_last", close * 0.002)
-        zone_half = atr_val * 0.3
-        sig.entry_zone_low = round(close - zone_half, 8)
-        sig.entry_zone_high = round(close + zone_half, 8)
+        zone_width = atr_val * 0.4
+        if direction == Direction.LONG:
+            sig.entry_zone_low = round(close - zone_width * 0.7, 8)
+            sig.entry_zone_high = round(close + zone_width * 0.3, 8)
+        else:
+            sig.entry_zone_low = round(close - zone_width * 0.3, 8)
+            sig.entry_zone_high = round(close + zone_width * 0.7, 8)
 
         return sig

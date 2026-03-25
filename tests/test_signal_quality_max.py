@@ -658,3 +658,99 @@ class TestSpotBreakoutRetestDetection:
         sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 5_000_000)
         if sig is not None and sig.direction == Direction.SHORT:
             assert sig.setup_class in ("BREAKOUT_RETEST", "BREAKOUT_INITIAL")
+
+
+# ---------------------------------------------------------------------------
+# 10. Direction-Biased Entry Zones
+# ---------------------------------------------------------------------------
+
+class TestDirectionBiasedEntryZones:
+    """Entry zones must be biased toward the trade direction for better fills."""
+
+    def _make_scalp_signal(
+        self,
+        direction: Direction = Direction.LONG,
+        atr_val: float = 0.5,
+    ):
+        ch = ScalpChannel()
+        candles_data = _make_candles(60, base=100)
+        candles_data["close"][-1] = 97.0
+        candles = {"5m": candles_data}
+        ind = _make_indicators(adx_val=15, bb_lower=97.1, rsi_val=28, atr_val=atr_val)
+        indicators = {"5m": ind}
+        return ch._evaluate_range_fade("BTCUSDT", candles, indicators, {}, 0.01, 10_000_000)
+
+    def test_long_zone_biased_below_close(self):
+        """LONG entry zone: more space below close than above (buy on dips)."""
+        import pytest
+        sig = self._make_scalp_signal(direction=Direction.LONG)
+        if sig is None:
+            pytest.skip("Signal filtered by other gates — cannot validate zone bias")
+        close = sig.entry
+        below_dist = close - sig.entry_zone_low
+        above_dist = sig.entry_zone_high - close
+        assert below_dist > above_dist, (
+            f"LONG zone should have more space below close: below={below_dist}, above={above_dist}"
+        )
+
+    def test_long_entry_zone_brackets_entry(self):
+        """LONG entry zone must contain the entry price."""
+        import pytest
+        sig = self._make_scalp_signal(direction=Direction.LONG)
+        if sig is None:
+            pytest.skip("Signal filtered by other gates — cannot validate zone bracketing")
+        assert sig.entry_zone_low < sig.entry < sig.entry_zone_high
+
+    def test_entry_zone_width_proportional_to_atr(self):
+        """Wider ATR → wider entry zone."""
+        import pytest
+        sig_narrow = self._make_scalp_signal(atr_val=0.3)
+        sig_wide = self._make_scalp_signal(atr_val=1.0)
+        if sig_narrow is None or sig_wide is None:
+            pytest.skip("Signal filtered by other gates — cannot compare zone widths")
+        w_narrow = sig_narrow.entry_zone_high - sig_narrow.entry_zone_low
+        w_wide = sig_wide.entry_zone_high - sig_wide.entry_zone_low
+        assert w_wide > w_narrow
+
+
+# ---------------------------------------------------------------------------
+# 11. RANGE_FADE RSI Fix — mean-reversion RSI gating
+# ---------------------------------------------------------------------------
+
+class TestRangeFadeRSIFix:
+    """RANGE_FADE should gate on mean-reversion RSI thresholds, not trend thresholds."""
+
+    def _range_fade(self, rsi_val: float, direction_long: bool = True) -> object:
+        ch = ScalpChannel()
+        candles_data = _make_candles(60, base=100)
+        if direction_long:
+            # Price at lower BB → LONG mean-reversion
+            candles_data["close"][-1] = 97.0
+            indicators = {"5m": _make_indicators(adx_val=15, bb_lower=97.1, rsi_val=rsi_val)}
+        else:
+            # Price at upper BB → SHORT mean-reversion
+            candles_data["close"][-1] = 103.0
+            indicators = {"5m": _make_indicators(adx_val=15, bb_upper=102.9, rsi_val=rsi_val)}
+        candles = {"5m": candles_data}
+        return ch._evaluate_range_fade("BTCUSDT", candles, indicators, {}, 0.01, 10_000_000)
+
+    def test_long_oversold_rsi_fires(self):
+        """LONG range fade fires when RSI is oversold (< 30)."""
+        sig = self._range_fade(rsi_val=25, direction_long=True)
+        assert sig is not None
+        assert sig.direction == Direction.LONG
+
+    def test_long_rsi_at_boundary_fires(self):
+        """LONG range fade fires at RSI = 50 (below threshold of 55)."""
+        sig = self._range_fade(rsi_val=50, direction_long=True)
+        assert sig is not None
+
+    def test_long_rsi_above_threshold_blocked(self):
+        """LONG range fade blocked when RSI > 55 (price already recovering)."""
+        sig = self._range_fade(rsi_val=60, direction_long=True)
+        assert sig is None
+
+    def test_long_rsi_at_exact_threshold_blocked(self):
+        """LONG range fade blocked at RSI = 56 (strictly above 55)."""
+        sig = self._range_fade(rsi_val=56, direction_long=True)
+        assert sig is None

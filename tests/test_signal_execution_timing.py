@@ -224,13 +224,27 @@ class TestScalpChannelEntryZone:
         assert width_large > width_small
 
     def test_zone_half_width_approx_atr_times_0_6(self):
-        """Zone half-width = atr_val * 0.3; full width = atr_val * 0.6."""
+        """Direction-biased zone: LONG biases below close (0.7×width), above close (0.3×width)."""
         close = 30000.0
         atr = 100.0
-        sig = self._make_scalp_signal(close=close, atr_val=atr)
+        # zone_width = atr * 0.4 = 40.0; LONG: low = close - 40*0.7, high = close + 40*0.3
+        zone_width = atr * 0.4
+        sig = self._make_scalp_signal(close=close, atr_val=atr, direction=Direction.LONG)
         assert sig is not None
-        expected_low = close - atr * 0.3
-        expected_high = close + atr * 0.3
+        expected_low = close - zone_width * 0.7
+        expected_high = close + zone_width * 0.3
+        assert sig.entry_zone_low == pytest.approx(expected_low, abs=1e-6)
+        assert sig.entry_zone_high == pytest.approx(expected_high, abs=1e-6)
+
+    def test_zone_short_direction_biased_above_close(self):
+        """SHORT zone biases above close (0.7×width) and below (0.3×width)."""
+        close = 30000.0
+        atr = 100.0
+        zone_width = atr * 0.4
+        sig = self._make_scalp_signal(close=close, atr_val=atr, direction=Direction.SHORT)
+        assert sig is not None
+        expected_low = close - zone_width * 0.3
+        expected_high = close + zone_width * 0.7
         assert sig.entry_zone_low == pytest.approx(expected_low, abs=1e-6)
         assert sig.entry_zone_high == pytest.approx(expected_high, abs=1e-6)
 

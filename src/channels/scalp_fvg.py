@@ -191,9 +191,14 @@ class ScalpFVGChannel(BaseChannel):
         sig.original_tp3 = round(tp3, 8)
         sig.setup_class = "FVG_RETEST"
 
-        # Entry zone: bracket around close ±ATR×0.3
-        zone_half = atr_val * 0.3
-        sig.entry_zone_low = round(close - zone_half, 8)
-        sig.entry_zone_high = round(close + zone_half, 8)
+        # Direction-biased entry zone: LONGs bias below close (buy on dips),
+        # SHORTs bias above close (sell on rallies).
+        zone_width = atr_val * 0.4
+        if direction == Direction.LONG:
+            sig.entry_zone_low = round(close - zone_width * 0.7, 8)
+            sig.entry_zone_high = round(close + zone_width * 0.3, 8)
+        else:
+            sig.entry_zone_low = round(close - zone_width * 0.3, 8)
+            sig.entry_zone_high = round(close + zone_width * 0.7, 8)
 
         return sig

@@ -64,7 +64,7 @@ from src.confidence_decay import apply_confidence_decay
 from src.cross_asset import AssetState, check_cross_asset_gate
 from src.feedback_loop import FeedbackLoop
 from src.kill_zone import check_kill_zone_gate
-from src.mtf import check_mtf_gate
+from src.mtf import check_mtf_gate, compute_mtf_confluence
 from src.oi_filter import analyse_oi, check_oi_gate
 from src.pair_manager import PairTier
 from src.spoof_detect import check_spoof_gate
@@ -96,6 +96,10 @@ _RANGING_ADX_SUPPRESS_THRESHOLD: float = 15.0
 
 # Confidence boost applied to SCALP RANGE_FADE setup class when regime is RANGING
 _RANGING_RANGE_FADE_CONF_BOOST: float = 5.0
+
+# Chart pattern direction sets (used by scanner for chart_pattern_names population)
+_CHART_BULLISH_PATTERNS: frozenset = frozenset({"DOUBLE_BOTTOM", "ASCENDING_TRIANGLE"})
+_CHART_BEARISH_PATTERNS: frozenset = frozenset({"DOUBLE_TOP", "DESCENDING_TRIANGLE"})
 
 # SCALP channel names — used for fast-path logic (skip cross-exchange verification).
 _SCALP_CHANNELS: frozenset = frozenset({
@@ -1454,8 +1458,58 @@ class Scanner:
                         symbol, chan_name, pat_bonus,
                         [p["pattern"] for p in patterns],
                     )
+                # Record confirming pattern names for downstream consumers.
+                confirming_names = []
+                for _p in patterns:
+                    _pname = _p.get("pattern", "")
+                    if sig.direction.value == "LONG":
+                        if _pname in _CHART_BULLISH_PATTERNS:
+                            confirming_names.append(_pname)
+                        elif _pname == "BB_SQUEEZE" and _p.get("expansion_direction") == "UP":
+                            confirming_names.append(_pname)
+                    else:
+                        if _pname in _CHART_BEARISH_PATTERNS:
+                            confirming_names.append(_pname)
+                        elif _pname == "BB_SQUEEZE" and _p.get("expansion_direction") == "DOWN":
+                            confirming_names.append(_pname)
+                if confirming_names:
+                    sig.chart_pattern_names = ",".join(confirming_names)
             except Exception as _exc:
                 log.debug("Chart pattern detection error for {}: {}", symbol, _exc)
+
+        # MTF confluence confidence modifier: boost strong alignment, penalise weak.
+        # This augments the hard MTF gate above with a continuous confidence signal.
+        try:
+            _mtf_conf_data: Dict[str, Dict[str, float]] = {}
+            for _tf in ("5m", "15m", "1h", "4h"):
+                _ind = ctx.indicators.get(_tf, {})
+                _ema_fast = _ind.get("ema9_last")
+                _ema_slow = _ind.get("ema21_last")
+                _cd = ctx.candles.get(_tf, {})
+                _closes = _cd.get("close", [])
+                if _ema_fast is not None and _ema_slow is not None and _closes:
+                    _mtf_conf_data[_tf] = {
+                        "ema_fast": float(_ema_fast),
+                        "ema_slow": float(_ema_slow),
+                        "close": float(_closes[-1]),
+                    }
+            if _mtf_conf_data:
+                _mtf_result = compute_mtf_confluence(sig.direction.value, _mtf_conf_data)
+                sig.mtf_score = _mtf_result.score
+                if _mtf_result.is_strong:
+                    sig.confidence += 3.0
+                    log.debug(
+                        "MTF strong-confluence boost {} {}: +3.0 (score={:.2f})",
+                        symbol, chan_name, _mtf_result.score,
+                    )
+                elif not _mtf_result.is_aligned:
+                    sig.confidence -= 5.0
+                    log.debug(
+                        "MTF misalignment penalty {} {}: -5.0 (score={:.2f})",
+                        symbol, chan_name, _mtf_result.score,
+                    )
+        except Exception as _mtf_exc:
+            log.debug("MTF confidence modifier error for {} {} (fail open): {}", symbol, chan_name, _mtf_exc)
 
         # Apply adaptive confidence decay based on signal freshness.
         # apply_confidence_decay clamps the final value to [0, 100].

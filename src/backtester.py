@@ -6,6 +6,7 @@ performance metrics including win rate, average R:R, and max drawdown.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -170,17 +171,7 @@ def _simulate_trade(
             return False, 0.0, 0
         delayed_open = opens[execution_delay_candles] if len(opens) > execution_delay_candles else None
         if delayed_open is not None:
-            signal = Signal(  # lightweight copy with adjusted entry
-                channel=signal.channel,
-                symbol=signal.symbol,
-                direction=signal.direction,
-                entry=float(delayed_open),
-                stop_loss=signal.stop_loss,
-                tp1=signal.tp1,
-                tp2=signal.tp2,
-                tp3=signal.tp3,
-                original_sl_distance=signal.original_sl_distance,
-            )
+            signal = dataclasses.replace(signal, entry=float(delayed_open))
         highs = highs[execution_delay_candles:]
         lows = lows[execution_delay_candles:]
 

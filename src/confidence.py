@@ -472,7 +472,11 @@ def load_learned_weights(channel: str) -> Optional[Dict[str, float]]:
     Optional[Dict[str, float]]
         Loaded weight dict, or ``None`` to fall back to the built-in profiles.
     """
-    path = os.path.join(_LEARNED_WEIGHTS_DIR, f"learned_weights_{channel}.json")
+    # Sanitise: strip characters that could allow path traversal or injection.
+    safe_channel = "".join(c for c in channel if c.isalnum() or c in ("_", "-"))
+    if not safe_channel:
+        return None
+    path = os.path.join(_LEARNED_WEIGHTS_DIR, f"learned_weights_{safe_channel}.json")
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -497,7 +501,11 @@ def save_learned_weights(channel: str, weights: Dict[str, float]) -> None:
     weights:
         Dict of sub-score names → float weight values to persist.
     """
-    path = os.path.join(_LEARNED_WEIGHTS_DIR, f"learned_weights_{channel}.json")
+    # Sanitise: strip characters that could allow path traversal or injection.
+    safe_channel = "".join(c for c in channel if c.isalnum() or c in ("_", "-"))
+    if not safe_channel:
+        return
+    path = os.path.join(_LEARNED_WEIGHTS_DIR, f"learned_weights_{safe_channel}.json")
     try:
         os.makedirs(_LEARNED_WEIGHTS_DIR, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:

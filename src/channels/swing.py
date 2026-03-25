@@ -74,13 +74,15 @@ class SwingChannel(BaseChannel):
 
         direction = mss.direction
 
-        # MSS body-size minimum: tiny candle bodies are noise, not genuine structure.
-        mss_open = getattr(mss, "open_price", None)
-        mss_close = getattr(mss, "close_price", None)
-        if mss_open is not None and mss_close is not None and float(mss_close) > 0:
-            body_size_pct = abs(float(mss_open) - float(mss_close)) / float(mss_close) * 100.0
+        # MSS body-size minimum: tiny sweep candle bodies are noise, not genuine structure shifts.
+        # Use the H4 sweep candle's open_price and close_price (fields on LiquiditySweep).
+        sweep = sweeps[0]
+        sweep_open = getattr(sweep, "open_price", None)
+        sweep_close = getattr(sweep, "close_price", None)
+        if sweep_open is not None and sweep_close is not None and float(sweep_close) > 0:
+            body_size_pct = abs(float(sweep_open) - float(sweep_close)) / float(sweep_close) * 100.0
             if body_size_pct < _MSS_MIN_BODY_SIZE_PCT:
-                return None  # MSS candle body too small — likely indecision, not structure shift
+                return None  # Sweep candle body too small — likely indecision, not a genuine MSS
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
         if not check_rsi(ind_h1.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):

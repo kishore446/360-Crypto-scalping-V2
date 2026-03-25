@@ -69,8 +69,6 @@ def _make_fake_signal(
 class TestEntrySlippage:
     """Entry slippage is applied adversely at the start of _simulate_trade()."""
 
-    from src.backtester import _simulate_trade
-
     def test_long_entry_fills_higher_with_slippage(self):
         """LONG trade PnL must be lower with entry slippage than without."""
         from src.backtester import _simulate_trade

@@ -36,7 +36,8 @@ _SR_PROXIMITY_PCT: float = 0.5  # 0.5%
 _OBI_MAX_STALENESS_SEC: float = 2.0
 
 # Flag to emit a one-time warning when the order book lacks a timestamp.
-_obi_ts_warning_logged: bool = False
+# Using a list so it can be mutated from within functions without `global`.
+_obi_ts_warning_state: list = [False]  # [warned]
 
 
 def _compute_obi(bids: List, asks: List) -> Optional[float]:
@@ -75,7 +76,6 @@ class ScalpOBIChannel(BaseChannel):
         spread_pct: float,
         volume_24h_usd: float,
     ) -> Optional[Signal]:
-        global _obi_ts_warning_logged
 
         if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
@@ -103,12 +103,12 @@ class ScalpOBIChannel(BaseChannel):
         else:
             # No timestamp: emit a one-time warning and continue (fail-open).
             # The scanner should be updated to include 'fetched_at' in order_book data.
-            if not _obi_ts_warning_logged:
+            if not _obi_ts_warning_state[0]:
                 log.warning(
                     "OBI order book data missing timestamp; staleness guard inactive. "
                     "Scanner should include 'fetched_at' in order_book data."
                 )
-                _obi_ts_warning_logged = True
+                _obi_ts_warning_state[0] = True
 
         bids: List = order_book.get("bids", [])
         asks: List = order_book.get("asks", [])

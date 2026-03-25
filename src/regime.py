@@ -168,6 +168,7 @@ class MarketRegimeDetector:
                 volume_delta_pct = float(volume_delta)
                 if stable_regime in (MarketRegime.QUIET, MarketRegime.RANGING):
                     ema_slope_threshold = 0.15 if timeframe == "1m" else 0.05
+                    forced_regime: MarketRegime = MarketRegime.VOLATILE  # default
                     if ema_slope is not None and ema_slope > ema_slope_threshold:
                         forced_regime = MarketRegime.TRENDING_UP
                         log.debug(

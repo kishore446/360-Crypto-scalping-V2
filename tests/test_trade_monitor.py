@@ -476,7 +476,7 @@ class TestTrailingStopAfterTP2:
 
     @pytest.mark.asyncio
     async def test_trailing_stop_advances_after_tp2(self):
-        """After TP2 sets SL to entry, the trailing stop should still move up with price."""
+        """After TP2 sets SL to TP1, the trailing stop should still move up with price."""
         sig = _make_signal(
             channel="360_SCALP",
             direction=Direction.LONG,
@@ -487,9 +487,9 @@ class TestTrailingStopAfterTP2:
             tp3=30450.0,
             age_seconds=60.0,
         )
-        # Simulate what happens after TP2 is hit: SL moves to entry
+        # Simulate what happens after TP2 is hit: SL moves to TP1
         sig.status = "TP2_HIT"
-        sig.stop_loss = sig.entry  # break-even
+        sig.stop_loss = sig.tp1  # SL at TP1 price
         sig.original_sl_distance = 150.0  # 30000 - 29850
         sig.trailing_active = True
 
@@ -502,10 +502,10 @@ class TestTrailingStopAfterTP2:
         # Invoke trailing adjustment directly
         monitor._adjust_trailing(sig)
 
-        # trail_dist = 150 * 0.5 = 75
-        # new_sl = 30400 - 75 = 30325
-        # 30325 > 30000 (break-even), so stop should advance
-        assert sig.stop_loss == pytest.approx(30325.0)
+        # trail_dist = 150 * 0.75 = 112.5
+        # new_sl = 30400 - 112.5 = 30287.5
+        # 30287.5 > 30000 (break-even), so stop should advance
+        assert sig.stop_loss == pytest.approx(30287.5)
 
     @pytest.mark.asyncio
     async def test_trailing_stop_does_not_regress(self):
@@ -756,7 +756,7 @@ class TestATRBasedTrailing:
         assert sig.stop_loss > original_sl
 
     def test_fallback_when_no_candles(self):
-        """When get_candles returns None, fall back to base_dist * 0.5."""
+        """When get_candles returns None, fall back to base_dist * 0.75."""
         sig = _make_signal(
             channel="360_SCALP",
             direction=Direction.LONG,
@@ -773,11 +773,11 @@ class TestATRBasedTrailing:
         monitor, _ = self._build_monitor({sig.signal_id: sig}, candles=None)
         monitor._adjust_trailing(sig)
 
-        # trail_dist = 150 * 0.5 = 75  → new_sl = 30400 - 75 = 30325
-        assert sig.stop_loss == pytest.approx(30325.0)
+        # trail_dist = 150 * 0.75 = 112.5  → new_sl = 30400 - 112.5 = 30287.5
+        assert sig.stop_loss == pytest.approx(30287.5)
 
     def test_fallback_when_insufficient_candles(self):
-        """When fewer than 15 candles are available, fall back to base_dist * 0.5."""
+        """When fewer than 15 candles are available, fall back to base_dist * 0.75."""
         short_candles = {
             "open": np.ones(5) * 30000.0,
             "high": np.ones(5) * 30010.0,
@@ -800,8 +800,8 @@ class TestATRBasedTrailing:
         monitor, _ = self._build_monitor({sig.signal_id: sig}, candles=short_candles)
         monitor._adjust_trailing(sig)
 
-        # Fallback: trail_dist = 150 * 0.5 = 75 → new_sl = 30325
-        assert sig.stop_loss == pytest.approx(30325.0)
+        # Fallback: trail_dist = 150 * 0.75 = 112.5 → new_sl = 30287.5
+        assert sig.stop_loss == pytest.approx(30287.5)
 
     def test_atr_trailing_short_direction(self):
         """For SHORT positions the ATR-based trailing stop must move down with price."""
@@ -1212,7 +1212,7 @@ class TestSignalInvalidation:
 
     def test_regime_flip_invalidates_long(self):
         """LONG signal must be invalidated when regime detector returns TRENDING_DOWN."""
-        sig = _make_signal(direction=Direction.LONG, age_seconds=400.0)
+        sig = _make_signal(direction=Direction.LONG, age_seconds=700.0)
 
         regime_detector = MagicMock()
         regime_result = MagicMock()
@@ -1237,7 +1237,7 @@ class TestSignalInvalidation:
             entry=30000.0,
             stop_loss=30150.0,
             tp1=29850.0,
-            age_seconds=400.0,
+            age_seconds=700.0,
         )
 
         regime_detector = MagicMock()
@@ -1258,7 +1258,7 @@ class TestSignalInvalidation:
 
     def test_ema_bearish_crossover_invalidates_long(self):
         """LONG signal invalidated when EMA9 < EMA21 (bearish crossover)."""
-        sig = _make_signal(direction=Direction.LONG, age_seconds=400.0)
+        sig = _make_signal(direction=Direction.LONG, age_seconds=700.0)
 
         # Create a falling price sequence: EMA9 will be lower than EMA21
         closes = [30000.0 - i * 10 for i in range(25)]  # descending
@@ -1275,7 +1275,7 @@ class TestSignalInvalidation:
             entry=30000.0,
             stop_loss=30150.0,
             tp1=29850.0,
-            age_seconds=400.0,
+            age_seconds=700.0,
         )
 
         # Rising prices: EMA9 > EMA21
@@ -1333,7 +1333,7 @@ class TestSignalInvalidation:
         """An invalidated signal must be removed from active signals."""
         sig = _make_signal(
             channel="360_SCALP",
-            age_seconds=400.0,
+            age_seconds=700.0,
             entry=30000.0,
             stop_loss=29850.0,
             tp1=30150.0,
@@ -1364,7 +1364,7 @@ class TestSignalInvalidation:
         """Invalidated signals must NOT count as stop-losses in the circuit breaker."""
         sig = _make_signal(
             channel="360_SCALP",
-            age_seconds=400.0,
+            age_seconds=700.0,
             entry=30000.0,
             stop_loss=29850.0,
             tp1=30150.0,
@@ -1493,7 +1493,7 @@ class TestSignalInvalidation:
             entry=30000.0,
             stop_loss=29850.0,
             tp1=30150.0,
-            age_seconds=400.0,
+            age_seconds=700.0,
         )
         # Price is above SL so SL doesn't fire; invalidation will fire instead
         sig.current_price = 29900.0
@@ -1554,7 +1554,7 @@ class TestSignalInvalidation:
             entry=30000.0,
             stop_loss=30150.0,
             tp1=29850.0,
-            age_seconds=400.0,
+            age_seconds=700.0,
         )
         # Price is below SL so SL doesn't fire; invalidation will fire instead
         sig.current_price = 30100.0
@@ -1579,7 +1579,7 @@ class TestSignalInvalidation:
         assert sig.pnl_pct == pytest.approx(expected_pnl, abs=1e-4)
 
     def test_dca_grace_period_prevents_invalidation(self):
-        """Invalidation must return None within 300s of a DCA entry being filled."""
+        """Invalidation must return None within 600s of a DCA entry being filled."""
         from datetime import timedelta
         sig = _make_signal(
             channel="360_SCALP",
@@ -1607,16 +1607,16 @@ class TestSignalInvalidation:
         )
 
     def test_dca_grace_period_expires(self):
-        """Invalidation is allowed after the DCA grace period (>300s since DCA)."""
+        """Invalidation is allowed after the DCA grace period (>600s since DCA)."""
         from datetime import timedelta
         sig = _make_signal(
             channel="360_SCALP",
             direction=Direction.LONG,
-            age_seconds=400.0,
+            age_seconds=700.0,
         )
-        # Mark DCA as filled 310 seconds ago — grace period has expired
+        # Mark DCA as filled 610 seconds ago — grace period has expired
         sig.entry_2_filled = True
-        sig.dca_timestamp = utcnow() - timedelta(seconds=310)
+        sig.dca_timestamp = utcnow() - timedelta(seconds=610)
 
         regime_detector = MagicMock()
         regime_result = MagicMock()

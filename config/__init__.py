@@ -306,7 +306,7 @@ CHANNEL_SCALP_CVD = ChannelConfig(
     emoji="⚡",
     timeframes=["5m"],
     sl_pct_range=(0.15, 0.30),
-    tp_ratios=[1.0, 2.0, 3.0],
+    tp_ratios=[1.5, 2.5, 3.5],
     trailing_atr_mult=1.5,
     adx_min=15,
     adx_max=100,
@@ -321,7 +321,7 @@ CHANNEL_SCALP_VWAP = ChannelConfig(
     emoji="⚡",
     timeframes=["5m", "15m"],
     sl_pct_range=(0.10, 0.20),
-    tp_ratios=[1.0, 2.0, 3.0],
+    tp_ratios=[1.5, 2.5, 3.5],
     trailing_atr_mult=1.5,
     adx_min=0,
     adx_max=25,
@@ -336,7 +336,7 @@ CHANNEL_SCALP_OBI = ChannelConfig(
     emoji="⚡",
     timeframes=["5m"],
     sl_pct_range=(0.10, 0.20),
-    tp_ratios=[1.0, 1.5, 2.0],
+    tp_ratios=[1.5, 2.5, 3.0],
     trailing_atr_mult=1.5,
     adx_min=0,
     adx_max=100,
@@ -348,6 +348,10 @@ CHANNEL_SCALP_OBI = ChannelConfig(
 
 ALL_CHANNELS: List[ChannelConfig] = [
     CHANNEL_SCALP,
+    CHANNEL_SCALP_FVG,
+    CHANNEL_SCALP_CVD,
+    CHANNEL_SCALP_VWAP,
+    CHANNEL_SCALP_OBI,
     CHANNEL_SWING,
     CHANNEL_SPOT,
     CHANNEL_GEM,
@@ -590,7 +594,7 @@ MAX_CONCURRENT_SIGNALS: int = 5
 # Signal invalidation – minimum age before market-structure checks apply (secs)
 # ---------------------------------------------------------------------------
 INVALIDATION_MIN_AGE_SECONDS: Dict[str, int] = {
-    "360_SCALP": 300,       # was 120 — too aggressive for 1m candle noise
+    "360_SCALP": 600,       # was 300 — scalps need more time to develop on 1m/5m candles
     "360_SWING": 300,
     "360_SPOT": 1800,
     "360_GEM": 604800,      # 7 days — macro positions need much longer before invalidation
@@ -600,7 +604,7 @@ INVALIDATION_MIN_AGE_SECONDS: Dict[str, int] = {
 # Per-channel to account for different timeframe noise levels.
 # SCALP uses 1m/5m candles which have rapid momentum oscillation — use a lower threshold.
 INVALIDATION_MOMENTUM_THRESHOLD: Dict[str, float] = {
-    "360_SCALP": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SCALP", "0.10")),
+    "360_SCALP": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SCALP", "0.15")),
     "360_SWING": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SWING", "0.20")),
     "360_SPOT": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_SPOT", "0.30")),
     "360_GEM": float(os.getenv("INVALIDATION_MOMENTUM_THRESHOLD_GEM", "0.50")),

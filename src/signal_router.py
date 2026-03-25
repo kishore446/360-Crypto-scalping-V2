@@ -16,6 +16,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
+import time
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 
@@ -43,6 +44,22 @@ log = get_logger("signal_router")
 _FREE_HIGHLIGHT_MAX_PER_DAY: int = 4
 # Minimum TP level required to trigger a free-channel highlight.
 _FREE_HIGHLIGHT_MIN_TP: int = 2
+
+# SCALP channel names — used by the stale-signal gate and latency warnings.
+_SCALP_CHANNEL_NAMES: frozenset = frozenset({
+    "360_SCALP", "360_SCALP_FVG", "360_SCALP_CVD",
+    "360_SCALP_VWAP", "360_SCALP_OBI",
+})
+
+# Stale-signal gate: maximum seconds a signal may spend between detection and
+# posting before it is considered stale and suppressed.  For SCALP channels the
+# window is tight (120 s) because micro-cap moves complete in 2-3 minutes.
+# For all other channels the window is generous (used only as a safety net).
+_SCALP_STALE_THRESHOLD_SECONDS: float = 120.0
+_DEFAULT_STALE_THRESHOLD_SECONDS: float = 3600.0
+
+# Latency WARNING threshold for SCALP signals (2 minutes per problem statement).
+_SCALP_LATENCY_WARNING_SECONDS: float = 120.0
 
 # Delivery-retry sleep callable – replaced in tests to avoid real waits.
 async def _delivery_sleep(secs: float) -> None:
@@ -336,6 +353,62 @@ class SignalRouter:
             )
             return
 
+        # ── Stale signal gate ───────────────────────────────────────────────
+        # Check whether the signal is still actionable before posting.
+        if signal.detected_at is not None:
+            now_ts = time.time()
+            elapsed_s = now_ts - signal.detected_at
+
+            # Time-based staleness: signal exceeded its validity window.
+            is_scalp = signal.channel in _SCALP_CHANNEL_NAMES
+            stale_threshold = (
+                _SCALP_STALE_THRESHOLD_SECONDS if is_scalp
+                else _DEFAULT_STALE_THRESHOLD_SECONDS
+            )
+            if elapsed_s > stale_threshold:
+                log.warning(
+                    "STALE signal {} {} {}: detected→now {:.1f}s > {:.0f}s threshold – suppressed",
+                    signal.channel, signal.symbol, signal.direction.value,
+                    elapsed_s, stale_threshold,
+                )
+                return
+
+            # Price-based staleness: check against detection-time price (current_price).
+            # This catches the case where the price was already past TP1 or SL
+            # at the moment the signal was detected (e.g. due to a slow scan cycle).
+            if signal.current_price > 0:
+                cp = signal.current_price
+                if signal.direction == Direction.LONG:
+                    if cp > signal.tp1:
+                        log.warning(
+                            "STALE signal {} {} LONG: detection-time price {:.8f} already past "
+                            "TP1 {:.8f} – suppressed",
+                            signal.channel, signal.symbol, cp, signal.tp1,
+                        )
+                        return
+                    if cp < signal.stop_loss:
+                        log.warning(
+                            "STALE signal {} {} LONG: detection-time price {:.8f} already below "
+                            "SL {:.8f} – suppressed",
+                            signal.channel, signal.symbol, cp, signal.stop_loss,
+                        )
+                        return
+                else:  # SHORT
+                    if cp < signal.tp1:
+                        log.warning(
+                            "STALE signal {} {} SHORT: detection-time price {:.8f} already past "
+                            "TP1 {:.8f} – suppressed",
+                            signal.channel, signal.symbol, cp, signal.tp1,
+                        )
+                        return
+                    if cp > signal.stop_loss:
+                        log.warning(
+                            "STALE signal {} {} SHORT: detection-time price {:.8f} already above "
+                            "SL {:.8f} – suppressed",
+                            signal.channel, signal.symbol, cp, signal.stop_loss,
+                        )
+                        return
+
         # Channel min-confidence filter
         chan_cfg = next(
             (c for c in ALL_CHANNELS if c.name == signal.channel), None
@@ -443,6 +516,22 @@ class SignalRouter:
             signal.symbol,
             signal.direction.value,
         )
+
+        # ── Latency tracking ─────────────────────────────────────────────────
+        signal.posted_at = time.time()
+        if signal.detected_at is not None:
+            latency_ms = (signal.posted_at - signal.detected_at) * 1000.0
+            signal.enrichment_latency_ms = latency_ms
+            log.info(
+                "{} {} signal: detected→posted latency = {:,.0f}ms",
+                signal.symbol, signal.channel, latency_ms,
+            )
+            if signal.channel in _SCALP_CHANNEL_NAMES and latency_ms > _SCALP_LATENCY_WARNING_SECONDS * 1000:
+                log.warning(
+                    "HIGH LATENCY {} {} SCALP signal: {:.1f}s detected→posted (threshold={:.0f}s)",
+                    signal.symbol, signal.channel,
+                    latency_ms / 1000.0, _SCALP_LATENCY_WARNING_SECONDS,
+                )
 
         # Register only after confirmed delivery
         self._active_signals[signal.signal_id] = signal

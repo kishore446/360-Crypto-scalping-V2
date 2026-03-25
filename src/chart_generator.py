@@ -8,10 +8,8 @@ module degrades gracefully and every public function returns ``None``.
 from __future__ import annotations
 
 import io
-import os
 from typing import Dict, List, Optional, Tuple
 
-import matplotlib.font_manager as fm
 from src.utils import get_logger
 
 log = get_logger("chart_generator")
@@ -19,15 +17,6 @@ log = get_logger("chart_generator")
 try:
     import matplotlib
     matplotlib.use("Agg")
-    # Register Noto Color Emoji as a fallback for emoji glyphs
-    _noto_emoji = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
-    if os.path.isfile(_noto_emoji):
-        try:
-            fm.fontManager.addfont(_noto_emoji)
-            matplotlib.rcParams["font.family"] = "sans-serif"
-            matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", "Noto Color Emoji"]
-        except Exception as exc:
-            log.warning("Could not register Noto Color Emoji font: %s", exc)
     import mplfinance as mpf
     import matplotlib.pyplot as plt
     import pandas as pd
@@ -119,7 +108,7 @@ def generate_gem_chart(
 
         x_potential = ath / current_price if current_price > 0 else 0.0
         x_label = f"x{x_potential:.0f}" if x_potential > 0 else "N/A"
-        title = f"{symbol} — Daily | 💎 GEM {x_label}"
+        title = f"{symbol} — Daily | [GEM] {x_label}"
 
         # ATH horizontal line
         ath_line = [ath] * window
@@ -308,8 +297,8 @@ def generate_portfolio_chart(
                 mpf.make_addplot(tp_line, color=color, linestyle="-", width=0.8)
             )
 
-        channel_emoji = "💎" if channel_name == "GEM" else "📈"
-        title = f"{symbol} — {channel_emoji} {channel_name}"
+        channel_label = "[GEM]" if channel_name == "GEM" else "[SPOT]"
+        title = f"{symbol} — {channel_label} {channel_name}"
 
         # Dark TradingView-like style
         mc = mpf.make_marketcolors(

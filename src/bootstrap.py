@@ -307,12 +307,16 @@ class Bootstrap:
         # admin_alert_callback is intentionally None: drops on this manager are
         # expected during Extreme Fear liquidation cascades and should not spam
         # the admin with alerts.
+        # forceOrder streams fire only during liquidations and can be silent for
+        # hours in calm markets.  Use a much higher staleness multiplier so these
+        # connections are not incorrectly flagged as unhealthy.
         engine._ws_futures_liq = WebSocketManager(
             engine._on_ws_message,
             market="futures",
             admin_alert_callback=None,
             data_store=engine.data_store,
             label="futures_liq",
+            staleness_multiplier=100,
         )
 
         if spot_streams:

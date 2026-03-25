@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any, Optional
 
 import aiohttp
@@ -54,6 +55,8 @@ class TelegramBot:
         if not self._token:
             log.debug("Telegram token not configured – message not sent")
             return False
+        if parse_mode == "Markdown":
+            text = self._sanitize_markdown(text)
         session = await self._ensure_session()
         url = f"{self._base}/sendMessage"
         payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
@@ -208,6 +211,26 @@ class TelegramBot:
         """
         for ch in ("\\", "*", "_", "`", "["):
             text = text.replace(ch, f"\\{ch}")
+        return text
+
+    @staticmethod
+    def _sanitize_markdown(text: str) -> str:
+        """Ensure Markdown V1 entity markers are properly paired in *text*.
+
+        Counts unescaped occurrences of ``*``, ``_``, and `` ` ``.  If any
+        character has an odd count (i.e. an unmatched opener or closer),
+        **all** unescaped occurrences of that character are escaped so that
+        Telegram's parser never encounters an unterminated entity boundary.
+
+        This is applied to the fully-composed message just before sending,
+        acting as a safety net for dynamic content that may slip through
+        individual :meth:`_escape_md` call-sites.
+        """
+        for ch in ("*", "_", "`"):
+            pattern = r"(?<!\\)" + re.escape(ch)
+            count = len(re.findall(pattern, text))
+            if count % 2 != 0:
+                text = re.sub(pattern, f"\\{ch}", text)
         return text
 
     # Channel display names (strip 360_ prefix, use friendly names)

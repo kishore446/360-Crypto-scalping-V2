@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from config import CHANNEL_SCALP_CVD
-from src.channels.base import BaseChannel, build_channel_signal
+from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import check_spread, check_volume
 from src.smc import Direction
 

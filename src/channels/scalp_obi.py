@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from config import CHANNEL_SCALP_OBI
-from src.channels.base import BaseChannel, build_channel_signal
+from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import check_spread, check_volume
 from src.smc import Direction
 

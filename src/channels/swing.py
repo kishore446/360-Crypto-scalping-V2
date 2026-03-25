@@ -8,14 +8,11 @@ Risk    : SL 0.2–0.5 %, TP1 1.5R, TP2 3R, TP3 4–5R, Trailing 2.5×ATR
 from __future__ import annotations
 
 from typing import Dict, Optional
-import uuid
 
 from config import CHANNEL_SWING
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
-from src.filters import check_adx, check_spread, check_volume
+from src.channels.base import BaseChannel, Signal, build_channel_signal
+from src.filters import check_adx, check_rsi
 from src.smc import Direction
-from src.utils import utcnow
 
 
 class SwingChannel(BaseChannel):
@@ -43,9 +40,7 @@ class SwingChannel(BaseChannel):
         ind_h1 = indicators.get("1h", {})
         if not check_adx(ind_h4.get("adx_last"), self.config.adx_min, self.config.adx_max):
             return None
-        if not check_spread(spread_pct, self.config.spread_max):
-            return None
-        if not check_volume(volume_24h_usd, self.config.min_volume):
+        if not self._pass_basic_filters(spread_pct, volume_24h_usd):
             return None
 
         # EMA200 filter
@@ -67,12 +62,8 @@ class SwingChannel(BaseChannel):
         direction = mss.direction
 
         # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
-        rsi_last = ind_h1.get("rsi_last")
-        if rsi_last is not None:
-            if direction == Direction.LONG and rsi_last > 75:
-                return None
-            if direction == Direction.SHORT and rsi_last < 25:
-                return None
+        if not check_rsi(ind_h1.get("rsi_last"), overbought=75, oversold=25, direction=direction.value):
+            return None
 
         # Validate EMA200 bias
         if direction == Direction.LONG and close_h1 < ema200:
@@ -118,37 +109,23 @@ class SwingChannel(BaseChannel):
             tp2 = close - sl_dist * self.config.tp_ratios[1]
             tp3 = close - sl_dist * self.config.tp_ratios[2]
 
-        sig = Signal(
-            channel=self.config.name,
+        sig = build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Medium",
-            timestamp=utcnow(),
-            signal_id=f"SWING-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SWING",
+            atr_val=atr_val,
         )
+        if sig is None:
+            return None
 
-        # Initialise DCA zone so the trade monitor can check for Entry 2
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
+        sig.risk_label = "Medium"
 
         # Mark signal quality tier based on daily confluence
         if daily_confluence:

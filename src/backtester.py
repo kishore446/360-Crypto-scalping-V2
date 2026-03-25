@@ -7,7 +7,7 @@ performance metrics including win rate, average R:R, and max drawdown.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 

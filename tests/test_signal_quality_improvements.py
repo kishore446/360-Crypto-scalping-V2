@@ -18,9 +18,8 @@ Covers:
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -434,7 +433,7 @@ class TestFVGAgeDecay:
 
     def test_decay_applied_to_older_zone(self):
         """Older zones have a smaller decay factor, resulting in a tighter SL."""
-        from src.channels.scalp_fvg import ScalpFVGChannel, _FVG_MIN_DECAY
+        from src.channels.scalp_fvg import ScalpFVGChannel
         ch = ScalpFVGChannel()
         n = 90
         closes = np.ones(n) * 101.0
@@ -599,7 +598,7 @@ class TestSwingBBProximity:
 
     def test_long_rejected_when_bb_position_above_threshold(self):
         """LONG rejected when price is above 15% of BB range (not near lower band)."""
-        from src.channels.swing import SwingChannel, _BB_REJECTION_THRESHOLD
+        from src.channels.swing import SwingChannel
         from src.smc import Direction, MSSSignal
         ch = SwingChannel()
 
@@ -678,7 +677,7 @@ class TestSwingBBProximity:
         }
         smc_data = {"sweeps": [sweep], "mss": mss}
         # With zero-width bands and close == bb_lower → legacy check passes (close <= bb_lower*1.02)
-        sig = ch.evaluate("BTCUSDT", candles, ind, smc_data, 0.01, 10_000_000)
+        ch.evaluate("BTCUSDT", candles, ind, smc_data, 0.01, 10_000_000)
         # Result depends on legacy fallback — just verify it doesn't crash
         assert True  # No exception is the primary assertion here
 
@@ -705,9 +704,6 @@ class TestConfidenceLog:
         )
         # Verify file doesn't exist yet (path not configured)
         # Re-run with our tmp path:
-        import src.confidence as conf_mod
-        original_path = conf_mod.CONFIDENCE_LOG_PATH
-
         import src.confidence as _cm
         import config as _cfg
         orig = _cfg.CONFIDENCE_LOG_PATH
@@ -792,7 +788,7 @@ class TestVolatilityAdaptiveTP:
 
     def test_high_vol_stretches_tp_targets(self):
         """BB width > 5% stretches TP targets by 1.3×."""
-        from src.channels.base import build_channel_signal, _HIGH_VOL_BB_WIDTH, _VOL_STRETCH_FACTOR
+        from src.channels.base import build_channel_signal, _HIGH_VOL_BB_WIDTH
         args = self._make_base_signal_args(direction_long=True)
         sig_base = build_channel_signal(**args)
         sig_highvol = build_channel_signal(**args, bb_width_pct=_HIGH_VOL_BB_WIDTH + 1.0)
@@ -803,7 +799,7 @@ class TestVolatilityAdaptiveTP:
 
     def test_low_vol_compresses_tp_targets(self):
         """BB width < 1.5% compresses TP targets by 0.7×."""
-        from src.channels.base import build_channel_signal, _LOW_VOL_BB_WIDTH, _VOL_COMPRESS_FACTOR
+        from src.channels.base import build_channel_signal, _LOW_VOL_BB_WIDTH
         args = self._make_base_signal_args(direction_long=True)
         sig_base = build_channel_signal(**args)
         sig_lowvol = build_channel_signal(**args, bb_width_pct=_LOW_VOL_BB_WIDTH - 0.5)

@@ -1,0 +1,4 @@
+{"signal_id": "TEST-001", "channel": "360_SCALP", "timestamp": "2026-03-25T10:15:21.485564+00:00", "smc": 20.0, "trend": 15.0, "liquidity": 10.0, "total": 75.0, "session_multiplier": 1.0, "outcome": null}
+{"signal_id": "TEST-001", "channel": "360_SCALP", "timestamp": "2026-03-25T10:15:53.956046+00:00", "smc": 20.0, "trend": 15.0, "liquidity": 10.0, "total": 75.0, "session_multiplier": 1.0, "outcome": null}
+{"signal_id": "TEST-001", "channel": "360_SCALP", "timestamp": "2026-03-25T10:19:30.835740+00:00", "smc": 20.0, "trend": 15.0, "liquidity": 10.0, "total": 75.0, "session_multiplier": 1.0, "outcome": null}
+{"signal_id": "TEST-001", "channel": "360_SCALP", "timestamp": "2026-03-25T10:21:51.433286+00:00", "smc": 20.0, "trend": 15.0, "liquidity": 10.0, "total": 75.0, "session_multiplier": 1.0, "outcome": null}

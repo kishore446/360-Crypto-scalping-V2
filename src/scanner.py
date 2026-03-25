@@ -75,6 +75,8 @@ from src.volume_divergence import check_volume_divergence_gate
 from src.vwap import check_vwap_extension, compute_vwap
 from src.ai_engine import get_ai_insight
 from src.chart_patterns import detect_patterns, pattern_confidence_bonus
+from src.confluence import compute_confluence_bonus
+from src.session_thresholds import get_session_adjusted_thresholds, get_current_session
 
 log = get_logger("scanner")
 
@@ -1564,6 +1566,49 @@ class Scanner:
         sig.soft_gate_flags = ",".join(_fired_gates)
         # Second clamp: ensures confidence stays in [0, 100] after soft-penalty deduction.
         sig.confidence = self._clamp_confidence(sig.confidence)
+
+        # ── Cross-channel confluence bonus ─────────────────────────────────
+        # When other scalp channels agree on the same direction, boost confidence.
+        if chan_name in _SCALP_CHANNELS:
+            confluence_bonus, confirming_channels = compute_confluence_bonus(
+                primary_channel=chan_name,
+                primary_direction=sig.direction.value,
+                channels=self.channels,
+                symbol=symbol,
+                candles=ctx.candles,
+                indicators=ctx.indicators,
+                smc_data=ctx.smc_data,
+                spread_pct=ctx.spread_pct,
+                volume_24h_usd=volume_24h,
+                regime_result=ctx.regime_result,
+            )
+            if confluence_bonus > 0.0:
+                sig.confidence += confluence_bonus
+                sig.confluence_channels = ",".join(confirming_channels)
+                sig.confluence_count = len(confirming_channels)
+
+        # ── Session-adaptive confidence offset ────────────────────────────
+        # Boost confidence slightly during high-liquidity US session; apply a
+        # small penalty during lower-liquidity Asian/Overnight sessions.
+        _, _, session_offset = get_session_adjusted_thresholds(
+            getattr(chan.config, "spread_max", 0.02),
+            getattr(chan.config, "min_volume", 0.0),
+        )
+        if session_offset != 0.0:
+            sig.confidence += session_offset
+            log.debug(
+                "Session confidence offset {} {}: {:+.1f} (session={})",
+                symbol, chan_name, session_offset, get_current_session(),
+            )
+
+        sig.trading_session = get_current_session()
+
+        # Third clamp: after confluence bonus and session offset.
+        sig.confidence = self._clamp_confidence(sig.confidence)
+        # Update post_ai_confidence to reflect the final confidence value, which
+        # now includes confluence and session adjustments in addition to AI scoring.
+        sig.post_ai_confidence = sig.confidence
+
         # Classify signal into quality tier based on final confidence.
         sig.signal_tier = classify_signal_tier(sig.confidence)
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)

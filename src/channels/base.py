@@ -12,6 +12,7 @@ from src.dca import compute_dca_zone
 from src.filters import check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
+from src.session_thresholds import get_session_adjusted_thresholds
 
 # ---------------------------------------------------------------------------
 # Volatility-adaptive TP ratio constants
@@ -140,6 +141,13 @@ class Signal:
     # ---- Chart pattern names that confirmed the signal direction ----
     chart_pattern_names: str = ""
 
+    # ---- Cross-channel confluence (populated by scanner) ----
+    confluence_channels: str = ""   # Comma-separated list of confirming channel names
+    confluence_count: int = 0       # Number of confirming channels
+
+    # ---- Trading session at signal creation time ----
+    trading_session: str = ""       # ASIAN, EUROPEAN, US, OVERNIGHT
+
     # ---- Latency tracking ----
     # detected_at: time.time() when channel.evaluate() first returned a non-None signal.
     # posted_at: time.time() when the signal was successfully delivered to Telegram.
@@ -164,9 +172,12 @@ class BaseChannel:
 
     def _pass_basic_filters(self, spread_pct: float, volume_24h_usd: float) -> bool:
         """Return True if basic spread/volume filters pass."""
+        adj_spread, adj_volume, _ = get_session_adjusted_thresholds(
+            self.config.spread_max, self.config.min_volume,
+        )
         return (
-            check_spread(spread_pct, self.config.spread_max)
-            and check_volume(volume_24h_usd, self.config.min_volume)
+            check_spread(spread_pct, adj_spread)
+            and check_volume(volume_24h_usd, adj_volume)
         )
 
     def evaluate(

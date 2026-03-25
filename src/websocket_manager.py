@@ -59,14 +59,15 @@ class WSConnection:
 class WebSocketManager:
     """Manages multiple Binance WebSocket connections with resilience."""
 
-    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None, data_store=None, label: str | None = None) -> None:
+    def __init__(self, on_message: MessageHandler, market: str = "spot", admin_alert_callback=None, data_store=None, label: str | None = None, staleness_multiplier: float | None = None) -> None:
         self._on_message = on_message
         self._market = market
         self._label = label or market
         self._base_url = BINANCE_WS_BASE if market == "spot" else BINANCE_FUTURES_WS_BASE
         self._rest_base_url = BINANCE_REST_BASE if market == "spot" else BINANCE_FUTURES_REST_BASE
         self._heartbeat_interval = WS_HEARTBEAT_INTERVAL_FUTURES if market == "futures" else WS_HEARTBEAT_INTERVAL
-        self._staleness_multiplier = WS_STALENESS_MULTIPLIER_FUTURES if market == "futures" else WS_STALENESS_MULTIPLIER
+        default_multiplier = WS_STALENESS_MULTIPLIER_FUTURES if market == "futures" else WS_STALENESS_MULTIPLIER
+        self._staleness_multiplier = staleness_multiplier if staleness_multiplier is not None else default_multiplier
         self._connections: List[WSConnection] = []
         self._session: Optional[aiohttp.ClientSession] = None
         self._running = False

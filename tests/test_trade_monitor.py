@@ -1299,8 +1299,11 @@ class TestSignalInvalidation:
 
         # Disable regime and EMA to isolate momentum check
         # (flat prices mean EMA9 == EMA21, so no EMA invalidation)
+        # SCALP requires 2 consecutive below-threshold readings before invalidating.
         reason = monitor._check_invalidation(sig)
-        # Flat → momentum ≈ 0 < threshold
+        assert reason is None, "First reading should not invalidate yet (consecutive guard)"
+        reason = monitor._check_invalidation(sig)
+        # Flat → momentum ≈ 0 < threshold → second consecutive reading triggers invalidation
         assert reason is not None
         assert "momentum" in reason.lower()
 
@@ -1652,6 +1655,9 @@ class TestSignalInvalidation:
         closes = [30000.0] * 25
         monitor, _, _ = self._build_monitor({sig.signal_id: sig}, candles_close=closes)
 
+        # SCALP requires 2 consecutive readings; first should not invalidate
+        first_reason = monitor._check_invalidation(sig)
+        assert first_reason is None, "First reading should not invalidate yet (consecutive guard)"
         reason = monitor._check_invalidation(sig)
         assert reason is not None
         assert "momentum" in reason.lower()
@@ -1679,6 +1685,9 @@ class TestSignalInvalidation:
         closes = [30000.0] * 25
         monitor, _, _ = self._build_monitor({sig.signal_id: sig}, candles_close=closes)
 
+        # SCALP requires 2 consecutive readings; first should not invalidate
+        first_reason = monitor._check_invalidation(sig)
+        assert first_reason is None, "First reading should not invalidate yet (consecutive guard)"
         reason = monitor._check_invalidation(sig)
         assert reason is not None
         assert "momentum" in reason.lower()

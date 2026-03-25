@@ -10,7 +10,7 @@ Signal ID prefix: "SFVG-"
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from config import CHANNEL_SCALP_FVG
 from src.channels.base import BaseChannel, Signal, build_channel_signal
@@ -45,6 +45,8 @@ class ScalpFVGChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         # Try 5m first, fall back to 15m
         for tf in ("5m", "15m"):

@@ -11,7 +11,7 @@ Signal ID prefix: "SCVD-"
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from config import CHANNEL_SCALP_CVD
 from src.channels.base import BaseChannel, Signal, build_channel_signal
@@ -52,6 +52,8 @@ class ScalpCVDChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         m5 = candles.get("5m")
         if m5 is None or len(m5.get("close", [])) < 21:

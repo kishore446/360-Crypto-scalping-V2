@@ -36,6 +36,8 @@ class ScalpChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         # Evaluate all three paths and return the one with the best R-multiple.
         # This ensures that a marginal standard-path signal never blocks a

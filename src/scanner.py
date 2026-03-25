@@ -99,6 +99,27 @@ _RANGING_ADX_SUPPRESS_THRESHOLD: float = 15.0
 # Confidence boost applied to SCALP RANGE_FADE setup class when regime is RANGING
 _RANGING_RANGE_FADE_CONF_BOOST: float = 5.0
 
+# Per-channel × per-regime adjustment matrix.
+# Keys: (channel_name, regime_value) → {"confidence_boost": float, "sl_mult": float}
+_REGIME_CHANNEL_ADJUSTMENTS: Dict[Tuple[str, str], Dict[str, float]] = {
+    ("360_SCALP",      "RANGING"):        {"confidence_boost": 5.0,  "sl_mult": 0.8},
+    ("360_SCALP",      "VOLATILE"):       {"confidence_boost": -3.0, "sl_mult": 1.3},
+    ("360_SCALP",      "QUIET"):          {"confidence_boost": 2.0,  "sl_mult": 0.85},
+    ("360_SCALP_FVG",  "TRENDING_UP"):    {"confidence_boost": 3.0,  "sl_mult": 1.0},
+    ("360_SCALP_FVG",  "TRENDING_DOWN"):  {"confidence_boost": 3.0,  "sl_mult": 1.0},
+    ("360_SCALP_FVG",  "RANGING"):        {"confidence_boost": 1.0,  "sl_mult": 0.9},
+    ("360_SCALP_CVD",  "RANGING"):        {"confidence_boost": 5.0,  "sl_mult": 0.9},
+    ("360_SCALP_CVD",  "VOLATILE"):       {"confidence_boost": 3.0,  "sl_mult": 1.2},
+    ("360_SCALP_CVD",  "QUIET"):          {"confidence_boost": 2.0,  "sl_mult": 0.85},
+    ("360_SCALP_VWAP", "QUIET"):          {"confidence_boost": 5.0,  "sl_mult": 0.7},
+    ("360_SCALP_VWAP", "RANGING"):        {"confidence_boost": 3.0,  "sl_mult": 0.8},
+    ("360_SCALP_VWAP", "VOLATILE"):       {"confidence_boost": -5.0, "sl_mult": 1.4},
+    ("360_SCALP_OBI",  "VOLATILE"):       {"confidence_boost": 5.0,  "sl_mult": 1.2},
+    ("360_SCALP_OBI",  "TRENDING_UP"):    {"confidence_boost": 3.0,  "sl_mult": 1.0},
+    ("360_SCALP_OBI",  "TRENDING_DOWN"):  {"confidence_boost": 3.0,  "sl_mult": 1.0},
+    ("360_SCALP_OBI",  "QUIET"):          {"confidence_boost": -2.0, "sl_mult": 0.9},
+}
+
 # Chart pattern direction sets (used by scanner for chart_pattern_names population)
 _CHART_BULLISH_PATTERNS: frozenset = frozenset({"DOUBLE_BOTTOM", "ASCENDING_TRIANGLE"})
 _CHART_BEARISH_PATTERNS: frozenset = frozenset({"DOUBLE_TOP", "DESCENDING_TRIANGLE"})
@@ -1080,12 +1101,34 @@ class Scanner:
         sig: Any,
         ctx: ScanContext,
     ) -> None:
-        if chan_name == "360_SCALP" and ctx.is_ranging and sig.setup_class == "RANGE_FADE":
-            sig.confidence += _RANGING_RANGE_FADE_CONF_BOOST
+        # ctx.regime_result is a RegimeResult dataclass; .regime is a MarketRegime
+        # enum instance with a .value string (e.g. "VOLATILE", "RANGING").
+        # Defensive getattr/hasattr guards handle None or stub objects in tests.
+        regime_name = getattr(ctx.regime_result, "regime", None)
+        if regime_name is None:
+            return
+        regime_key = regime_name.value if hasattr(regime_name, "value") else str(regime_name)
+        adj = _REGIME_CHANNEL_ADJUSTMENTS.get((chan_name, regime_key))
+        if adj is None:
+            return
+        boost = adj.get("confidence_boost", 0.0)
+        if boost != 0.0:
+            sig.confidence += boost
             log.debug(
-                "SCALP RANGE_FADE confidence boosted for {} (RANGING): {:.1f}",
-                symbol,
-                sig.confidence,
+                "Regime adjustment {} {} ({}): confidence {:+.1f} → {:.1f}",
+                symbol, chan_name, regime_key, boost, sig.confidence,
+            )
+        sl_mult = adj.get("sl_mult", 1.0)
+        if sl_mult != 1.0 and hasattr(sig, "stop_loss") and hasattr(sig, "entry"):
+            sl_dist = abs(sig.entry - sig.stop_loss)
+            new_sl_dist = sl_dist * sl_mult
+            if sig.direction.value == "LONG":
+                sig.stop_loss = round(sig.entry - new_sl_dist, 8)
+            else:
+                sig.stop_loss = round(sig.entry + new_sl_dist, 8)
+            log.debug(
+                "Regime SL adjustment {} {} ({}): mult={:.2f}, new SL={:.8f}",
+                symbol, chan_name, regime_key, sl_mult, sig.stop_loss,
             )
 
     async def _apply_predictive_adjustments(
@@ -1168,6 +1211,7 @@ class Scanner:
                 smc_data=ctx.smc_data,
                 spread_pct=ctx.spread_pct,
                 volume_24h_usd=volume_24h,
+                regime_result=ctx.regime_result,
             )
         except Exception as exc:
             log.debug("Channel {} eval error for {}: {}", chan_name, symbol, exc)

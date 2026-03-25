@@ -7,7 +7,7 @@ Risk    : SL 0.2–0.5 %, TP1 1.5R, TP2 3R, TP3 4–5R, Trailing 2.5×ATR
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from config import CHANNEL_SWING
 from src.channels.base import BaseChannel, Signal, build_channel_signal
@@ -40,6 +40,8 @@ class SwingChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         h4 = candles.get("4h")
         h1 = candles.get("1h")

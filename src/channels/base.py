@@ -177,6 +177,8 @@ class BaseChannel:
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         """Evaluate whether to emit a signal. Override in subclasses."""
         raise NotImplementedError

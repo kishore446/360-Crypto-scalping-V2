@@ -8,7 +8,7 @@ Risk    : SL 0.5–2 %, TP1 2R, TP2 5R, TP3 10R, Trailing 3×ATR, max hold 7 day
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import uuid
 
 from config import CHANNEL_SPOT
@@ -34,6 +34,8 @@ class SpotChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
         h4 = candles.get("4h")
         if h4 is None or len(h4.get("close", [])) < 50:

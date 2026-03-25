@@ -84,6 +84,8 @@ class ScalpOBIChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        *,
+        regime_result: Optional[Any] = None,
     ) -> Optional[Signal]:
 
         if not self._pass_basic_filters(spread_pct, volume_24h_usd):

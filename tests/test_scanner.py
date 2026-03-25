@@ -1521,3 +1521,123 @@ async def test_gem_skips_mtf_gate():
 
     # MTF gate must NOT be called for 360_GEM
     mock_mtf.assert_not_called()
+
+
+class TestRegimeChannelAdjustments:
+    """Unit tests for _apply_regime_channel_adjustments() data-driven matrix."""
+
+    def _make_ctx(self, regime_value: str) -> SimpleNamespace:
+        """Return a minimal ScanContext-like namespace for adjustment tests."""
+        regime = SimpleNamespace(value=regime_value)
+        return SimpleNamespace(regime_result=SimpleNamespace(regime=regime))
+
+    def _make_signal_for_adj(
+        self,
+        *,
+        channel: str = "360_SCALP_OBI",
+        confidence: float = 50.0,
+        direction: Direction = Direction.LONG,
+        entry: float = 100.0,
+        stop_loss: float = 95.0,
+    ) -> Signal:
+        return Signal(
+            channel=channel,
+            symbol="BTCUSDT",
+            direction=direction,
+            entry=entry,
+            stop_loss=stop_loss,
+            tp1=105.0,
+            tp2=110.0,
+            confidence=confidence,
+            signal_id="SIG-ADJ",
+            timestamp=utcnow(),
+        )
+
+    def test_obi_volatile_confidence_boost(self):
+        """360_SCALP_OBI + VOLATILE → confidence boosted by +5.0."""
+        from src.scanner import _REGIME_CHANNEL_ADJUSTMENTS
+        scanner = _make_scanner()
+        ctx = self._make_ctx("VOLATILE")
+        sig = self._make_signal_for_adj(channel="360_SCALP_OBI", confidence=50.0)
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_OBI", sig, ctx)
+        assert sig.confidence == pytest.approx(55.0)
+
+    def test_obi_volatile_sl_multiplied(self):
+        """360_SCALP_OBI + VOLATILE → SL distance multiplied by 1.2 (LONG)."""
+        scanner = _make_scanner()
+        ctx = self._make_ctx("VOLATILE")
+        # entry=100, stop_loss=90 → sl_dist=10 → new_sl_dist=12 → new sl=88
+        sig = self._make_signal_for_adj(
+            channel="360_SCALP_OBI", entry=100.0, stop_loss=90.0, direction=Direction.LONG
+        )
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_OBI", sig, ctx)
+        assert sig.stop_loss == pytest.approx(100.0 - 10.0 * 1.2, rel=1e-6)
+
+    def test_obi_volatile_sl_multiplied_short(self):
+        """360_SCALP_OBI + VOLATILE → SL distance multiplied by 1.2 (SHORT)."""
+        scanner = _make_scanner()
+        ctx = self._make_ctx("VOLATILE")
+        sig = self._make_signal_for_adj(
+            channel="360_SCALP_OBI", entry=100.0, stop_loss=110.0, direction=Direction.SHORT
+        )
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_OBI", sig, ctx)
+        assert sig.stop_loss == pytest.approx(100.0 + 10.0 * 1.2, rel=1e-6)
+
+    def test_no_adjustment_for_unmatched_regime(self):
+        """No adjustment applied when channel+regime combo is not in the matrix."""
+        scanner = _make_scanner()
+        # 360_SCALP_OBI + RANGING is NOT in the matrix
+        ctx = self._make_ctx("RANGING")
+        sig = self._make_signal_for_adj(channel="360_SCALP_OBI", confidence=50.0)
+        original_sl = sig.stop_loss
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_OBI", sig, ctx)
+        assert sig.confidence == pytest.approx(50.0)
+        assert sig.stop_loss == original_sl
+
+    def test_no_adjustment_when_regime_result_is_none(self):
+        """No crash or adjustment when regime_result is None."""
+        scanner = _make_scanner()
+        ctx = SimpleNamespace(regime_result=None)
+        sig = self._make_signal_for_adj(confidence=50.0)
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_OBI", sig, ctx)
+        assert sig.confidence == pytest.approx(50.0)
+
+    def test_scalp_ranging_confidence_boost(self):
+        """360_SCALP + RANGING → confidence boosted by +5.0."""
+        scanner = _make_scanner()
+        ctx = self._make_ctx("RANGING")
+        sig = self._make_signal_for_adj(channel="360_SCALP", confidence=60.0)
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP", sig, ctx)
+        assert sig.confidence == pytest.approx(65.0)
+
+    def test_scalp_vwap_volatile_negative_boost(self):
+        """360_SCALP_VWAP + VOLATILE → confidence reduced by -5.0."""
+        scanner = _make_scanner()
+        ctx = self._make_ctx("VOLATILE")
+        sig = self._make_signal_for_adj(channel="360_SCALP_VWAP", confidence=60.0)
+        scanner._apply_regime_channel_adjustments("BTCUSDT", "360_SCALP_VWAP", sig, ctx)
+        assert sig.confidence == pytest.approx(55.0)
+
+    def test_regime_channel_adjustments_matrix_has_expected_entries(self):
+        """Spot-check that the matrix contains all required channel×regime combos."""
+        from src.scanner import _REGIME_CHANNEL_ADJUSTMENTS
+        required = [
+            ("360_SCALP",      "RANGING"),
+            ("360_SCALP",      "VOLATILE"),
+            ("360_SCALP",      "QUIET"),
+            ("360_SCALP_FVG",  "TRENDING_UP"),
+            ("360_SCALP_FVG",  "TRENDING_DOWN"),
+            ("360_SCALP_FVG",  "RANGING"),
+            ("360_SCALP_CVD",  "RANGING"),
+            ("360_SCALP_CVD",  "VOLATILE"),
+            ("360_SCALP_CVD",  "QUIET"),
+            ("360_SCALP_VWAP", "QUIET"),
+            ("360_SCALP_VWAP", "RANGING"),
+            ("360_SCALP_VWAP", "VOLATILE"),
+            ("360_SCALP_OBI",  "VOLATILE"),
+            ("360_SCALP_OBI",  "TRENDING_UP"),
+            ("360_SCALP_OBI",  "TRENDING_DOWN"),
+            ("360_SCALP_OBI",  "QUIET"),
+        ]
+        for key in required:
+            assert key in _REGIME_CHANNEL_ADJUSTMENTS, f"Missing key: {key}"

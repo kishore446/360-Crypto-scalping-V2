@@ -15,12 +15,11 @@ Validates all targeted improvements from the comprehensive audit:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from src.channels.scalp import ScalpChannel
 from src.channels.scalp_cvd import ScalpCVDChannel
 from src.channels.scalp_fvg import ScalpFVGChannel
-from src.channels.scalp_obi import ScalpOBIChannel, _compute_obi
+from src.channels.scalp_obi import _compute_obi
 from src.channels.spot import SpotChannel
 from src.channels.swing import SwingChannel
 from src.confidence import score_order_flow
@@ -352,17 +351,15 @@ class TestFVGPartialFillDetection:
         assert sig is None
 
     def test_lightly_filled_bullish_fvg_allowed(self):
-        """Bullish FVG with price 30% filled → allowed."""
+        """Bullish FVG with price 30% filled → fill check passes (not blocked by fill gate)."""
         ch = ScalpFVGChannel()
-        # fill_pct = (101 - 100.7) / 1 = 0.3 < 0.6 → allowed
+        # fill_pct = (101 - 100.7) / 1 = 0.3 < 0.6 → fill check passes
         candles = self._make_fvg_candles(close_val=100.7)
         zone = FVGZone(index=20, direction=Direction.LONG, gap_high=101.0, gap_low=100.0)
         smc_data = {"fvg": [zone]}
         indicators = {"5m": _make_indicators(adx_val=25, rsi_val=45)}
-        sig = ch._evaluate_tf("BTCUSDT", "5m", candles, indicators, smc_data, 0.01, 10_000_000)
-        # Should pass fill check (may still be filtered by proximity or other checks)
-        # We verify the fill check is not what blocks it
-        # fill_pct=0.3 < 0.6 → fill check passes
+        # Call succeeds without raising; result may be None due to proximity filtering
+        ch._evaluate_tf("BTCUSDT", "5m", candles, indicators, smc_data, 0.01, 10_000_000)
 
     def test_heavily_filled_bearish_fvg_rejected(self):
         """Bearish FVG with price 70% filled from below → rejected."""
@@ -379,15 +376,15 @@ class TestFVGPartialFillDetection:
         assert sig is None
 
     def test_exact_60pct_fill_is_allowed(self):
-        """Exactly 60% filled (boundary) → allowed (condition is > 0.6, not >=)."""
+        """Exactly 60% filled (boundary) → fill check passes (condition is > 0.6, not >=)."""
         ch = ScalpFVGChannel()
-        # fill_pct = (101 - 100.4) / 1 = 0.6 → not > 0.6 → allowed
+        # fill_pct = (101 - 100.4) / 1 = 0.6 → not > 0.6 → fill check passes
         candles = self._make_fvg_candles(close_val=100.4)
         zone = FVGZone(index=20, direction=Direction.LONG, gap_high=101.0, gap_low=100.0)
         smc_data = {"fvg": [zone]}
         indicators = {"5m": _make_indicators(adx_val=25, rsi_val=45)}
-        sig = ch._evaluate_tf("BTCUSDT", "5m", candles, indicators, smc_data, 0.01, 10_000_000)
-        # fill_pct = 0.6, condition is > 0.6, so this should NOT be rejected by fill check
+        # Call succeeds without raising; result may be None due to other filters
+        ch._evaluate_tf("BTCUSDT", "5m", candles, indicators, smc_data, 0.01, 10_000_000)
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ import uuid
 from config import CHANNEL_SCALP
 from src.channels.base import BaseChannel, Signal
 from src.dca import compute_dca_zone
-from src.filters import check_adx, check_ema_alignment, check_rsi, check_spread, check_volume
+from src.filters import check_adx, check_ema_alignment, check_spread, check_volume
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -181,15 +181,14 @@ class ScalpChannel(BaseChannel):
         else:
             return None
 
-        # RSI extreme gate: don't chase overbought LONGs or fade oversold SHORTs
+        # For mean-reversion LONGs we want oversold RSI; for SHORTs, overbought.
+        # Reject setups where RSI has already recovered past the mean-reversion
+        # entry window (i.e. the edge has been lost).
         if rsi_val is not None:
-            if direction == Direction.LONG and rsi_val > 75:
-                return None
-            if direction == Direction.SHORT and rsi_val < 25:
-                return None
-
-        if not check_rsi(rsi_val, 70.0, 30.0, direction.value):
-            return None
+            if direction == Direction.LONG and rsi_val > 55:
+                return None  # Not oversold enough for mean-reversion LONG
+            if direction == Direction.SHORT and rsi_val < 45:
+                return None  # Not overbought enough for mean-reversion SHORT
 
         atr_val = ind.get("atr_last", close * 0.002)
         sl_dist = max(close * self.config.sl_pct_range[0] / 100, atr_val * 0.8)
@@ -313,6 +312,7 @@ class ScalpChannel(BaseChannel):
         sl_dist: float,
         id_prefix: str,
         atr_val: float = 0.0,
+        vwap_price: float = 0.0,
     ) -> Optional[Signal]:
         if direction == Direction.LONG and sl >= close:
             return None
@@ -350,10 +350,21 @@ class ScalpChannel(BaseChannel):
         sig.original_tp2 = round(tp2, 8)
         sig.original_tp3 = round(tp3, 8)
 
-        # Entry zone: bracket around close ±ATR×0.3 (or ±sl_dist×0.6 as proxy)
-        # Gives users a limit-order zone to pre-position instead of chasing price.
-        zone_half = (atr_val * 0.3) if atr_val > 0 else (sl_dist * 0.6)
-        sig.entry_zone_low = round(close - zone_half, 8)
-        sig.entry_zone_high = round(close + zone_half, 8)
+        # Direction-biased entry zone: LONGs bias below close (buy on dips),
+        # SHORTs bias above close (sell on rallies).
+        zone_width = (atr_val * 0.4) if atr_val > 0 else (sl_dist * 0.6)
+
+        # Volume-weighted anchoring: blend zone centre toward VWAP when close.
+        if vwap_price > 0 and abs(vwap_price - close) < zone_width:
+            zone_center = close * 0.6 + vwap_price * 0.4
+        else:
+            zone_center = close
+
+        if direction == Direction.LONG:
+            sig.entry_zone_low = round(zone_center - zone_width * 0.7, 8)
+            sig.entry_zone_high = round(zone_center + zone_width * 0.3, 8)
+        else:
+            sig.entry_zone_low = round(zone_center - zone_width * 0.3, 8)
+            sig.entry_zone_high = round(zone_center + zone_width * 0.7, 8)
 
         return sig

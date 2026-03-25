@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config import ChannelConfig
+from src.dca import compute_dca_zone
 from src.smc import Direction
 from src.utils import utcnow
 
@@ -116,6 +118,12 @@ class Signal:
     last_lifecycle_check: Optional[datetime] = None  # UTC timestamp of last check
     lifecycle_alert_level: str = "GREEN"          # GREEN, YELLOW, RED
 
+    # ---- MTF confluence score (0-1, populated by scanner) ----
+    mtf_score: float = 0.0
+
+    # ---- Chart pattern names that confirmed the signal direction ----
+    chart_pattern_names: str = ""
+
     # ---- Latency tracking ----
     # detected_at: time.time() when channel.evaluate() first returned a non-None signal.
     # posted_at: time.time() when the signal was successfully delivered to Telegram.
@@ -149,3 +157,83 @@ class BaseChannel:
     ) -> Optional[Signal]:
         """Evaluate whether to emit a signal. Override in subclasses."""
         raise NotImplementedError
+
+
+def build_channel_signal(
+    config: ChannelConfig,
+    symbol: str,
+    direction: Direction,
+    close: float,
+    sl: float,
+    tp1: float,
+    tp2: float,
+    tp3: float,
+    sl_dist: float,
+    id_prefix: str,
+    atr_val: float = 0.0,
+    vwap_price: float = 0.0,
+    setup_class: str = "",
+) -> Optional[Signal]:
+    """Shared signal construction for all scalp-family channels.
+
+    Centralises Signal instantiation, DCA zone calculation, and direction-
+    biased entry zone logic so that bug fixes propagate automatically to every
+    channel that calls this helper.
+    """
+    if direction == Direction.LONG and sl >= close:
+        return None
+    if direction == Direction.SHORT and sl <= close:
+        return None
+
+    sig = Signal(
+        channel=config.name,
+        symbol=symbol,
+        direction=direction,
+        entry=close,
+        stop_loss=round(sl, 8),
+        tp1=round(tp1, 8),
+        tp2=round(tp2, 8),
+        tp3=round(tp3, 8),
+        trailing_active=True,
+        trailing_desc=f"{config.trailing_atr_mult}×ATR",
+        confidence=0.0,
+        ai_sentiment_label="",
+        ai_sentiment_summary="",
+        risk_label="Aggressive",
+        timestamp=utcnow(),
+        signal_id=f"{id_prefix}-{uuid.uuid4().hex[:8].upper()}",
+        current_price=close,
+        original_sl_distance=sl_dist,
+    )
+
+    dca_lower, dca_upper = compute_dca_zone(
+        close, round(sl, 8), direction, config.dca_zone_range
+    )
+    sig.dca_zone_lower = dca_lower
+    sig.dca_zone_upper = dca_upper
+    sig.original_entry = close
+    sig.original_tp1 = round(tp1, 8)
+    sig.original_tp2 = round(tp2, 8)
+    sig.original_tp3 = round(tp3, 8)
+    if setup_class:
+        sig.setup_class = setup_class
+
+    # Direction-biased entry zone: LONGs bias below close (buy on dips),
+    # SHORTs bias above close (sell on rallies).
+    zone_width = (atr_val * 0.4) if atr_val > 0 else (sl_dist * 0.6)
+
+    # Volume-weighted anchoring: blend zone centre toward VWAP when it is
+    # close to the current price and available.
+    if vwap_price > 0 and abs(vwap_price - close) < zone_width:
+        zone_center = close * 0.6 + vwap_price * 0.4
+    else:
+        zone_center = close
+
+    if direction == Direction.LONG:
+        sig.entry_zone_low = round(zone_center - zone_width * 0.7, 8)
+        sig.entry_zone_high = round(zone_center + zone_width * 0.3, 8)
+    else:
+        sig.entry_zone_low = round(zone_center - zone_width * 0.3, 8)
+        sig.entry_zone_high = round(zone_center + zone_width * 0.7, 8)
+
+    return sig

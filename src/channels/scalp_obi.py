@@ -12,14 +12,11 @@ Signal ID prefix: "SOBI-"
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-import uuid
 
 from config import CHANNEL_SCALP_OBI
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
+from src.channels.base import BaseChannel, build_channel_signal
 from src.filters import check_spread, check_volume
 from src.smc import Direction
-from src.utils import utcnow
 
 # OBI thresholds for signal generation
 _OBI_LONG_THRESHOLD: float = 0.65   # Strong bid absorption
@@ -139,41 +136,17 @@ class ScalpOBIChannel(BaseChannel):
         if direction == Direction.SHORT and sl <= close:
             return None
 
-        sig = Signal(
-            channel=self.config.name,
+        return build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Aggressive",
-            timestamp=utcnow(),
-            signal_id=f"SOBI-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
+            close=close,
+            sl=sl,
+            tp1=tp1,
+            tp2=tp2,
+            tp3=tp3,
+            sl_dist=sl_dist,
+            id_prefix="SOBI",
+            atr_val=atr_val,
+            setup_class="OBI_ABSORPTION",
         )
-
-        dca_lower, dca_upper = compute_dca_zone(
-            close, round(sl, 8), direction, self.config.dca_zone_range
-        )
-        sig.dca_zone_lower = dca_lower
-        sig.dca_zone_upper = dca_upper
-        sig.original_entry = close
-        sig.original_tp1 = round(tp1, 8)
-        sig.original_tp2 = round(tp2, 8)
-        sig.original_tp3 = round(tp3, 8)
-        sig.setup_class = "OBI_ABSORPTION"
-
-        # Entry zone: bracket around close ±ATR×0.3
-        zone_half = atr_val * 0.3
-        sig.entry_zone_low = round(close - zone_half, 8)
-        sig.entry_zone_high = round(close + zone_half, 8)
-
-        return sig

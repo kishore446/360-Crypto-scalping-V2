@@ -77,6 +77,15 @@ class TelemetryCollector:
         """
         self._admin_alert = callback
 
+    def get_admin_alert_callback(self) -> Optional[Any]:
+        """Return the registered admin alert callback, or ``None`` if unset."""
+        return self._admin_alert
+
+    @property
+    def scan_latency_ms(self) -> float:
+        """Most recently recorded scan cycle latency in milliseconds."""
+        return self._scan_latency_ms
+
     def record_signal_latency(self, latency_ms: float) -> None:
         """Record time from signal creation to Telegram delivery (ms)."""
         self._signal_latency_ms = latency_ms

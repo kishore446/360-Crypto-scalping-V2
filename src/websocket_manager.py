@@ -272,7 +272,11 @@ class WebSocketManager:
             if extracted:
                 # Deduplicate while preserving insertion order for logging
                 seen: set = set()
-                unique = [s for s in extracted if not (s in seen or seen.add(s))]  # type: ignore[func-returns-value]
+                unique: List[str] = []
+                for s in extracted:
+                    if s not in seen:
+                        seen.add(s)
+                        unique.append(s)
                 self._critical_pairs = set(unique[:20])
                 log.warning(
                     "WS fully degraded with empty critical_pairs — "

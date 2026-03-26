@@ -435,7 +435,7 @@ class Scanner:
                 )
                 if self._consecutive_ws_degraded_cycles == WS_DEGRADED_CYCLES_ALERT:
                     try:
-                        _alert_fn = getattr(self.telemetry, "_admin_alert", None)
+                        _alert_fn = self.telemetry.get_admin_alert_callback()
                         if _alert_fn is not None:
                             await _alert_fn(
                                 f"⚠️ WebSocket unhealthy for "
@@ -473,12 +473,12 @@ class Scanner:
                 # Tier 2 pairs to reduce cycle time.
                 skip_tier2_for_latency = (
                     self._consecutive_high_latency_cycles > 0
-                    and self.telemetry._scan_latency_ms > SCAN_LATENCY_REDUCE_MS
+                    and self.telemetry.scan_latency_ms > SCAN_LATENCY_REDUCE_MS
                 )
                 if skip_tier2_for_latency:
                     log.warning(
                         "Scan latency circuit breaker: skipping Tier 2 pairs "
-                        "(last latency={:.0f}ms)", self.telemetry._scan_latency_ms
+                        "(last latency={:.0f}ms)", self.telemetry.scan_latency_ms
                     )
                 pairs_this_cycle = [
                     (sym, info) for sym, info in sorted_pairs
@@ -538,7 +538,7 @@ class Scanner:
                 self._consecutive_high_latency_cycles += 1
                 if self._consecutive_high_latency_cycles >= SCAN_LATENCY_ALERT_CONSECUTIVE:
                     try:
-                        _alert_fn = getattr(self.telemetry, "_admin_alert", None)
+                        _alert_fn = self.telemetry.get_admin_alert_callback()
                         if _alert_fn is not None:
                             await _alert_fn(
                                 f"⚠️ Scan latency critical: {elapsed_ms:.0f}ms for "

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from config import ChannelConfig
+from src.channels.signal_params import lookup_signal_params
 from src.dca import compute_dca_zone
 from src.filters import check_spread, check_volume
 from src.smc import Direction
@@ -197,6 +198,7 @@ def build_channel_signal(
     vwap_price: float = 0.0,
     setup_class: str = "",
     bb_width_pct: Optional[float] = None,
+    regime: str = "",
 ) -> Optional[Signal]:
     """Shared signal construction for all scalp-family channels.
 
@@ -218,20 +220,49 @@ def build_channel_signal(
           ratio by ``_VOL_COMPRESS_FACTOR`` (0.7×) — closer targets because
           TP2/TP3 are rarely reached in tight ranges.
         * Otherwise: use base ratios as-is.
+    setup_class:
+        Setup class string (e.g. "RANGE_FADE", "WHALE_MOMENTUM").  Used to
+        set ``sig.setup_class`` and, together with ``regime``, to look up
+        regime-aware signal parameters.
+    regime:
+        Market regime string (e.g. "TRENDING_UP", "RANGING", "VOLATILE").
+        When provided alongside ``setup_class``, enables per-context signal
+        parameter overrides via :func:`lookup_signal_params`.
     """
     if direction == Direction.LONG and sl >= close:
         return None
     if direction == Direction.SHORT and sl <= close:
         return None
 
+    # Look up regime-aware parameters.  When setup_class or regime are empty
+    # the lookup returns _DEFAULT which replicates the previous behaviour.
+    params = lookup_signal_params(config.name, setup_class, regime)
+
+    # Apply SL multiplier before computing TP levels.
+    sl_dist = sl_dist * params.sl_multiplier
+    if direction == Direction.LONG:
+        sl = close - sl_dist
+    else:
+        sl = close + sl_dist
+
+    # Re-validate SL after applying multiplier.
+    if direction == Direction.LONG and sl >= close:
+        return None
+    if direction == Direction.SHORT and sl <= close:
+        return None
+
+    # Determine base TP ratios: use per-context override when available,
+    # otherwise fall back to channel config.
+    base_ratios = list(params.tp_ratios) if params.tp_ratios is not None else list(config.tp_ratios)
+
     # Volatility-adaptive TP ratios: only recompute when bb_width_pct is provided.
     if bb_width_pct is not None:
         if bb_width_pct > _HIGH_VOL_BB_WIDTH:
-            adj_ratios = [r * _VOL_STRETCH_FACTOR for r in config.tp_ratios]
+            adj_ratios = [r * params.vol_stretch_factor for r in base_ratios]
         elif bb_width_pct < _LOW_VOL_BB_WIDTH:
-            adj_ratios = [r * _VOL_COMPRESS_FACTOR for r in config.tp_ratios]
+            adj_ratios = [r * params.vol_compress_factor for r in base_ratios]
         else:
-            adj_ratios = list(config.tp_ratios)
+            adj_ratios = base_ratios
         if direction == Direction.LONG:
             tp1 = close + sl_dist * adj_ratios[0]
             tp2 = close + sl_dist * adj_ratios[1]
@@ -240,6 +271,16 @@ def build_channel_signal(
             tp1 = close - sl_dist * adj_ratios[0]
             tp2 = close - sl_dist * adj_ratios[1]
             tp3 = close - sl_dist * adj_ratios[2] if len(adj_ratios) > 2 else tp3
+    elif params.tp_ratios is not None:
+        # No bb_width_pct but we have a param override — apply base_ratios directly.
+        if direction == Direction.LONG:
+            tp1 = close + sl_dist * base_ratios[0]
+            tp2 = close + sl_dist * base_ratios[1]
+            tp3 = close + sl_dist * base_ratios[2] if len(base_ratios) > 2 else tp3
+        else:
+            tp1 = close - sl_dist * base_ratios[0]
+            tp2 = close - sl_dist * base_ratios[1]
+            tp3 = close - sl_dist * base_ratios[2] if len(base_ratios) > 2 else tp3
 
     sig = Signal(
         channel=config.name,
@@ -262,17 +303,22 @@ def build_channel_signal(
         original_sl_distance=sl_dist,
     )
 
-    dca_lower, dca_upper = compute_dca_zone(
-        close, round(sl, 8), direction, config.dca_zone_range
-    )
-    sig.dca_zone_lower = dca_lower
-    sig.dca_zone_upper = dca_upper
+    if params.dca_enabled:
+        dca_lower, dca_upper = compute_dca_zone(
+            close, round(sl, 8), direction, config.dca_zone_range
+        )
+        sig.dca_zone_lower = dca_lower
+        sig.dca_zone_upper = dca_upper
     sig.original_entry = close
     sig.original_tp1 = round(tp1, 8)
     sig.original_tp2 = round(tp2, 8)
     sig.original_tp3 = round(tp3, 8)
     if setup_class:
         sig.setup_class = setup_class
+
+    # Override validity window when the params table specifies one.
+    if params.validity_minutes is not None:
+        sig.valid_for_minutes = params.validity_minutes
 
     # Direction-biased entry zone: LONGs bias below close (buy on dips),
     # SHORTs bias above close (sell on rallies).
@@ -285,11 +331,12 @@ def build_channel_signal(
     else:
         zone_center = close
 
+    bias = params.entry_zone_bias
     if direction == Direction.LONG:
-        sig.entry_zone_low = round(zone_center - zone_width * 0.7, 8)
-        sig.entry_zone_high = round(zone_center + zone_width * 0.3, 8)
+        sig.entry_zone_low = round(zone_center - zone_width * bias, 8)
+        sig.entry_zone_high = round(zone_center + zone_width * (1.0 - bias), 8)
     else:
-        sig.entry_zone_low = round(zone_center - zone_width * 0.3, 8)
-        sig.entry_zone_high = round(zone_center + zone_width * 0.7, 8)
+        sig.entry_zone_low = round(zone_center - zone_width * (1.0 - bias), 8)
+        sig.entry_zone_high = round(zone_center + zone_width * bias, 8)
 
     return sig

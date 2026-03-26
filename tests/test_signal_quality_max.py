@@ -681,7 +681,7 @@ class TestDirectionBiasedEntryZones:
         return ch._evaluate_range_fade("BTCUSDT", candles, indicators, {}, 0.01, 10_000_000)
 
     def test_long_zone_biased_below_close(self):
-        """LONG entry zone: more space below close than above (buy on dips)."""
+        """RANGE_FADE LONG entry zone: symmetric around entry (bias=0.5 for mean-reversion)."""
         import pytest
         sig = self._make_scalp_signal(direction=Direction.LONG)
         if sig is None:
@@ -689,8 +689,9 @@ class TestDirectionBiasedEntryZones:
         close = sig.entry
         below_dist = close - sig.entry_zone_low
         above_dist = sig.entry_zone_high - close
-        assert below_dist > above_dist, (
-            f"LONG zone should have more space below close: below={below_dist}, above={above_dist}"
+        # RANGE_FADE uses entry_zone_bias=0.5 (symmetric) — below and above are equal
+        assert abs(below_dist - above_dist) < 1e-6, (
+            f"RANGE_FADE LONG zone should be symmetric: below={below_dist}, above={above_dist}"
         )
 
     def test_long_entry_zone_brackets_entry(self):

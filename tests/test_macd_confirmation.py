@@ -1,7 +1,5 @@
 """Tests for MACD confirmation layer (PR_04)."""
 
-import pytest
-
 from src.filters import check_macd_confirmation
 
 

@@ -130,6 +130,7 @@ class CommandHandler:
         paper_portfolio: Optional[Any] = None,
         trade_observer: Optional[Any] = None,
         stat_filter: Optional[Any] = None,
+        portfolio_guard: Optional[Any] = None,
     ) -> None:
         self._telegram = telegram
         self._telemetry = telemetry
@@ -156,6 +157,7 @@ class CommandHandler:
         self._paper_portfolio = paper_portfolio
         self._trade_observer = trade_observer
         self._stat_filter = stat_filter
+        self._portfolio_guard = portfolio_guard
         # Mutable backtest config shared via CommandContext
         self._bt_fee_pct: float = 0.08
         self._bt_slippage_pct: float = 0.02
@@ -260,6 +262,7 @@ class CommandHandler:
             trade_observer=self._trade_observer,
             alert_subscribers=self._alert_subscribers,
             stat_filter=self._stat_filter,
+            portfolio_guard=self._portfolio_guard,
             bt_fee_pct=self._bt_fee_pct,
             bt_slippage_pct=self._bt_slippage_pct,
             bt_lookahead=self._bt_lookahead,

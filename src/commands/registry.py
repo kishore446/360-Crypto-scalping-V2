@@ -73,6 +73,7 @@ class CommandContext:
     trade_observer: Optional[Any] = None
     alert_subscribers: Set[str] = field(default_factory=set)
     stat_filter: Optional[Any] = None
+    portfolio_guard: Optional[Any] = None
     # Backtest config (mutable, shared via context)
     bt_fee_pct: float = 0.08
     bt_slippage_pct: float = 0.02

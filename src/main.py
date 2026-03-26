@@ -35,6 +35,7 @@ from src.channels.scalp_cvd import ScalpCVDChannel
 from src.channels.scalp_vwap import ScalpVWAPChannel
 from src.channels.scalp_obi import ScalpOBIChannel
 from src.circuit_breaker import CircuitBreaker
+from src.portfolio_guard import PortfolioGuard
 from src.commands import CommandHandler
 from src.detector import SMCDetector
 from src.exchange import ExchangeManager
@@ -77,6 +78,12 @@ from config import (
     EXCHANGE_SANDBOX,
     POSITION_SIZE_PCT,
     MAX_POSITION_USD,
+    PORTFOLIO_GUARD_YELLOW_PCT,
+    PORTFOLIO_GUARD_RED_PCT,
+    PORTFOLIO_GUARD_BLACK_PCT,
+    PORTFOLIO_GUARD_RED_HALT_HOURS,
+    PORTFOLIO_GUARD_BLACK_HALT_HOURS,
+    PORTFOLIO_GUARD_YELLOW_SIZE_MULT,
 )
 
 log = get_logger("main")
@@ -147,6 +154,22 @@ class CryptoSignalEngine:
             cooldown_seconds=CIRCUIT_BREAKER_COOLDOWN_SECONDS,
             alert_callback=self.telegram.send_admin_alert,
         )
+
+        # Portfolio-level drawdown guard — aggregate protection across all channels.
+        # Works alongside CircuitBreaker (per-channel) with tiered throttling.
+        self._portfolio_guard = PortfolioGuard(
+            yellow_pct=PORTFOLIO_GUARD_YELLOW_PCT,
+            red_pct=PORTFOLIO_GUARD_RED_PCT,
+            black_pct=PORTFOLIO_GUARD_BLACK_PCT,
+            red_halt_seconds=PORTFOLIO_GUARD_RED_HALT_HOURS * 3600,
+            black_halt_seconds=PORTFOLIO_GUARD_BLACK_HALT_HOURS * 3600,
+            yellow_size_multiplier=PORTFOLIO_GUARD_YELLOW_SIZE_MULT,
+            alert_callback=self.telegram.send_admin_alert,
+        )
+        # Wire guard into circuit breaker (P&L flows circuit_breaker → guard)
+        self._circuit_breaker.portfolio_guard = self._portfolio_guard
+        # Wire guard into signal router (pre-dispatch check)
+        self.router.portfolio_guard = self._portfolio_guard
 
         # Performance tracker (must be created before TradeMonitor)
         self._performance_tracker = PerformanceTracker(
@@ -320,6 +343,7 @@ class CryptoSignalEngine:
             gem_scanner=self._gem_scanner,
             paper_portfolio=self._paper_portfolio,
             trade_observer=self._trade_observer,
+            portfolio_guard=self._portfolio_guard,
         )
 
         # Bootstrap coordinates the boot/shutdown/WS sequence

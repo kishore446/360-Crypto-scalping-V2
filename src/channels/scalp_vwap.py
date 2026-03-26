@@ -43,6 +43,7 @@ class ScalpVWAPChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         # Regime gate: only valid in RANGING or QUIET
         # Note: regime_result is not directly available in evaluate(); the
@@ -51,7 +52,7 @@ class ScalpVWAPChannel(BaseChannel):
         # compatibility matrix.  For defensive validation, check ADX as a proxy.
         for tf in ("5m", "15m"):
             sig = self._evaluate_tf(
-                symbol, tf, candles, indicators, smc_data, spread_pct, volume_24h_usd
+                symbol, tf, candles, indicators, smc_data, spread_pct, volume_24h_usd, regime
             )
             if sig is not None:
                 return sig
@@ -66,6 +67,7 @@ class ScalpVWAPChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         cd = candles.get(tf)
         if cd is None or len(cd.get("close", [])) < 20:
@@ -160,6 +162,7 @@ class ScalpVWAPChannel(BaseChannel):
             atr_val=atr_val,
             vwap_price=vwap_mid,
             setup_class="VWAP_BOUNCE",
+            regime=regime,
         )
 
         return sig

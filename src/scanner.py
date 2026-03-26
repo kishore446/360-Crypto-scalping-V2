@@ -1168,6 +1168,7 @@ class Scanner:
                 smc_data=ctx.smc_data,
                 spread_pct=ctx.spread_pct,
                 volume_24h_usd=volume_24h,
+                regime=ctx.regime_result.regime.value,
             )
         except Exception as exc:
             log.debug("Channel {} eval error for {}: {}", chan_name, symbol, exc)

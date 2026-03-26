@@ -18,7 +18,6 @@ from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import (
     check_adx,
     check_rsi_regime,
-    check_ema_alignment_regime,
     check_ema_alignment_adaptive,
 )
 from src.smc import Direction

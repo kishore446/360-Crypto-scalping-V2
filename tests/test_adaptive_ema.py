@@ -1,7 +1,5 @@
 """Tests for adaptive EMA thresholds (PR_03)."""
 
-import pytest
-
 from src.filters import check_ema_alignment_adaptive
 
 

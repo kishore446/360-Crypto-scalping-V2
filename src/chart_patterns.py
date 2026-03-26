@@ -585,8 +585,6 @@ def detect_morning_evening_star(
     list of PatternResult
     """
     o_arr = np.asarray(opens, dtype=np.float64).ravel()
-    h_arr = np.asarray(highs, dtype=np.float64).ravel()
-    lo_arr = np.asarray(lows, dtype=np.float64).ravel()
     c_arr = np.asarray(closes, dtype=np.float64).ravel()
     if len(c_arr) < 3:
         return []

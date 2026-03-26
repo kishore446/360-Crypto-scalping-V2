@@ -30,7 +30,7 @@ the signal validation pipeline after indicator calculations are available.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from src.utils import get_logger
 
@@ -112,6 +112,7 @@ def compute_mtf_confluence(
     signal_direction: str,
     timeframes: Dict[str, Dict[str, float]],
     min_score: float = MTF_MIN_SCORE,
+    tf_weight_overrides: Optional[Dict[str, float]] = None,
 ) -> MTFResult:
     """Evaluate trend alignment across multiple timeframes.
 
@@ -127,6 +128,11 @@ def compute_mtf_confluence(
         Minimum fraction of timeframes that must agree with the signal
         direction to be considered aligned.  Defaults to
         :data:`MTF_MIN_SCORE`.
+    tf_weight_overrides:
+        Optional mapping of timeframe label → weight override.  When
+        provided, these weights replace the defaults from :data:`_TF_WEIGHTS`
+        for the specified timeframes.  Use this to apply regime-specific
+        higher/lower TF weight multipliers without modifying the global table.
 
     Returns
     -------
@@ -155,7 +161,11 @@ def compute_mtf_confluence(
             close=close,
         ))
 
-        weight = _TF_WEIGHTS.get(tf_label, 1.0)
+        weight = (
+            tf_weight_overrides[tf_label]
+            if tf_weight_overrides and tf_label in tf_weight_overrides
+            else _TF_WEIGHTS.get(tf_label, 1.0)
+        )
         weighted_total += weight
 
         wanted = "BULLISH" if direction == "LONG" else "BEARISH"
@@ -205,6 +215,7 @@ def check_mtf_gate(
     signal_direction: str,
     timeframes: Dict[str, Dict[str, float]],
     min_score: float = MTF_MIN_SCORE,
+    tf_weight_overrides: Optional[Dict[str, float]] = None,
 ) -> tuple[bool, str]:
     """Pipeline hook: return ``(allowed, reason)`` for the MTF confluence gate.
 
@@ -219,6 +230,11 @@ def check_mtf_gate(
         Same format as :func:`compute_mtf_confluence`.
     min_score:
         Minimum passing score.
+    tf_weight_overrides:
+        Optional per-timeframe weight overrides passed through to
+        :func:`compute_mtf_confluence`.  Allows callers (e.g. the scanner's
+        regime-weighted MTF gate) to adjust how much each timeframe
+        contributes without modifying the global weight table.
 
     Returns
     -------
@@ -228,7 +244,7 @@ def check_mtf_gate(
     if not timeframes:
         return True, ""
 
-    result = compute_mtf_confluence(signal_direction, timeframes, min_score)
+    result = compute_mtf_confluence(signal_direction, timeframes, min_score, tf_weight_overrides)
     if result.total_count == 0:
         return True, ""
 

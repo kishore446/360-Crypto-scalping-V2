@@ -91,6 +91,34 @@ class SpotChannel(BaseChannel):
         return None
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _bb_squeeze_threshold(self, atr_val: float, close: float) -> float:
+        """Return the ATR-normalized Bollinger squeeze threshold.
+
+        Scales the maximum allowed BB width with pair-specific volatility so
+        that high-ATR altcoins are not blocked by BTC-centric thresholds.
+        Clamped to [2.0, 6.0].
+        """
+        atr_pct = (atr_val / close * 100) if close > 0 else 1.0
+        return max(2.0, min(6.0, atr_pct * 3.0))
+
+    def _volume_expansion_mult(self) -> float:
+        """Return the regime-adjusted volume expansion multiplier.
+
+        * QUIET / RANGING : 2.2× — any volume expansion should be meaningful
+        * VOLATILE        : 1.5× — volume is naturally elevated
+        * Default         : 1.8× (TRENDING or unknown)
+        """
+        regime_upper = self._current_regime.upper() if self._current_regime else ""
+        if regime_upper in ("QUIET", "RANGING"):
+            return 2.2
+        if regime_upper == "VOLATILE":
+            return 1.5
+        return 1.8
+
+    # ------------------------------------------------------------------
     # LONG signal builder
     # ------------------------------------------------------------------
 
@@ -109,9 +137,12 @@ class SpotChannel(BaseChannel):
         mss: object,
     ) -> Optional[Signal]:
         """Attempt to build a LONG spot signal."""
-        # Bollinger squeeze detection: require tight BB before breakout
-        if bb_width is not None and bb_width > 4.0:
-            return None  # Not squeezing, not a real accumulation pattern
+        # ATR-normalized Bollinger squeeze detection.
+        # Scale the squeeze threshold with pair-specific volatility so that
+        # high-ATR altcoins aren't blocked by BTC-centric thresholds.
+        if bb_width is not None:
+            if bb_width > self._bb_squeeze_threshold(atr_val, close):
+                return None  # Not squeezing, not a real accumulation pattern
 
         # Accumulation breakout: price must clear recent H4 resistance
         # using an ATR-adaptive threshold instead of a fixed 0.2% proximity.
@@ -122,12 +153,12 @@ class SpotChannel(BaseChannel):
         if close < recent_high + breakout_buffer:
             return None  # No confirmed breakout — candle must close above resistance + buffer
 
-        # Volume expansion
+        # Volume expansion — threshold scales with regime via _volume_expansion_mult().
         if len(volumes) < 10 or len(closes_list) < 10:
             return None
         usd_volumes = [float(v) * float(c) for v, c in zip(volumes[-10:], closes_list[-10:])]
         avg_usd_vol = sum(usd_volumes[:-1]) / 9
-        if usd_volumes[-1] < avg_usd_vol * 1.8:
+        if usd_volumes[-1] < avg_usd_vol * self._volume_expansion_mult():
             return None
 
         # SMC: bearish structure contradicts LONG
@@ -205,9 +236,10 @@ class SpotChannel(BaseChannel):
         * SMC bullish MSS contradicts SHORT → skip
         * RSI oversold gate (< 25) prevents chasing drops
         """
-        # Bollinger squeeze
-        if bb_width is not None and bb_width > 4.0:
-            return None
+        # ATR-normalized Bollinger squeeze detection (mirrors _try_long).
+        if bb_width is not None:
+            if bb_width > self._bb_squeeze_threshold(atr_val, close):
+                return None
 
         # Distribution breakdown: price must breach recent H4 support
         # using an ATR-adaptive threshold instead of a fixed 0.2% proximity.
@@ -218,12 +250,12 @@ class SpotChannel(BaseChannel):
         if close > recent_low - breakdown_buffer:
             return None  # No confirmed breakdown
 
-        # Volume expansion on the down-move
+        # Volume expansion on the down-move — regime-adjusted multiplier.
         if len(volumes) < 10 or len(closes_list) < 10:
             return None
         usd_volumes = [float(v) * float(c) for v, c in zip(volumes[-10:], closes_list[-10:])]
         avg_usd_vol = sum(usd_volumes[:-1]) / 9
-        if usd_volumes[-1] < avg_usd_vol * 1.8:
+        if usd_volumes[-1] < avg_usd_vol * self._volume_expansion_mult():
             return None
 
         # SMC: bullish structure contradicts SHORT

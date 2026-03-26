@@ -66,7 +66,7 @@ from src.confidence_decay import apply_confidence_decay
 from src.cross_asset import AssetState, check_cross_asset_gate
 from src.feedback_loop import FeedbackLoop
 from src.kill_zone import check_kill_zone_gate
-from src.mtf import check_mtf_gate, compute_mtf_confluence
+from src.mtf import check_mtf_gate, compute_mtf_confluence, _TF_WEIGHTS as _MTF_TF_WEIGHTS
 from src.oi_filter import analyse_oi, check_oi_gate
 from src.pair_manager import PairTier
 from src.spoof_detect import check_spoof_gate
@@ -134,6 +134,21 @@ _REGIME_PENALTY_MULTIPLIER: Dict[str, float] = {
     "RANGING":       1.0,   # Mean-reversion market, all quality gates at full weight
     "VOLATILE":      1.5,   # High chaos = more false signals, amplify penalties
     "QUIET":         0.8,   # Low volume but stable, gates fire often on thin data
+}
+
+# Regime-specific MTF confluence configuration.
+# min_score   — the minimum passing score for the hard MTF gate.
+# higher_tf_weight — multiplier applied to 4h/1d weights (trend confirmation).
+# lower_tf_weight  — multiplier applied to 1m/5m weights (entry precision).
+# In TRENDING regimes the higher-TF alignment is critical; in RANGING the
+# lower-TF precision matters more; in VOLATILE, MTF is relaxed because
+# timeframes often diverge during volatile markets.
+_MTF_REGIME_CONFIG: Dict[str, Dict[str, float]] = {
+    "TRENDING_UP":   {"min_score": 0.6, "higher_tf_weight": 1.5, "lower_tf_weight": 0.8},
+    "TRENDING_DOWN": {"min_score": 0.6, "higher_tf_weight": 1.5, "lower_tf_weight": 0.8},
+    "RANGING":       {"min_score": 0.3, "higher_tf_weight": 0.7, "lower_tf_weight": 1.4},
+    "VOLATILE":      {"min_score": 0.2, "higher_tf_weight": 1.0, "lower_tf_weight": 1.0},
+    "QUIET":         {"min_score": 0.4, "higher_tf_weight": 0.8, "lower_tf_weight": 1.2},
 }
 
 # Per-channel SMC timeframe preference order.
@@ -1190,14 +1205,39 @@ class Scanner:
             return None, None
 
         # ── Filter 1: MTF Confluence Gate ──────────────────────────────────
-        # Relaxed min_score for scalp signals (range-fade setups need less confluence)
+        # Resolve the regime key early so regime-specific MTF config can
+        # adjust the min_score and per-TF weight multipliers below.
+        # (The same key is reused later for the regime penalty multiplier.)
+        _regime_name = getattr(ctx.regime_result, "regime", None)
+        if _regime_name is None:
+            _regime_key = ""
+        elif hasattr(_regime_name, "value"):
+            _regime_key = _regime_name.value
+        else:
+            _regime_key = str(_regime_name)
+
         # Look up this channel's gate profile and penalty weights.
         # Unknown channels default to an empty profile (all gates on via .get(key, True))
         # and empty weights (gate-specific defaults apply via .get(key, default)).
         _gate_profile = _CHANNEL_GATE_PROFILE.get(chan_name, {})
         _penalty_weights = _CHANNEL_PENALTY_WEIGHTS.get(chan_name, {})
         if _gate_profile.get("mtf", True):
-            _mtf_min_score = 0.4 if chan_name == "360_SCALP" else 0.5
+            # Base MTF min_score: relaxed for SCALP (range-fade setups need less confluence)
+            _base_mtf_min_score = 0.4 if chan_name == "360_SCALP" else 0.5
+            # Override with regime-specific min_score when configured
+            _mtf_cfg = _MTF_REGIME_CONFIG.get(_regime_key, {})
+            _mtf_min_score = _mtf_cfg.get("min_score", _base_mtf_min_score)
+            # Build TF weight overrides from the regime config
+            _higher_tfs = {"4h", "1d"}
+            _lower_tfs = {"1m", "5m", "15m"}
+            _tf_weight_overrides: Dict[str, float] = {}
+            if _mtf_cfg:
+                _hw = _mtf_cfg.get("higher_tf_weight", 1.0)
+                _lw = _mtf_cfg.get("lower_tf_weight", 1.0)
+                for _tf in _higher_tfs:
+                    _tf_weight_overrides[_tf] = _MTF_TF_WEIGHTS.get(_tf, 1.0) * _hw
+                for _tf in _lower_tfs:
+                    _tf_weight_overrides[_tf] = _MTF_TF_WEIGHTS.get(_tf, 1.0) * _lw
             mtf_data: Dict[str, Dict[str, float]] = {}
             for tf_label, ind in ctx.indicators.items():
                 ema_fast = ind.get("ema9_last")
@@ -1210,19 +1250,17 @@ class Scanner:
                         "ema_slow": float(ema_slow),
                         "close": float(closes[-1]),
                     }
-            mtf_allowed, mtf_reason = check_mtf_gate(sig.direction.value, mtf_data, min_score=_mtf_min_score)
+            mtf_allowed, mtf_reason = check_mtf_gate(
+                sig.direction.value,
+                mtf_data,
+                min_score=_mtf_min_score,
+                tf_weight_overrides=_tf_weight_overrides or None,
+            )
             if not mtf_allowed:
                 log.debug("MTF gate blocked {} {}: {}", symbol, chan_name, mtf_reason)
                 return None, None
 
         # Resolve regime penalty multiplier for all soft gates below
-        _regime_name = getattr(ctx.regime_result, "regime", None)
-        if _regime_name is None:
-            _regime_key = ""
-        elif hasattr(_regime_name, "value"):
-            _regime_key = _regime_name.value
-        else:
-            _regime_key = str(_regime_name)
         regime_mult = _REGIME_PENALTY_MULTIPLIER.get(_regime_key, 1.0)
 
         # ── Filter 2: VWAP Extension Rejection ─────────────────────────────

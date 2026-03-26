@@ -32,6 +32,37 @@ class ScalpChannel(BaseChannel):
     def __init__(self) -> None:
         super().__init__(CHANNEL_SCALP)
 
+    def _select_indicator_weights(self, regime: str) -> dict:
+        """Return indicator weight multipliers for the current regime.
+
+        The weights are applied as a confidence boost multiplier to each
+        candidate signal so that regime-appropriate setups are preferred
+        when multiple candidates are available.
+
+        Parameters
+        ----------
+        regime:
+            Current market regime string (e.g. ``"VOLATILE"``, ``"QUIET"``).
+
+        Returns
+        -------
+        dict
+            Keys: ``"order_flow"``, ``"trend"``, ``"mean_reversion"``,
+            ``"volume"``.  Values are float multipliers (>1 boosts,
+            <1 suppresses).
+        """
+        regime_upper = regime.upper() if regime else ""
+        if regime_upper == "VOLATILE":
+            # Order flow signals more reliable in volatile markets
+            return {"order_flow": 1.5, "trend": 0.7, "mean_reversion": 0.5, "volume": 1.3}
+        if regime_upper in ("QUIET", "RANGING"):
+            # Mean-reversion signals more reliable in ranging/quiet markets
+            return {"order_flow": 0.7, "trend": 0.5, "mean_reversion": 1.5, "volume": 0.8}
+        if regime_upper in ("TRENDING_UP", "TRENDING_DOWN"):
+            # Trend-following signals preferred in trending markets
+            return {"order_flow": 1.0, "trend": 1.5, "mean_reversion": 0.3, "volume": 1.0}
+        return {"order_flow": 1.0, "trend": 1.0, "mean_reversion": 1.0, "volume": 1.0}
+
     def evaluate(
         self,
         symbol: str,
@@ -42,22 +73,26 @@ class ScalpChannel(BaseChannel):
         volume_24h_usd: float,
         regime: str = "",
     ) -> Optional[Signal]:
-        # Evaluate all three paths and return the one with the best R-multiple.
-        # This ensures that a marginal standard-path signal never blocks a
-        # higher-quality RANGE_FADE or WHALE_MOMENTUM opportunity.
+        # Evaluate all three paths and return the one with the best R-multiple,
+        # adjusted by regime-specific indicator weight multipliers so that the
+        # most appropriate signal type is preferred for the current market regime.
+        weights = self._select_indicator_weights(regime)
         candidates = []
-        for evaluator in (
-            self._evaluate_standard,
-            self._evaluate_range_fade,
-            self._evaluate_whale_momentum,
+        for evaluator, weight_key in (
+            (self._evaluate_standard,       "trend"),
+            (self._evaluate_range_fade,     "mean_reversion"),
+            (self._evaluate_whale_momentum, "order_flow"),
         ):
             sig = evaluator(symbol, candles, indicators, smc_data, spread_pct, volume_24h_usd, regime)
             if sig is not None:
+                # Boost the effective R-multiple by the regime weight so that
+                # regime-preferred signal types rank higher in the max() selection.
+                sig._regime_adjusted_r = sig.r_multiple * weights[weight_key]
                 candidates.append(sig)
         if not candidates:
             return None
-        # Return the candidate with the best risk-reward (highest R-multiple)
-        best = max(candidates, key=lambda s: s.r_multiple)
+        # Return the candidate with the best regime-adjusted risk-reward
+        best = max(candidates, key=lambda s: getattr(s, "_regime_adjusted_r", s.r_multiple))
         # Apply kill zone check and mark reduced-conviction signals
         self._apply_kill_zone_note(best)
         return best

@@ -404,7 +404,10 @@ class TestRegimeTagging:
             "low": np.linspace(98, 108, n).tolist(),
             "volume": [1e6] * n,
         }
-        result = bt.run(hist, tag_regimes=True)
+        results = bt.run(hist, tag_regimes=True)
+        assert isinstance(results, list)
+        assert len(results) == 1
+        result = results[0]
         assert isinstance(result, BacktestResult)
         for detail in result.signal_details:
             assert "regime" in detail
@@ -420,8 +423,10 @@ class TestRegimeTagging:
             "low": [99.8] * n,
             "volume": [1e6] * n,
         }
-        result = bt.run(hist, tag_regimes=True)
-        assert isinstance(result, BacktestResult)
+        results = bt.run(hist, tag_regimes=True)
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert isinstance(results[0], BacktestResult)
 
 
 class TestWalkForwardValidation:

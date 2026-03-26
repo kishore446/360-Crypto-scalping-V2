@@ -447,13 +447,13 @@ class Backtester:
         simulated_ai_score: float = 0.0,
         config: Optional[BacktestConfig] = None,
         tag_regimes: bool = False,
-    ) -> Union[List[BacktestResult], BacktestResult]:
+    ) -> List[BacktestResult]:
         """Run backtest across all (or one) channel(s).
 
         When ``config`` or ``tag_regimes`` is provided, the method runs in
         *flat-data mode*: ``candles_by_tf`` is treated as a plain OHLCV dict
         (keys ``"close"``, ``"high"``, ``"low"``, ``"open"``, ``"volume"``),
-        and a single :class:`BacktestResult` is returned.
+        and a single-element list is returned.
 
         Without those parameters the method behaves as before: it expects a
         multi-timeframe dict (keys are timeframe strings such as ``"5m"``) and
@@ -485,18 +485,18 @@ class Backtester:
             trading), pass a negative value such as ``-0.5``.
         config:
             :class:`BacktestConfig` for the flat-data mode.  Activates
-            per-pair / per-config sweep path and returns a single result.
+            per-pair / per-config sweep path.
         tag_regimes:
             When ``True``, attach regime labels to every recorded signal detail.
-            Activates the flat-data mode and returns a single result.
+            Activates the flat-data mode.
 
         Returns
         -------
-        ``List[BacktestResult]`` in the standard multi-TF path, or a single
-        :class:`BacktestResult` when ``config`` or ``tag_regimes`` is supplied.
+        ``List[BacktestResult]``, one per channel (standard path) or a
+        single-element list (flat-data mode).
         """
         if config is not None or tag_regimes:
-            return self._run_with_flat_data(candles_by_tf, config=config, tag_regimes=tag_regimes)
+            return [self._run_with_flat_data(candles_by_tf, config=config, tag_regimes=tag_regimes)]
 
         channels = self._channels
         if channel_name:
@@ -563,7 +563,7 @@ class Backtester:
             results[pair] = []
             for cfg in configs:
                 cfg.pair = pair
-                result = self.run(historical_data, config=cfg, tag_regimes=True)
+                result = self._run_with_flat_data(historical_data, config=cfg, tag_regimes=True)
                 result.channel = f"{result.channel}[{pair}]"
                 results[pair].append(result)
         return results

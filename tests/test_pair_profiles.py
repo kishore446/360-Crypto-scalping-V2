@@ -1,8 +1,6 @@
 """Tests for per-pair config profiles (PR_02)."""
 
-import pytest
-
-from config import PairProfile, PAIR_PROFILES, PAIR_TIER_MAP
+from config import PAIR_PROFILES, PAIR_TIER_MAP
 from src.pair_manager import classify_pair_tier
 
 

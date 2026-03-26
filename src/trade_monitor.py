@@ -29,6 +29,7 @@ from src.indicators import ema as _compute_ema
 from src.indicators import momentum as _compute_momentum
 from src.performance_metrics import calculate_trade_pnl_pct, classify_trade_outcome
 from src.smc import Direction
+from src.stat_filter import SignalOutcome
 from src.utils import fmt_price, fmt_ts, get_logger, utcnow
 
 log = get_logger("trade_monitor")
@@ -173,6 +174,7 @@ class TradeMonitor:
         indicators_fn: Optional[Callable] = None,
         paper_portfolio: Optional[Any] = None,
         order_manager: Optional[Any] = None,
+        stat_filter: Optional[Any] = None,
     ) -> None:
         self._store = data_store
         self._send = send_telegram
@@ -208,6 +210,9 @@ class TradeMonitor:
         # Optional AI Trade Observer — captures full trade lifecycle data.
         # Set after construction (e.g. in main.py after router.observer is wired).
         self.observer: Optional[Any] = None
+        # Optional StatisticalFilter — records resolved signal outcomes so the
+        # rolling win-rate store can adapt confidence gating over time.
+        self._stat_filter = stat_filter
 
     def _record_outcome(self, sig: Signal, hit_tp: int, hit_sl: bool) -> None:
         """Notify performance tracker and circuit breaker of a completed signal.
@@ -321,6 +326,25 @@ class TradeMonitor:
                 self.observer.capture_exit_analysis(sig, outcome_label, actual_pnl)
             except Exception as exc:
                 log.debug("TradeObserver.capture_exit_analysis failed (non-critical): {}", exc)
+
+        # Statistical filter outcome recording — updates rolling win-rate store
+        # so the filter can penalise or suppress future signals from poor
+        # (channel, pair, regime) combinations.
+        if self._stat_filter is not None:
+            try:
+                won = signal_quality_hit_tp >= 1
+                _sf_outcome = SignalOutcome(
+                    signal_id=sig.signal_id,
+                    channel=sig.channel,
+                    pair=sig.symbol,
+                    regime=getattr(sig, "entry_regime", "") or "",
+                    setup_class=sig.setup_class or "",
+                    won=won,
+                    pnl_pct=signal_quality_pnl,
+                )
+                self._stat_filter.record(_sf_outcome)
+            except Exception as exc:
+                log.debug("stat_filter.record failed (non-critical): {}", exc)
 
     @staticmethod
     def _set_realized_pnl(sig: Signal, exit_price: float) -> None:

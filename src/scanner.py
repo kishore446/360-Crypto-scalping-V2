@@ -77,11 +77,16 @@ from src.volume_divergence import check_volume_divergence_gate
 from src.vwap import check_vwap_extension, compute_vwap
 from src.ai_engine import get_ai_insight
 from src.chart_patterns import detect_patterns, pattern_confidence_bonus, detect_all_patterns
+from src.stat_filter import StatisticalFilter, SignalOutcome
 
 log = get_logger("scanner")
 
 # Composite signal scoring engine — instantiated once at module level.
 _scoring_engine = SignalScoringEngine()
+
+# Statistical filter — tracks rolling win rates per (channel, pair, regime)
+# and suppresses or penalises signals from historically poor combinations.
+_stat_filter = StatisticalFilter()
 
 # Order book spread cache TTL and per-cycle fetch cap
 _SPREAD_CACHE_TTL: float = 30.0
@@ -1745,6 +1750,28 @@ class Scanner:
             )
         except Exception as _score_exc:
             log.debug("PR09 scoring engine error for {} {} (fail open): {}", symbol, chan_name, _score_exc)
+
+        # ── PR_12: Statistical False-Positive Filter ──────────────────────
+        # Apply rolling win-rate gate after scoring. Fail-open when no history.
+        try:
+            _sf_allow, _sf_conf, _sf_reason = _stat_filter.check(
+                channel=chan_name,
+                pair=symbol,
+                regime=_regime_key,
+                current_confidence=sig.confidence,
+            )
+            if not _sf_allow:
+                log.debug(
+                    "stat_filter suppressed {}/{}: {}",
+                    symbol, chan_name, _sf_reason,
+                )
+                return None, cross_verified
+            sig.confidence = _sf_conf
+            if "penalty" in _sf_reason:
+                _existing_flags = sig.soft_gate_flags or ""
+                sig.soft_gate_flags = (_existing_flags + f",{_sf_reason}").lstrip(",")
+        except Exception as _sf_exc:
+            log.debug("stat_filter error for {} {} (fail open): {}", symbol, chan_name, _sf_exc)
 
         min_conf = self.confidence_overrides.get(chan_name, chan.config.min_confidence)
         # WATCHLIST tier: signals with confidence 50-64 are kept as WATCHLIST

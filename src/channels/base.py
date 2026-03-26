@@ -31,6 +31,34 @@ _VOL_COMPRESS_FACTOR: float = 0.7  # Low-vol: compress TP targets
 
 
 @dataclass
+class TrailingStopState:
+    """Encapsulates the dynamic trailing stop configuration for a live signal.
+
+    Used by the trade monitor to compute the current trailing stop level.
+    """
+    initial_atr: float                # ATR at signal creation
+    current_atr: float = 0.0         # ATR from most recent lifecycle check
+    stage: int = 0                   # 0=entry, 1=TP1 hit, 2=TP2 hit
+    breakeven_set: bool = False      # Whether SL has been moved to breakeven
+    tight_trail_active: bool = False # Whether the tight 0.5× ATR trail is active
+
+    @property
+    def effective_mult(self) -> float:
+        """ATR multiple for the current stage."""
+        if self.stage == 2:
+            return 0.5     # Post-TP2: tight trail
+        if self.stage == 1:
+            return 1.0     # Post-TP1: intermediate trail
+        return 2.0         # Entry: standard trail
+
+    @property
+    def trail_distance(self) -> float:
+        """Absolute trailing distance using current ATR."""
+        atr = self.current_atr if self.current_atr > 0 else self.initial_atr
+        return atr * self.effective_mult
+
+
+@dataclass
 class Signal:
     """Represents a single trade signal."""
     channel: str
@@ -43,6 +71,9 @@ class Signal:
     tp3: Optional[float] = None
     trailing_active: bool = True
     trailing_desc: str = ""
+    trailing_atr_mult_effective: float = 0.0   # Current trailing ATR multiple (updates during trade)
+    trailing_stage: int = 0                     # 0=initial, 1=TP1_hit (breakeven), 2=TP2_hit (tight trail)
+    partial_close_pct: float = 0.0             # Fraction of position notionally closed
     confidence: float = 0.0
     ai_sentiment_label: str = "Neutral"
     ai_sentiment_summary: str = ""

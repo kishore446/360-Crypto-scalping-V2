@@ -1863,3 +1863,121 @@ class TestOnHighlightCallback:
         # Should not raise even when TP2 is hit
         sig.current_price = 30300.0
         await monitor._evaluate_signal(sig)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Tests for stage-aware trailing stop logic (PR_08)
+# ---------------------------------------------------------------------------
+
+class TestTrailingStopStageTransitions:
+    """Tests for _compute_trailing_stop and _update_trailing_stage."""
+
+    def test_trailing_stage_0_initial_trail(self):
+        """Stage 0: standard 2× ATR trailing distance."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _compute_trailing_stop
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=49800.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+        )
+        new_sl = _compute_trailing_stop(sig, 50300.0, 100.0, state, atr_percentile=50.0)
+        # Stage 0 → 2.0× ATR = 200; candidate = 50300 - 200 = 50100; max(49800, 50100) = 50100
+        assert new_sl == 50100.0
+
+    def test_trailing_stage_1_breakeven(self):
+        """Stage 1 (TP1 hit): 1.0× ATR trailing, SL at breakeven."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _update_trailing_stage
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=49800.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+        )
+        _update_trailing_stage(sig, 50600.0, state)  # Price above TP1
+        assert state.stage == 1
+        assert sig.trailing_stage == 1
+        assert sig.stop_loss == 50000.0  # Moved to breakeven
+        assert sig.partial_close_pct == 0.4
+
+    def test_trailing_stage_2_tight_trail(self):
+        """Stage 2 (TP2 hit): 0.5× ATR tight trail."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _update_trailing_stage, _compute_trailing_stop
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=1)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=50000.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+            trailing_stage=1,
+        )
+        _update_trailing_stage(sig, 51100.0, state)  # Price above TP2
+        assert state.stage == 2
+        assert sig.trailing_stage == 2
+        assert sig.partial_close_pct == 0.7
+        # Tight trail: 0.5 × 100 = 50; candidate = 51100 - 50 = 51050
+        new_sl = _compute_trailing_stop(sig, 51100.0, 100.0, state, atr_percentile=50.0)
+        assert new_sl == 51050.0
+
+    def test_trailing_high_vol_widens_buffer(self):
+        """High ATR percentile widens trailing buffer by 1.3×."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _compute_trailing_stop
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=49700.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+        )
+        new_sl = _compute_trailing_stop(sig, 50300.0, 100.0, state, atr_percentile=90.0)
+        # Stage 0 → 2.0× ATR = 200; vol_adj 1.3 → trail = 260; candidate = 50300 - 260 = 50040
+        assert new_sl == 50040.0
+
+    def test_trailing_low_vol_tightens_buffer(self):
+        """Low ATR percentile tightens trailing buffer by 0.7×."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _compute_trailing_stop
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=49800.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+        )
+        new_sl = _compute_trailing_stop(sig, 50300.0, 100.0, state, atr_percentile=10.0)
+        # Stage 0 → 2.0× ATR = 200; vol_adj 0.7 → trail = 140; candidate = 50300 - 140 = 50160
+        assert new_sl == 50160.0
+
+    def test_trailing_never_widens_for_long(self):
+        """SL should never move backwards (lower) for a LONG trade."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _compute_trailing_stop
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.LONG,
+            entry=50000.0, stop_loss=50200.0, tp1=50500.0, tp2=51000.0, tp3=51500.0,
+        )
+        # Price at 50300 → candidate = 50300 - 200 = 50100 < current SL 50200
+        new_sl = _compute_trailing_stop(sig, 50300.0, 100.0, state, atr_percentile=50.0)
+        assert new_sl == 50200.0  # Should not move backwards
+
+    def test_trailing_short_direction(self):
+        """Trailing stop works correctly for SHORT direction."""
+        from src.channels.base import TrailingStopState
+        from src.trade_monitor import _compute_trailing_stop, _update_trailing_stage
+
+        state = TrailingStopState(initial_atr=100.0, current_atr=100.0, stage=0)
+        sig = Signal(
+            channel="SCALP", symbol="BTCUSDT", direction=Direction.SHORT,
+            entry=50000.0, stop_loss=50200.0, tp1=49500.0, tp2=49000.0, tp3=48500.0,
+        )
+        new_sl = _compute_trailing_stop(sig, 49700.0, 100.0, state, atr_percentile=50.0)
+        # Stage 0 → 2.0× ATR = 200; candidate = 49700 + 200 = 49900; min(50200, 49900) = 49900
+        assert new_sl == 49900.0
+
+        # TP1 hit for short
+        _update_trailing_stage(sig, 49400.0, state)
+        assert state.stage == 1
+        assert sig.stop_loss == 50000.0  # Breakeven

@@ -21,7 +21,7 @@ from config import (
     MONITOR_POLL_INTERVAL,
     TRAILING_ATR_MULTIPLIER,
 )
-from src.channels.base import Signal
+from src.channels.base import Signal, TrailingStopState
 from src.dca import check_dca_entry, recalculate_after_dca
 from src.historical_data import HistoricalDataStore
 from src.indicators import atr as _compute_atr
@@ -45,6 +45,109 @@ _STOP_OUTCOME_MESSAGES = {
 # Seconds of grace after a DCA entry before invalidation checks are allowed.
 # Gives the averaged position time to develop without being killed prematurely.
 _DCA_GRACE_SECONDS = 600
+
+
+def _compute_trailing_stop(
+    signal: Signal,
+    current_price: float,
+    current_atr: float,
+    trailing_state: TrailingStopState,
+    atr_percentile: float = 50.0,
+) -> float:
+    """Compute the new trailing stop level based on current stage and ATR.
+
+    Parameters
+    ----------
+    signal:
+        Active signal with direction, entry, current stop_loss.
+    current_price:
+        Latest market price.
+    current_atr:
+        ATR computed from the most recent candles (updated each lifecycle poll).
+    trailing_state:
+        Mutable state tracking the trailing stop stage.
+    atr_percentile:
+        Rolling ATR percentile 0–100 (from RegimeContext).
+
+    Returns
+    -------
+    float
+        New stop-loss level. Will only ratchet tighter (never widen) for the
+        direction of the trade.
+    """
+    # Update the trailing state with current ATR
+    trailing_state.current_atr = current_atr
+
+    # ATR-percentile adjustment: wider buffer in high-vol, tighter in low-vol
+    if atr_percentile >= 80:
+        vol_adj = 1.3
+    elif atr_percentile <= 20:
+        vol_adj = 0.7
+    else:
+        vol_adj = 1.0
+
+    trail_dist = trailing_state.trail_distance * vol_adj
+
+    if signal.direction == Direction.LONG:
+        candidate_sl = current_price - trail_dist
+        # Never move SL backwards (lower) for a long trade
+        new_sl = max(signal.stop_loss, candidate_sl)
+    else:
+        candidate_sl = current_price + trail_dist
+        # Never move SL backwards (higher) for a short trade
+        new_sl = min(signal.stop_loss, candidate_sl)
+
+    return round(new_sl, 8)
+
+
+def _update_trailing_stage(
+    signal: Signal,
+    current_price: float,
+    trailing_state: TrailingStopState,
+) -> None:
+    """Check if TP levels have been hit and advance trailing stage.
+
+    Mutates both signal and trailing_state in place.
+    """
+    if trailing_state.stage >= 2:
+        return  # Already at final stage
+
+    if trailing_state.stage == 0:
+        # Check for TP1 hit
+        if signal.direction == Direction.LONG and current_price >= signal.tp1:
+            trailing_state.stage = 1
+            trailing_state.breakeven_set = True
+            signal.trailing_stage = 1
+            signal.partial_close_pct = 0.4
+            signal.best_tp_hit = max(signal.best_tp_hit, 1)
+            signal.execution_note += " | TP1 hit → 40% closed, SL→breakeven"
+            # Move SL to breakeven (entry price)
+            signal.stop_loss = signal.entry
+        elif signal.direction == Direction.SHORT and current_price <= signal.tp1:
+            trailing_state.stage = 1
+            trailing_state.breakeven_set = True
+            signal.trailing_stage = 1
+            signal.partial_close_pct = 0.4
+            signal.best_tp_hit = max(signal.best_tp_hit, 1)
+            signal.execution_note += " | TP1 hit → 40% closed, SL→breakeven"
+            signal.stop_loss = signal.entry
+
+    if trailing_state.stage == 1:
+        # Check for TP2 hit
+        if signal.direction == Direction.LONG and current_price >= signal.tp2:
+            trailing_state.stage = 2
+            trailing_state.tight_trail_active = True
+            signal.trailing_stage = 2
+            signal.partial_close_pct = 0.7  # Cumulative: 40% at TP1 + 30% at TP2
+            signal.best_tp_hit = max(signal.best_tp_hit, 2)
+            signal.execution_note += " | TP2 hit → 70% closed, tight 0.5×ATR trail"
+        elif signal.direction == Direction.SHORT and current_price <= signal.tp2:
+            trailing_state.stage = 2
+            trailing_state.tight_trail_active = True
+            signal.trailing_stage = 2
+            signal.partial_close_pct = 0.7
+            signal.best_tp_hit = max(signal.best_tp_hit, 2)
+            signal.execution_note += " | TP2 hit → 70% closed, tight 0.5×ATR trail"
 
 
 def _escape_md(text: str) -> str:

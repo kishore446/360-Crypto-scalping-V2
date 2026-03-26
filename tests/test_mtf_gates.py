@@ -1,4 +1,3 @@
-import pytest
 from src.mtf import (
     check_mtf_ema_alignment,
     check_mtf_rsi,

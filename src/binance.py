@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Callable, Dict, List, Optional
+from collections import deque
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 import aiohttp
 
@@ -44,6 +45,11 @@ _DEPTH_TIMEOUT_S: float = 5.0
 # Depth endpoint paths — used by the per-endpoint circuit breaker.
 _DEPTH_PATHS: frozenset = frozenset({"/fapi/v1/depth", "/api/v3/depth"})
 
+# Sliding-window duration for the depth circuit breaker (seconds).
+# Timeouts within this window count toward the threshold even if
+# successful calls occur in between.
+_DEPTH_CB_WINDOW_S: float = 60.0
+
 
 class BinanceClient:
     """Async Binance REST client with rate-limit tracking and retry logic.
@@ -76,10 +82,10 @@ class BinanceClient:
         self._rate_limiter = (
             futures_rate_limiter if market == "futures" else spot_rate_limiter
         )
-        # Per-endpoint depth circuit breaker: tracks consecutive timeouts so
-        # that a sustained Binance depth API outage doesn't block scan cycles
-        # for 75 s per symbol (5 retries × 15 s timeout each).
-        self._depth_consecutive_timeouts: int = 0
+        # Per-endpoint depth circuit breaker: tracks timeout timestamps in a
+        # sliding window so that a burst of failures trips the breaker even
+        # when occasional successes occur in between.
+        self._depth_timeout_timestamps: Deque[float] = deque()
         self._depth_circuit_open_until: float = 0.0
 
     # ------------------------------------------------------------------
@@ -190,9 +196,9 @@ class BinanceClient:
                                 pass
                         if BinanceClient.on_api_call is not None:
                             BinanceClient.on_api_call()
-                        # Reset depth circuit breaker on first successful call.
-                        if is_depth and self._depth_consecutive_timeouts > 0:
-                            self._depth_consecutive_timeouts = 0
+                        # A single success does NOT clear the sliding window —
+                        # recent timeout timestamps still count toward the
+                        # threshold until they age out of the window.
                         return data
                     if resp.status in (429, 418):
                         retry_after = int(resp.headers.get("Retry-After", 5))
@@ -209,16 +215,24 @@ class BinanceClient:
                 wait = _BACKOFF_BASE ** attempt
                 log.warning("Binance %s timeout – retrying in %.1fs", path, wait)
                 if is_depth:
-                    self._depth_consecutive_timeouts += 1
-                    if self._depth_consecutive_timeouts >= DEPTH_CIRCUIT_BREAKER_THRESHOLD:
+                    now = time.monotonic()
+                    self._depth_timeout_timestamps.append(now)
+                    # Prune entries outside the sliding window.
+                    cutoff = now - _DEPTH_CB_WINDOW_S
+                    while self._depth_timeout_timestamps and self._depth_timeout_timestamps[0] < cutoff:
+                        self._depth_timeout_timestamps.popleft()
+                    window_count = len(self._depth_timeout_timestamps)
+                    if window_count >= DEPTH_CIRCUIT_BREAKER_THRESHOLD:
                         self._depth_circuit_open_until = (
-                            time.monotonic() + DEPTH_CIRCUIT_BREAKER_COOLDOWN
+                            now + DEPTH_CIRCUIT_BREAKER_COOLDOWN
                         )
+                        # Clear the deque so the breaker starts fresh after cooldown.
+                        self._depth_timeout_timestamps.clear()
                         log.warning(
                             "Depth endpoint circuit breaker open — skipping {} for {:.0f}s "
-                            "({} consecutive timeouts)",
+                            "({} timeouts in last {:.0f}s)",
                             path, DEPTH_CIRCUIT_BREAKER_COOLDOWN,
-                            self._depth_consecutive_timeouts,
+                            window_count, _DEPTH_CB_WINDOW_S,
                         )
                         return None
                 await asyncio.sleep(wait)

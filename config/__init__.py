@@ -811,34 +811,35 @@ NO_SIGNAL_ALERT_COOLDOWN_SECONDS: int = int(
 # Scan-latency circuit breaker thresholds
 # ---------------------------------------------------------------------------
 # Warn in logs when a single scan cycle exceeds this duration (ms).
-SCAN_LATENCY_WARN_MS: float = float(os.getenv("SCAN_LATENCY_WARN_MS", "15000"))
+SCAN_LATENCY_WARN_MS: float = float(os.getenv("SCAN_LATENCY_WARN_MS", "10000"))
 # Fire an admin alert when latency exceeds this threshold for N consecutive
 # cycles (see SCAN_LATENCY_ALERT_CONSECUTIVE).
 SCAN_LATENCY_ALERT_MS: float = float(os.getenv("SCAN_LATENCY_ALERT_MS", "30000"))
 # Number of consecutive over-threshold cycles before the admin alert fires.
-SCAN_LATENCY_ALERT_CONSECUTIVE: int = int(os.getenv("SCAN_LATENCY_ALERT_CONSECUTIVE", "3"))
+SCAN_LATENCY_ALERT_CONSECUTIVE: int = int(os.getenv("SCAN_LATENCY_ALERT_CONSECUTIVE", "2"))
 # When latency exceeds this value, automatically reduce the scan set to
 # Tier 1 only and lower _MAX_ORDER_BOOK_FETCHES_PER_CYCLE temporarily (ms).
-SCAN_LATENCY_REDUCE_MS: float = float(os.getenv("SCAN_LATENCY_REDUCE_MS", "60000"))
+SCAN_LATENCY_REDUCE_MS: float = float(os.getenv("SCAN_LATENCY_REDUCE_MS", "35000"))
 
 # ---------------------------------------------------------------------------
 # WS health-aware scan gating
 # ---------------------------------------------------------------------------
 # Number of consecutive scan cycles with both WS managers unhealthy before
 # an admin alert is sent.
-WS_DEGRADED_CYCLES_ALERT: int = int(os.getenv("WS_DEGRADED_CYCLES_ALERT", "10"))
+WS_DEGRADED_CYCLES_ALERT: int = int(os.getenv("WS_DEGRADED_CYCLES_ALERT", "5"))
 
 # ---------------------------------------------------------------------------
 # Depth endpoint circuit breaker
 # ---------------------------------------------------------------------------
-# Consecutive timeout count for /fapi/v1/depth or /api/v3/depth that triggers
-# the open-circuit state.
+# Number of timeouts within the sliding window (60 s) on /fapi/v1/depth or
+# /api/v3/depth that triggers the open-circuit state.  A single successful
+# call does NOT reset the window — only time elapses entries away.
 DEPTH_CIRCUIT_BREAKER_THRESHOLD: int = int(
-    os.getenv("DEPTH_CIRCUIT_BREAKER_THRESHOLD", "10")
+    os.getenv("DEPTH_CIRCUIT_BREAKER_THRESHOLD", "5")
 )
 # How long (seconds) the circuit stays open (depth fetches return None immediately).
 DEPTH_CIRCUIT_BREAKER_COOLDOWN: float = float(
-    os.getenv("DEPTH_CIRCUIT_BREAKER_COOLDOWN", "60")
+    os.getenv("DEPTH_CIRCUIT_BREAKER_COOLDOWN", "30")
 )
 # Maximum retries for depth endpoint specifically (prevents 75 s cumulative wait).
 DEPTH_MAX_RETRIES: int = int(os.getenv("DEPTH_MAX_RETRIES", "3"))

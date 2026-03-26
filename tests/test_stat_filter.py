@@ -245,7 +245,7 @@ def test_rolling_win_rate_store_stats_values():
     s = store.stats("GEM", "LTCUSDT", "TRENDING_DOWN")
     assert s["n"] == 10
     assert s["win_rate"] == pytest.approx(0.6)
-    # avg_pnl: 6 wins at 1.5% + 4 losses at –1.0% = (9 – 4) / 10 = 0.5
+    # avg_pnl: 6 wins at 1.5% + 4 losses at -1.0% = (9 - 4) / 10 = 0.5
     assert s["avg_pnl"] == pytest.approx(0.5)
     assert s["last_updated"] is not None
 

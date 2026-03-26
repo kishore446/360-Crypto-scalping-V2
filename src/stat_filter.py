@@ -164,18 +164,18 @@ class RollingWinRateStore:
 class StatisticalFilter:
     """Applies adaptive confidence gates based on rolling win-rate statistics.
 
-    Gate logic (thresholds configurable via env vars):
+    Gate logic (thresholds configurable via env vars; WR = win rate):
     ────────────────────────────────────────────────────────────
-    win_rate >= SOFT_PENALTY_WR  → pass (no penalty)
-    HARD_SUPPRESS_WR <= WR < SOFT_PENALTY_WR → soft penalty (–PENALTY_PTS confidence)
-    WR < HARD_SUPPRESS_WR       → HARD SUPPRESS (signal dropped)
-    None (no history)           → pass (fail-open)
+    WR >= SOFT_PENALTY_WR          → pass (no penalty)
+    HARD_SUPPRESS_WR <= WR < SOFT_PENALTY_WR → soft penalty (-PENALTY_PTS confidence)
+    WR < HARD_SUPPRESS_WR          → HARD SUPPRESS (signal dropped)
+    None (no history)              → pass (fail-open)
     ────────────────────────────────────────────────────────────
 
     Default thresholds (overridable via env vars):
       Hard suppress: WR < 25%  (STAT_FILTER_HARD_SUPPRESS_WR)
       Soft penalty:  WR < 45%  (STAT_FILTER_SOFT_PENALTY_WR)
-      Penalty pts:   –5.0      (STAT_FILTER_SOFT_PENALTY_PTS)
+      Penalty pts:   -5.0      (STAT_FILTER_SOFT_PENALTY_PTS)
     """
 
     def __init__(self, store: Optional[RollingWinRateStore] = None) -> None:
@@ -240,10 +240,13 @@ class StatisticalFilter:
         if not all_stats:
             return "📊 *Statistical Filter Stats*\n\nNo outcomes recorded yet."
 
+        # Column widths must match the header format string below.
+        _COL_SEP_LEN: int = 61  # 14+1+10+1+14+1+6+1+4+1+8
+
         lines = ["📊 *Statistical Filter Stats*\n"]
         lines.append("```")
         lines.append(f"{'Channel':<14} {'Pair':<10} {'Regime':<14} {'WR%':>6} {'N':>4} {'AvgPnL%':>8}")
-        lines.append("-" * 60)
+        lines.append("-" * _COL_SEP_LEN)
         for _key, s in sorted(all_stats.items()):
             wr_pct = f"{s['win_rate'] * 100:.1f}%"
             avg_pnl = f"{s['avg_pnl']:+.2f}%"

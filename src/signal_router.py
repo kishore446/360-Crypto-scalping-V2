@@ -134,6 +134,8 @@ class SignalRouter:
         self.sector_comparator: Optional[Any] = None
         # AI Trade Observer (optional — set after construction in main.py)
         self.observer: Optional[Any] = None
+        # Portfolio-level drawdown guard (optional — set after construction in main.py)
+        self.portfolio_guard: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -423,10 +425,33 @@ class SignalRouter:
             )
             return
 
+        # Portfolio-level drawdown guard check (additive — fail-open when not wired).
+        _portfolio_size_multiplier: float = 1.0
+        if self.portfolio_guard is not None:
+            pg_allowed, pg_reason, _portfolio_size_multiplier = (
+                self.portfolio_guard.check_signal_allowed()
+            )
+            if not pg_allowed:
+                log.warning(
+                    "Signal {} {} suppressed by portfolio guard: {}",
+                    signal.symbol, signal.channel, pg_reason,
+                )
+                return
+            if _portfolio_size_multiplier < 1.0:
+                # Annotate signal so operators can see the size reduction
+                note = f"[PG: {_portfolio_size_multiplier:.0%} size]"
+                signal.execution_note = (
+                    f"{signal.execution_note} {note}".strip()
+                    if signal.execution_note
+                    else note
+                )
+
         # Risk assessment: use the signal's own volume/spread fields so the risk
         # classifier has accurate data (set by the scanner before enqueuing).
         risk = self._risk_mgr.calculate_risk(
-            signal, {}, volume_24h_usd=signal.volume_24h_usd, active_signals=self.active_signals
+            signal, {}, volume_24h_usd=signal.volume_24h_usd,
+            active_signals=self.active_signals,
+            portfolio_size_multiplier=_portfolio_size_multiplier,
         )
         if not risk.allowed:
             log.warning(

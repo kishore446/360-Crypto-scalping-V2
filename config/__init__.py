@@ -779,3 +779,17 @@ CONFIDENCE_LOG_PATH: str = os.getenv("CONFIDENCE_LOG_PATH", "data/confidence_log
 # ---------------------------------------------------------------------------
 MACRO_BLACKOUT_PRE_MINUTES: int = int(os.getenv("MACRO_BLACKOUT_PRE_MINUTES", "30"))
 MACRO_BLACKOUT_POST_MINUTES: int = int(os.getenv("MACRO_BLACKOUT_POST_MINUTES", "60"))
+
+# ---------------------------------------------------------------------------
+# Portfolio Guard — aggregate drawdown protection (PR_13)
+# Tiered circuit breaker across all channels:
+#   YELLOW: drawdown >= YELLOW_PCT → reduce position sizes by YELLOW_SIZE_MULT
+#   RED:    drawdown >= RED_PCT    → halt all signals for RED_HALT_HOURS
+#   BLACK:  drawdown >= BLACK_PCT  → halt all signals for BLACK_HALT_HOURS + admin alert
+# ---------------------------------------------------------------------------
+PORTFOLIO_GUARD_YELLOW_PCT: float = float(os.getenv("PORTFOLIO_GUARD_YELLOW_PCT", "3.0"))
+PORTFOLIO_GUARD_RED_PCT: float = float(os.getenv("PORTFOLIO_GUARD_RED_PCT", "5.0"))
+PORTFOLIO_GUARD_BLACK_PCT: float = float(os.getenv("PORTFOLIO_GUARD_BLACK_PCT", "8.0"))
+PORTFOLIO_GUARD_RED_HALT_HOURS: int = int(os.getenv("PORTFOLIO_GUARD_RED_HALT_HOURS", "4"))
+PORTFOLIO_GUARD_BLACK_HALT_HOURS: int = int(os.getenv("PORTFOLIO_GUARD_BLACK_HALT_HOURS", "24"))
+PORTFOLIO_GUARD_YELLOW_SIZE_MULT: float = float(os.getenv("PORTFOLIO_GUARD_YELLOW_SIZE_MULT", "0.5"))

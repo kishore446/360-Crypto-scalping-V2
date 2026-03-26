@@ -793,3 +793,61 @@ PORTFOLIO_GUARD_BLACK_PCT: float = float(os.getenv("PORTFOLIO_GUARD_BLACK_PCT", 
 PORTFOLIO_GUARD_RED_HALT_HOURS: int = int(os.getenv("PORTFOLIO_GUARD_RED_HALT_HOURS", "4"))
 PORTFOLIO_GUARD_BLACK_HALT_HOURS: int = int(os.getenv("PORTFOLIO_GUARD_BLACK_HALT_HOURS", "24"))
 PORTFOLIO_GUARD_YELLOW_SIZE_MULT: float = float(os.getenv("PORTFOLIO_GUARD_YELLOW_SIZE_MULT", "0.5"))
+
+# ---------------------------------------------------------------------------
+# No-signal watchdog — alert admin when no new signals are generated for an
+# extended period while WebSocket health is degraded.
+# ---------------------------------------------------------------------------
+# Seconds without a new signal before the watchdog fires (default: 1 hour).
+NO_SIGNAL_ALERT_THRESHOLD_SECONDS: int = int(
+    os.getenv("NO_SIGNAL_ALERT_THRESHOLD_SECONDS", "3600")
+)
+# Minimum seconds between repeated no-signal alerts (cooldown to avoid spam).
+NO_SIGNAL_ALERT_COOLDOWN_SECONDS: int = int(
+    os.getenv("NO_SIGNAL_ALERT_COOLDOWN_SECONDS", "3600")
+)
+
+# ---------------------------------------------------------------------------
+# Scan-latency circuit breaker thresholds
+# ---------------------------------------------------------------------------
+# Warn in logs when a single scan cycle exceeds this duration (ms).
+SCAN_LATENCY_WARN_MS: float = float(os.getenv("SCAN_LATENCY_WARN_MS", "15000"))
+# Fire an admin alert when latency exceeds this threshold for N consecutive
+# cycles (see SCAN_LATENCY_ALERT_CONSECUTIVE).
+SCAN_LATENCY_ALERT_MS: float = float(os.getenv("SCAN_LATENCY_ALERT_MS", "30000"))
+# Number of consecutive over-threshold cycles before the admin alert fires.
+SCAN_LATENCY_ALERT_CONSECUTIVE: int = int(os.getenv("SCAN_LATENCY_ALERT_CONSECUTIVE", "3"))
+# When latency exceeds this value, automatically reduce the scan set to
+# Tier 1 only and lower _MAX_ORDER_BOOK_FETCHES_PER_CYCLE temporarily (ms).
+SCAN_LATENCY_REDUCE_MS: float = float(os.getenv("SCAN_LATENCY_REDUCE_MS", "60000"))
+
+# ---------------------------------------------------------------------------
+# WS health-aware scan gating
+# ---------------------------------------------------------------------------
+# Number of consecutive scan cycles with both WS managers unhealthy before
+# an admin alert is sent.
+WS_DEGRADED_CYCLES_ALERT: int = int(os.getenv("WS_DEGRADED_CYCLES_ALERT", "10"))
+
+# ---------------------------------------------------------------------------
+# Depth endpoint circuit breaker
+# ---------------------------------------------------------------------------
+# Consecutive timeout count for /fapi/v1/depth or /api/v3/depth that triggers
+# the open-circuit state.
+DEPTH_CIRCUIT_BREAKER_THRESHOLD: int = int(
+    os.getenv("DEPTH_CIRCUIT_BREAKER_THRESHOLD", "10")
+)
+# How long (seconds) the circuit stays open (depth fetches return None immediately).
+DEPTH_CIRCUIT_BREAKER_COOLDOWN: float = float(
+    os.getenv("DEPTH_CIRCUIT_BREAKER_COOLDOWN", "60")
+)
+# Maximum retries for depth endpoint specifically (prevents 75 s cumulative wait).
+DEPTH_MAX_RETRIES: int = int(os.getenv("DEPTH_MAX_RETRIES", "3"))
+
+# ---------------------------------------------------------------------------
+# WS reconnection resilience — escalation alert threshold
+# ---------------------------------------------------------------------------
+# After this many consecutive reconnect failures on any one connection, fire
+# a "manual intervention needed" admin alert.
+WS_RECONNECT_FAIL_ALERT_THRESHOLD: int = int(
+    os.getenv("WS_RECONNECT_FAIL_ALERT_THRESHOLD", "50")
+)

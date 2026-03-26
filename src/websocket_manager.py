@@ -33,6 +33,7 @@ from config import (
     WS_HEARTBEAT_INTERVAL_FUTURES,
     WS_MAX_STREAMS_PER_CONN,
     WS_RECONNECT_BASE_DELAY,
+    WS_RECONNECT_FAIL_ALERT_THRESHOLD,
     WS_RECONNECT_MAX_DELAY,
     WS_SESSION_RECYCLE_ATTEMPTS,
     WS_STALENESS_MULTIPLIER,
@@ -141,6 +142,23 @@ class WebSocketManager:
         self._critical_pairs = set(pairs)
         log.info("Critical pairs set ({}): {}", len(self._critical_pairs), pairs)
 
+    def auto_populate_critical_pairs(self, symbols: List[str]) -> None:
+        """Populate *_critical_pairs* from the provided symbol list.
+
+        Call this after :meth:`start` with the top-N pairs by volume so that
+        REST fallback activates automatically when WS is fully degraded even
+        if :meth:`set_critical_pairs` was never called explicitly.
+
+        Existing critical pairs are *replaced* only when the incoming list is
+        non-empty; an empty list is a no-op so bootstrap ordering is flexible.
+        """
+        if not symbols:
+            return
+        self._critical_pairs = set(s.upper() for s in symbols)
+        log.info(
+            "Critical pairs auto-populated ({}): {}", len(self._critical_pairs), list(self._critical_pairs)[:20]
+        )
+
     async def _rest_fallback_loop(self) -> None:
         """Poll REST klines for critical pairs while WS is down."""
         assert self._session is not None
@@ -241,6 +259,31 @@ class WebSocketManager:
         )
 
     def _sync_rest_fallback_state(self) -> None:
+        # If all connections are degraded but _critical_pairs was never
+        # configured, auto-extract symbols from subscribed kline streams so
+        # that the REST fallback activates rather than remaining a no-op.
+        all_degraded = self._connections and all(c.degraded for c in self._connections)
+        if all_degraded and not self._critical_pairs and self._subscribed_streams:
+            extracted: List[str] = []
+            for stream in self._subscribed_streams:
+                if "@kline_" in stream:
+                    symbol = stream.split("@", 1)[0].upper()
+                    extracted.append(symbol)
+            if extracted:
+                # Deduplicate while preserving insertion order for logging
+                seen: set = set()
+                unique: List[str] = []
+                for s in extracted:
+                    if s not in seen:
+                        seen.add(s)
+                        unique.append(s)
+                self._critical_pairs = set(unique[:20])
+                log.warning(
+                    "WS fully degraded with empty critical_pairs — "
+                    "auto-extracted {} symbols from subscribed streams",
+                    len(self._critical_pairs),
+                )
+
         should_run = any(
             conn.degraded and self._connection_uses_fallback(conn)
             for conn in self._connections
@@ -308,7 +351,20 @@ class WebSocketManager:
                         "Recycling HTTP session after {} consecutive failures ({})",
                         conn.reconnect_attempts, self._label,
                     )
-                    await self._recreate_session()
+                    await self._recreate_session(force_dns_reresolution=True)
+                # Escalation alert: after many consecutive failures the issue
+                # may require manual intervention (e.g. IP ban, firewall change).
+                if (
+                    conn.reconnect_attempts == WS_RECONNECT_FAIL_ALERT_THRESHOLD
+                    and self._admin_alert
+                ):
+                    asyncio.create_task(
+                        self._admin_alert(
+                            f"🚨 WebSocket unable to reconnect after "
+                            f"{WS_RECONNECT_FAIL_ALERT_THRESHOLD} attempts "
+                            f"({self._label}) — manual intervention may be needed."
+                        )
+                    )
                 await asyncio.sleep(actual_delay)
 
     async def _connect(self, conn: WSConnection) -> None:
@@ -367,16 +423,28 @@ class WebSocketManager:
     # Dynamic subscription helpers
     # ------------------------------------------------------------------
 
-    async def _recreate_session(self) -> None:
-        """Close and recreate the aiohttp session to clear stale connections."""
+    async def _recreate_session(self, force_dns_reresolution: bool = False) -> None:
+        """Close and recreate the aiohttp session to clear stale connections.
+
+        Parameters
+        ----------
+        force_dns_reresolution:
+            When ``True``, create the TCP connector with ``force_close=True``
+            so that no connections are reused from the pool.  This forces the
+            OS to resolve DNS again, which helps when the Binance endpoint IP
+            changes or when a previous outage was caused by a stale ARP/DNS
+            cache.
+        """
         if self._session and not self._session.closed:
             try:
                 await self._session.close()
             except Exception as exc:
                 log.debug("Error closing stale session ({}): {}", self._label, exc)
-        self._session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(keepalive_timeout=30)
+        connector = aiohttp.TCPConnector(
+            keepalive_timeout=30,
+            force_close=force_dns_reresolution,
         )
+        self._session = aiohttp.ClientSession(connector=connector)
 
     def build_kline_stream(self, symbol: str, interval: str) -> str:
         return f"{symbol.lower()}@kline_{interval}"

@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import psutil
 
-from config import TELEMETRY_INTERVAL
+from config import TELEMETRY_INTERVAL, NO_SIGNAL_ALERT_THRESHOLD_SECONDS, NO_SIGNAL_ALERT_COOLDOWN_SECONDS
 from src.utils import get_logger
 
 log = get_logger("telemetry")
@@ -51,9 +51,40 @@ class TelemetryCollector:
         self._signal_latency_ms: float = 0.0
         self._api_weight_used: int = 0
         self._ws_message_lag_ms: float = 0.0
+        # No-signal watchdog: track time of last dispatched signal and the
+        # time of the last fired watchdog alert (to enforce cooldown).
+        self._last_new_signal_time: float = time.monotonic()
+        self._last_no_signal_alert_time: float = 0.0
+        # Optional async callback for admin alerts (e.g. TelegramBot.send_admin_alert).
+        self._admin_alert: Optional[Any] = None
 
     def record_api_call(self) -> None:
         self._api_call_count += 1
+
+    def record_new_signal(self) -> None:
+        """Record the time of the most recently dispatched signal.
+
+        Call this whenever a signal is successfully enqueued so the no-signal
+        watchdog can detect prolonged drought conditions.
+        """
+        self._last_new_signal_time = time.monotonic()
+
+    def set_admin_alert_callback(self, callback: Any) -> None:
+        """Register an async callable for admin alert delivery.
+
+        The callback signature must be ``async def send(message: str) -> bool``.
+        Typically wired to ``TelegramBot.send_admin_alert`` from ``main.py``.
+        """
+        self._admin_alert = callback
+
+    def get_admin_alert_callback(self) -> Optional[Any]:
+        """Return the registered admin alert callback, or ``None`` if unset."""
+        return self._admin_alert
+
+    @property
+    def scan_latency_ms(self) -> float:
+        """Most recently recorded scan cycle latency in milliseconds."""
+        return self._scan_latency_ms
 
     def record_signal_latency(self, latency_ms: float) -> None:
         """Record time from signal creation to Telegram delivery (ms)."""
@@ -113,12 +144,46 @@ class TelemetryCollector:
                     self.latest.api_calls_last_min,
                     self.latest.redis_connected,
                 )
+                await self._check_no_signal_watchdog()
             except Exception as exc:
                 log.debug("Telemetry error: %s", exc)
             await asyncio.sleep(TELEMETRY_INTERVAL)
 
     async def stop(self) -> None:
         self._running = False
+
+    async def _check_no_signal_watchdog(self) -> None:
+        """Fire an admin alert when no new signals have been seen for too long.
+
+        The alert only fires when *both* conditions hold:
+        1. No signal has been recorded for ``NO_SIGNAL_ALERT_THRESHOLD_SECONDS``.
+        2. The WebSocket is currently unhealthy (``ws_healthy=False``).
+
+        A cooldown of ``NO_SIGNAL_ALERT_COOLDOWN_SECONDS`` prevents repeated
+        alerts for the same incident.  Runs inside the telemetry loop so it
+        is subject to the same fail-open exception handling.
+        """
+        if self._admin_alert is None:
+            return
+        try:
+            now = time.monotonic()
+            drought_s = now - self._last_new_signal_time
+            if drought_s < NO_SIGNAL_ALERT_THRESHOLD_SECONDS:
+                return
+            if self._ws_healthy:
+                return
+            if now - self._last_no_signal_alert_time < NO_SIGNAL_ALERT_COOLDOWN_SECONDS:
+                return
+            self._last_no_signal_alert_time = now
+            minutes = int(drought_s / 60)
+            msg = (
+                f"⚠️ No new signals for {minutes} minutes. "
+                "WebSocket unhealthy. Consider /restart."
+            )
+            log.warning("No-signal watchdog: %s", msg)
+            await self._admin_alert(msg)
+        except Exception as exc:
+            log.debug("No-signal watchdog error: %s", exc)
 
     def _collect(self) -> None:
         now = time.monotonic()

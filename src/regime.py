@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from src.utils import get_logger
 
 log = get_logger("regime")
@@ -35,6 +37,56 @@ class RegimeResult:
     ema_slope: Optional[float] = None
     volume_delta_pct: Optional[float] = None
     note: str = ""
+
+
+@dataclass
+class RegimeContext:
+    """Rich regime context for downstream signal enrichment."""
+
+    label: str                    # TRENDING_UP / TRENDING_DOWN / RANGING / VOLATILE / QUIET
+    adx_value: float              # Raw ADX
+    adx_slope: float              # adx[t] - adx[t-1]; positive = strengthening
+    atr_percentile: float         # 0-100 rolling percentile of current ATR vs last 200 bars
+    volume_profile: str           # "ACCUMULATION", "DISTRIBUTION", "NEUTRAL"
+    is_regime_strengthening: bool  # adx_slope > 0 and adx_value > 20
+
+
+# ---------------------------------------------------------------------------
+# Standalone helper functions
+# ---------------------------------------------------------------------------
+
+
+def atr_percentile(atr_series: np.ndarray, lookback: int = 200) -> float:
+    """Return rolling percentile (0-100) of the last ATR value vs prior `lookback` bars."""
+    if len(atr_series) < 2:
+        return 50.0
+    window = atr_series[-lookback:] if len(atr_series) >= lookback else atr_series
+    current = float(atr_series[-1])
+    return float(np.sum(window <= current) / len(window) * 100)
+
+
+def volume_profile_classify(
+    volumes: np.ndarray,
+    closes: np.ndarray,
+    vwap: float,
+    lookback: int = 20,
+) -> str:
+    """Classify volume profile as ACCUMULATION, DISTRIBUTION, or NEUTRAL."""
+    if vwap <= 0 or len(closes) < lookback or len(volumes) < lookback:
+        return "NEUTRAL"
+    c = np.asarray(closes[-lookback:], dtype=float)
+    v = np.asarray(volumes[-lookback:], dtype=float)
+    above_vol = float(np.sum(v[c >= vwap]))
+    below_vol = float(np.sum(v[c < vwap]))
+    total = above_vol + below_vol
+    if total == 0:
+        return "NEUTRAL"
+    ratio = above_vol / total
+    if ratio > 0.60:
+        return "ACCUMULATION"
+    if ratio < 0.40:
+        return "DISTRIBUTION"
+    return "NEUTRAL"
 
 
 # Thresholds (tunable via environment variables in the future)
@@ -256,6 +308,66 @@ class MarketRegimeDetector:
 
         # Not yet enough consecutive readings — return the stable regime.
         return self._previous_regime
+
+    # ------------------------------------------------------------------
+
+    def build_regime_context(
+        self,
+        result: RegimeResult,
+        candles: Optional[Dict[str, Any]] = None,
+        indicators: Optional[Dict[str, Any]] = None,
+        vwap: float = 0.0,
+    ) -> RegimeContext:
+        """Build a rich RegimeContext from a RegimeResult and raw market data."""
+        adx_val = result.adx if result.adx is not None else 0.0
+        adx_slope = 0.0
+        atr_pct = 50.0
+        vol_profile = "NEUTRAL"
+
+        if candles is not None:
+            closes = candles.get("close", [])
+            highs = candles.get("high", [])
+            lows = candles.get("low", [])
+            volumes = candles.get("volume", [])
+
+            # ADX slope: compute full ADX array and take last two values
+            if len(closes) >= 30:
+                from src.indicators import adx as compute_adx  # noqa: PLC0415
+                h = np.asarray(highs, dtype=np.float64)
+                lo = np.asarray(lows, dtype=np.float64)
+                c = np.asarray(closes, dtype=np.float64)
+                adx_arr = compute_adx(h, lo, c, 14)
+                valid = adx_arr[~np.isnan(adx_arr)]
+                if len(valid) >= 2:
+                    adx_slope = float(valid[-1] - valid[-2])
+
+            # ATR percentile
+            if len(closes) >= 15:
+                from src.indicators import atr as compute_atr  # noqa: PLC0415
+                h = np.asarray(highs, dtype=np.float64)
+                lo = np.asarray(lows, dtype=np.float64)
+                c = np.asarray(closes, dtype=np.float64)
+                atr_arr = compute_atr(h, lo, c, 14)
+                valid_atr = atr_arr[~np.isnan(atr_arr)]
+                if len(valid_atr) >= 2:
+                    atr_pct = atr_percentile(valid_atr)
+
+            # Volume profile
+            if len(volumes) >= 20 and len(closes) >= 20 and vwap > 0:
+                vol_profile = volume_profile_classify(
+                    np.asarray(volumes, dtype=np.float64),
+                    np.asarray(closes, dtype=np.float64),
+                    vwap,
+                )
+
+        return RegimeContext(
+            label=result.regime.value,
+            adx_value=adx_val,
+            adx_slope=adx_slope,
+            atr_percentile=atr_pct,
+            volume_profile=vol_profile,
+            is_regime_strengthening=(adx_slope > 0 and adx_val > 20),
+        )
 
     # ------------------------------------------------------------------
 

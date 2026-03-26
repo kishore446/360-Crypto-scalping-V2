@@ -262,6 +262,7 @@ class ScanContext:
     candle_total: int
     pair_quality: PairQualityAssessment
     market_state: MarketState
+    regime_context: Any = None  # RegimeContext from regime detector
 
 
 class Scanner:
@@ -812,6 +813,21 @@ class Scanner:
             candles=regime_candles,
             spread_pct=spread_pct,
         )
+        # Build rich regime context for signal enrichment
+        from src.vwap import compute_vwap  # noqa: PLC0415
+        vwap_val = 0.0
+        if regime_candles is not None:
+            vwap_result = compute_vwap(
+                regime_candles.get("high", []),
+                regime_candles.get("low", []),
+                regime_candles.get("close", []),
+                regime_candles.get("volume", []),
+            )
+            if vwap_result is not None:
+                vwap_val = vwap_result.vwap
+        regime_context = self.regime_detector.build_regime_context(
+            regime_result, regime_candles, regime_ind, vwap=vwap_val,
+        )
         return ScanContext(
             candles=candles,
             indicators=indicators,
@@ -827,6 +843,7 @@ class Scanner:
             candle_total=candle_total,
             pair_quality=pair_quality,
             market_state=market_state,
+            regime_context=regime_context,
         )
 
     def _should_skip_channel(self, symbol: str, chan_name: str, ctx: ScanContext) -> bool:
@@ -1124,6 +1141,18 @@ class Scanner:
 
     def _populate_signal_context(self, sig: Any, volume_24h: float, ctx: ScanContext) -> None:
         sig.market_phase = ctx.market_state.value
+        if ctx.regime_context is not None:
+            rc = ctx.regime_context
+            try:
+                sig.market_phase = (
+                    f"{rc.label} | ATR%ile={float(rc.atr_percentile):.0f} | "
+                    f"Vol={rc.volume_profile}"
+                )
+                sig.regime_context = (
+                    f"ADXslope={float(rc.adx_slope):.2f} strengthen={rc.is_regime_strengthening}"
+                )
+            except (TypeError, ValueError):
+                pass  # Keep market_state.value when context is not a real RegimeContext
         liq_parts = []
         if ctx.smc_result.sweeps:
             sweep = ctx.smc_result.sweeps[0]

@@ -68,7 +68,7 @@ from src.feedback_loop import FeedbackLoop
 from src.kill_zone import check_kill_zone_gate
 from src.mtf import check_mtf_gate, compute_mtf_confluence, _TF_WEIGHTS as _MTF_TF_WEIGHTS
 from src.oi_filter import analyse_oi, check_oi_gate
-from src.pair_manager import PairTier
+from src.pair_manager import PairTier, classify_pair_tier
 from src.spoof_detect import check_spoof_gate
 from src.utils import get_logger, price_decimal_fmt, utcnow
 from src.volume_divergence import check_volume_divergence_gate
@@ -770,6 +770,9 @@ class Scanner:
             tolerance_pct=SMC_SCALP_TOLERANCE_PCT,
         )
         smc_data = smc_result.as_dict()
+        # Attach per-pair profile so channel evaluators can consume it via
+        # smc_data.get("pair_profile") without any signature changes.
+        smc_data["pair_profile"] = classify_pair_tier(symbol, volume_24h_usd=volume_24h)
 
         regime_tf = "5m" if "5m" in indicators else "1m"
         regime_ind = indicators.get("5m", indicators.get("1m", {}))

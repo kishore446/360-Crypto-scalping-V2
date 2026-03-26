@@ -1,7 +1,6 @@
 """Tests verifying that SwingChannel and SpotChannel use regime-aware filters."""
 
 import numpy as np
-import pytest
 
 
 class TestSwingChannelRegimeFilters:
@@ -45,11 +44,9 @@ class TestSwingChannelRegimeFilters:
         smc_data = {"sweeps": [sweep], "mss": mss}
 
         # Without regime → ADX 14 < 20 → should fail (return None)
-        sig_no_regime = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 15_000_000)
+        ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 15_000_000)
         # With QUIET regime → ADX 14 > 12 → may pass ADX filter
-        sig_quiet = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 15_000_000, regime="QUIET")
-        # The regime-aware version should be more permissive
-        # (sig_quiet may still be None due to other filters, but it shouldn't fail on ADX)
+        ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 15_000_000, regime="QUIET")
 
 
 class TestSpotChannelRegimeFilters:

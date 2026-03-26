@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 from config import CHANNEL_SWING
 from src.channels.base import BaseChannel, Signal, build_channel_signal
-from src.filters import check_adx, check_adx_regime, check_rsi_regime, check_spread_adaptive, check_volume
+from src.filters import check_adx_regime, check_rsi_regime, check_spread_adaptive, check_volume
 from src.smc import Direction
 
 # Percentile position within the Bollinger Band range for rejection gate.

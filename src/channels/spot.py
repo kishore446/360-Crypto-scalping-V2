@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 from config import CHANNEL_SPOT
 from src.channels.base import BaseChannel, Signal, build_channel_signal
-from src.filters import check_adx, check_adx_regime, check_rsi_regime, check_spread_adaptive, check_volume
+from src.filters import check_adx_regime, check_rsi_regime, check_spread_adaptive, check_volume
 from src.smc import Direction
 
 # Short signals require a higher minimum confidence to guard against false shorts.

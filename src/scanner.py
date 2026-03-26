@@ -77,7 +77,7 @@ from src.volume_divergence import check_volume_divergence_gate
 from src.vwap import check_vwap_extension, compute_vwap
 from src.ai_engine import get_ai_insight
 from src.chart_patterns import detect_patterns, pattern_confidence_bonus, detect_all_patterns
-from src.stat_filter import StatisticalFilter, SignalOutcome
+from src.stat_filter import StatisticalFilter
 
 log = get_logger("scanner")
 

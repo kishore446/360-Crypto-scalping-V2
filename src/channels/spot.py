@@ -9,14 +9,11 @@ Risk    : SL 0.5–2 %, TP1 2R, TP2 5R, TP3 10R, Trailing 3×ATR, max hold 7 day
 from __future__ import annotations
 
 from typing import Dict, Optional
-import uuid
 
 from config import CHANNEL_SPOT
-from src.channels.base import BaseChannel, Signal
-from src.dca import compute_dca_zone
+from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import check_adx, check_spread, check_volume
 from src.smc import Direction
-from src.utils import utcnow
 
 # Short signals require a higher minimum confidence to guard against false shorts.
 _SHORT_CONFIDENCE_BOOST = 5.0
@@ -25,6 +22,7 @@ _SHORT_CONFIDENCE_BOOST = 5.0
 class SpotChannel(BaseChannel):
     def __init__(self) -> None:
         super().__init__(CHANNEL_SPOT)
+        self._current_regime = ""
 
     def evaluate(
         self,
@@ -157,7 +155,9 @@ class SpotChannel(BaseChannel):
         if sl >= close:
             return None
 
-        sig = self._build_signal(
+        setup_class = "BREAKOUT_RETEST" if is_retest else "BREAKOUT_INITIAL"
+        sig = build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=Direction.LONG,
             close=close,
@@ -166,9 +166,16 @@ class SpotChannel(BaseChannel):
             tp2=tp2,
             tp3=tp3,
             sl_dist=sl_dist,
+            id_prefix="SPOT",
+            atr_val=atr_val,
+            setup_class=setup_class,
+            bb_width_pct=bb_width,
+            regime=self._current_regime,
         )
-        if sig is not None:
-            sig.setup_class = "BREAKOUT_RETEST" if is_retest else "BREAKOUT_INITIAL"
+        # Spot-specific: use DCA zone as entry zone for LONGs (accumulation zone)
+        if sig is not None and sig.dca_zone_lower > 0:
+            sig.entry_zone_low = sig.dca_zone_lower
+            sig.entry_zone_high = sig.dca_zone_upper
         return sig
 
     # ------------------------------------------------------------------
@@ -244,7 +251,9 @@ class SpotChannel(BaseChannel):
         if sl <= close or tp1 >= close:
             return None
 
-        sig = self._build_signal(
+        setup_class = "BREAKOUT_RETEST" if is_retest else "BREAKOUT_INITIAL"
+        sig = build_channel_signal(
+            config=self.config,
             symbol=symbol,
             direction=Direction.SHORT,
             close=close,
@@ -253,63 +262,16 @@ class SpotChannel(BaseChannel):
             tp2=tp2,
             tp3=tp3,
             sl_dist=sl_dist,
-            confidence_boost=_SHORT_CONFIDENCE_BOOST,
+            id_prefix="SPOT-SHORT",
+            atr_val=atr_val,
+            setup_class=setup_class,
+            bb_width_pct=bb_width,
+            regime=self._current_regime,
         )
         if sig is not None:
-            sig.setup_class = "BREAKOUT_RETEST" if is_retest else "BREAKOUT_INITIAL"
+            sig.confidence += _SHORT_CONFIDENCE_BOOST
+            # Spot-specific: no DCA zone for SHORT signals (accumulation is LONG-only)
+            sig.dca_zone_lower = 0.0
+            sig.dca_zone_upper = 0.0
         return sig
 
-    # ------------------------------------------------------------------
-    # Shared signal factory
-    # ------------------------------------------------------------------
-
-    def _build_signal(
-        self,
-        symbol: str,
-        direction: Direction,
-        close: float,
-        sl: float,
-        tp1: float,
-        tp2: float,
-        tp3: float,
-        sl_dist: float,
-        confidence_boost: float = 0.0,
-    ) -> Signal:
-        """Assemble and return a :class:`Signal` instance."""
-        prefix = "SPOT-SHORT" if direction == Direction.SHORT else "SPOT"
-        sig = Signal(
-            channel=self.config.name,
-            symbol=symbol,
-            direction=direction,
-            entry=close,
-            stop_loss=round(sl, 8),
-            tp1=round(tp1, 8),
-            tp2=round(tp2, 8),
-            tp3=round(tp3, 8),
-            trailing_active=True,
-            trailing_desc=f"{self.config.trailing_atr_mult}×ATR",
-            confidence=0.0 + confidence_boost,
-            ai_sentiment_label="",
-            ai_sentiment_summary="",
-            risk_label="Conservative" if direction == Direction.LONG else "Conservative-Short",
-            timestamp=utcnow(),
-            signal_id=f"{prefix}-{uuid.uuid4().hex[:8].upper()}",
-            current_price=close,
-            original_sl_distance=sl_dist,
-        )
-
-        # DCA zone for LONG spot accumulation only (not SHORT)
-        if direction == Direction.LONG and self.config.dca_enabled:
-            dca_lower, dca_upper = compute_dca_zone(
-                close, round(sl, 8), direction, self.config.dca_zone_range
-            )
-            sig.dca_zone_lower = dca_lower
-            sig.dca_zone_upper = dca_upper
-            sig.original_entry = close
-            sig.original_tp1 = round(tp1, 8)
-            sig.original_tp2 = round(tp2, 8)
-            sig.original_tp3 = round(tp3, 8)
-            sig.entry_zone_low = dca_lower
-            sig.entry_zone_high = dca_upper
-
-        return sig

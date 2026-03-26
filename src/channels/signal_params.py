@@ -108,6 +108,19 @@ PARAM_TABLE: Dict[Tuple[str, str, str], SignalParams] = {
         tp_ratios=(1.5, 2.5, 4.0), sl_multiplier=1.0, entry_zone_bias=0.65,
         dca_enabled=True, validity_minutes=60,
     ),
+    ("SPOT", "BREAKOUT_INITIAL", "TRENDING_UP"): SignalParams(
+        tp_ratios=(1.5, 2.5, 4.0), sl_multiplier=1.0, entry_zone_bias=0.65,
+        dca_enabled=True, validity_minutes=60,
+    ),
+    # --- SPOT SHORT setups: DCA disabled for SHORT signals ---
+    ("SPOT", "BREAKOUT_RETEST", "TRENDING_DOWN"): SignalParams(
+        tp_ratios=(2.0, 5.0, 10.0), sl_multiplier=1.0, entry_zone_bias=0.65,
+        dca_enabled=False, validity_minutes=60,
+    ),
+    ("SPOT", "BREAKOUT_INITIAL", "TRENDING_DOWN"): SignalParams(
+        tp_ratios=(2.0, 5.0, 10.0), sl_multiplier=1.0, entry_zone_bias=0.65,
+        dca_enabled=False, validity_minutes=60,
+    ),
 }
 
 

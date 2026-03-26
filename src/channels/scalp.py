@@ -36,6 +36,7 @@ class ScalpChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         # Evaluate all three paths and return the one with the best R-multiple.
         # This ensures that a marginal standard-path signal never blocks a
@@ -46,7 +47,7 @@ class ScalpChannel(BaseChannel):
             self._evaluate_range_fade,
             self._evaluate_whale_momentum,
         ):
-            sig = evaluator(symbol, candles, indicators, smc_data, spread_pct, volume_24h_usd)
+            sig = evaluator(symbol, candles, indicators, smc_data, spread_pct, volume_24h_usd, regime)
             if sig is not None:
                 candidates.append(sig)
         if not candidates:
@@ -69,6 +70,7 @@ class ScalpChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         m5 = candles.get("5m")
         if m5 is None or len(m5.get("close", [])) < 50:
@@ -146,6 +148,8 @@ class ScalpChannel(BaseChannel):
             sl_dist=sl_dist,
             id_prefix="SCALP",
             atr_val=atr_val,
+            setup_class="LIQUIDITY_SWEEP_REVERSAL",
+            regime=regime,
         )
 
     # ------------------------------------------------------------------
@@ -161,6 +165,7 @@ class ScalpChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         m5 = candles.get("5m")
         if m5 is None or len(m5.get("close", [])) < 50:
@@ -227,9 +232,9 @@ class ScalpChannel(BaseChannel):
             sl_dist=sl_dist,
             id_prefix="RANGE-FADE",
             atr_val=atr_val,
+            setup_class="RANGE_FADE",
+            regime=regime,
         )
-        if sig is not None:
-            sig.setup_class = "RANGE_FADE"
         return sig
 
     # ------------------------------------------------------------------
@@ -245,6 +250,7 @@ class ScalpChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         whale = smc_data.get("whale_alert")
         delta_spike = smc_data.get("volume_delta_spike", False)
@@ -315,9 +321,9 @@ class ScalpChannel(BaseChannel):
             sl_dist=sl_dist,
             id_prefix="WHALE",
             atr_val=atr_val,
+            setup_class="WHALE_MOMENTUM",
+            regime=regime,
         )
-        if sig is not None:
-            sig.setup_class = "WHALE_MOMENTUM"
         return sig
 
     # ------------------------------------------------------------------

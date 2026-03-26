@@ -225,6 +225,10 @@ class ScalpChannel(BaseChannel):
         if sig is None:
             return None
 
+        sig.trailing_atr_mult_effective = self.config.trailing_atr_mult
+        sig.trailing_stage = 0
+        sig.partial_close_pct = 0.0
+
         # Apply MACD soft penalty if applicable
         if macd_adj != 0.0:
             sig.confidence += macd_adj
@@ -352,6 +356,10 @@ class ScalpChannel(BaseChannel):
             atr_percentile=_regime_ctx.atr_percentile if _regime_ctx else 50.0,
             pair_tier=profile.tier if profile else "MIDCAP",
         )
+        if sig is not None:
+            sig.trailing_atr_mult_effective = self.config.trailing_atr_mult
+            sig.trailing_stage = 0
+            sig.partial_close_pct = 0.0
         return sig
 
     # ------------------------------------------------------------------
@@ -445,6 +453,10 @@ class ScalpChannel(BaseChannel):
             atr_percentile=_regime_ctx.atr_percentile if _regime_ctx else 50.0,
             pair_tier=_pair_profile.tier if _pair_profile else "MIDCAP",
         )
+        if sig is not None:
+            sig.trailing_atr_mult_effective = self.config.trailing_atr_mult
+            sig.trailing_stage = 0
+            sig.partial_close_pct = 0.0
         return sig
 
     # ------------------------------------------------------------------

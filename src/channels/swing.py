@@ -199,6 +199,10 @@ class SwingChannel(BaseChannel):
         if sig is None:
             return None
 
+        sig.trailing_atr_mult_effective = self.config.trailing_atr_mult
+        sig.trailing_stage = 0
+        sig.partial_close_pct = 0.0
+
         # MTF gate — 4h EMA + ADX must support the 1h signal direction (PR_06)
         mtf_ok, mtf_reason, mtf_adj = mtf_gate_swing(ind_h4, direction.value)
         if not mtf_ok:

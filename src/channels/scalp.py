@@ -77,7 +77,8 @@ class ScalpChannel(BaseChannel):
         # adjusted by regime-specific indicator weight multipliers so that the
         # most appropriate signal type is preferred for the current market regime.
         weights = self._select_indicator_weights(regime)
-        candidates = []
+        # Each tuple is (signal, adjusted_r_multiple) for regime-aware selection.
+        scored: List[tuple] = []
         for evaluator, weight_key in (
             (self._evaluate_standard,       "trend"),
             (self._evaluate_range_fade,     "mean_reversion"),
@@ -86,13 +87,13 @@ class ScalpChannel(BaseChannel):
             sig = evaluator(symbol, candles, indicators, smc_data, spread_pct, volume_24h_usd, regime)
             if sig is not None:
                 # Boost the effective R-multiple by the regime weight so that
-                # regime-preferred signal types rank higher in the max() selection.
-                sig._regime_adjusted_r = sig.r_multiple * weights[weight_key]
-                candidates.append(sig)
-        if not candidates:
+                # regime-preferred signal types rank higher in the selection.
+                adjusted_r = sig.r_multiple * weights[weight_key]
+                scored.append((sig, adjusted_r))
+        if not scored:
             return None
         # Return the candidate with the best regime-adjusted risk-reward
-        best = max(candidates, key=lambda s: getattr(s, "_regime_adjusted_r", s.r_multiple))
+        best, _ = max(scored, key=lambda t: t[1])
         # Apply kill zone check and mark reduced-conviction signals
         self._apply_kill_zone_note(best)
         return best

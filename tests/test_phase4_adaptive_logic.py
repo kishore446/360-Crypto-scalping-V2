@@ -127,13 +127,8 @@ class TestAtrNormalizedBollingerThreshold:
 
     def test_high_atr_pair_uses_wider_threshold(self):
         """High-ATR altcoin should allow wider BB before blocking."""
-        ch = self._make_spot_channel()
         h4 = self._make_h4()
-        highs = list(h4["high"])
-        lows = list(h4["low"])
-        closes_list = list(h4["close"])
-        volumes = list(h4["volume"])
-        close = closes_list[-1]
+        close = float(h4["close"][-1])
         # ATR = 5 (5% of 100) → atr_pct=5.0 → threshold = max(2.0, min(6.0, 5.0*3))=6.0
         atr_val = 5.0
         atr_pct = atr_val / close * 100
@@ -391,7 +386,7 @@ class TestMtfGateRegimeMinScore:
 
     def test_check_mtf_gate_passes_tf_weight_overrides(self):
         """check_mtf_gate forward tf_weight_overrides to compute_mtf_confluence."""
-        from src.mtf import check_mtf_gate, _TF_WEIGHTS
+        from src.mtf import check_mtf_gate
         data = self._make_mixed_data()
         # With VOLATILE config (lower min_score + neutral weights)
         allowed_strict, _ = check_mtf_gate("LONG", data, min_score=0.6)
@@ -462,9 +457,10 @@ class TestScalpChannelRegimeWeights:
                 spread_pct=0.01, volume_24h_usd=20_000_000, regime=regime,
             )
 
-    def test_regime_adjusted_r_attribute_set(self):
-        """Signals in evaluate() should get _regime_adjusted_r attribute set."""
+    def test_regime_weighted_selection_returns_valid_signal(self):
+        """ScalpChannel.evaluate() returns a valid Signal using regime-weighted selection."""
         from src.channels.scalp import ScalpChannel
+        from src.channels.base import Signal
         from src.smc import LiquiditySweep, Direction
 
         ch = ScalpChannel()
@@ -505,8 +501,7 @@ class TestScalpChannelRegimeWeights:
             "TESTUSDT", candles, indicators, smc_data,
             spread_pct=0.01, volume_24h_usd=20_000_000, regime="VOLATILE",
         )
-        if sig is not None:
-            # The selected signal should have the regime-adjusted R attribute
-            assert hasattr(sig, "_regime_adjusted_r"), (
-                "Selected signal should have _regime_adjusted_r set"
-            )
+        # Regime-weighted selection must return None or a proper Signal instance.
+        assert sig is None or isinstance(sig, Signal), (
+            "evaluate() must return None or a Signal, not an intermediate type"
+        )

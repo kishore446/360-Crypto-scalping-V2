@@ -109,7 +109,7 @@ class DataFetcher:
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         return {
-            tf: (r if not isinstance(r, Exception) else [])
+            tf: (r if not isinstance(r, BaseException) else [])
             for tf, r in zip(tasks.keys(), results)
         }
 

@@ -45,7 +45,7 @@ from src.confidence import (
     score_spread,
     score_trend,
 )
-from src.indicators import adx, atr, bollinger_bands, ema, macd, momentum, rsi
+from src.indicators import adx, atr, bollinger_bands, ema, macd, momentum, rsi  # noqa: F401
 from src.scanner.data_fetcher import DataFetcher
 from src.scanner.indicator_compute import compute_indicators_for_candle_dict
 from src.onchain import score_onchain

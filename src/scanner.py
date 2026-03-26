@@ -74,7 +74,7 @@ from src.utils import get_logger, price_decimal_fmt, utcnow
 from src.volume_divergence import check_volume_divergence_gate
 from src.vwap import check_vwap_extension, compute_vwap
 from src.ai_engine import get_ai_insight
-from src.chart_patterns import detect_patterns, pattern_confidence_bonus
+from src.chart_patterns import detect_patterns, pattern_confidence_bonus, detect_all_patterns
 
 log = get_logger("scanner")
 
@@ -1567,7 +1567,44 @@ class Scanner:
             except Exception as _exc:
                 log.debug("Chart pattern detection error for {}: {}", symbol, _exc)
 
-        # MTF confluence confidence modifier: boost strong alignment, penalise weak.
+            # PR_05: candlestick pattern engine — confidence modifier (not hard gate)
+            try:
+                _open_arr = primary_candles.get("open", [])
+                _high_arr = primary_candles.get("high", [])
+                _low_arr = primary_candles.get("low", [])
+                _close_arr = primary_candles.get("close", [])
+                _vol_arr = primary_candles.get("volume", [])
+                if len(_close_arr) >= 3 and len(_open_arr) >= 3:
+                    _cp_results = detect_all_patterns(
+                        np.asarray(_open_arr),
+                        np.asarray(_high_arr),
+                        np.asarray(_low_arr),
+                        np.asarray(_close_arr),
+                        np.asarray(_vol_arr) if _vol_arr else None,
+                    )
+                    # Store in smc_data for downstream consumers
+                    ctx.smc_data["chart_patterns"] = _cp_results
+                    # Filter to direction-aligned patterns only
+                    _aligned = [
+                        p for p in _cp_results
+                        if p.direction == sig.direction.value or p.direction == "NEUTRAL"
+                    ]
+                    if _aligned:
+                        _cp_bonus = sum(p.confidence_bonus for p in _aligned)
+                        sig.confidence = max(0.0, min(100.0, sig.confidence + _cp_bonus))
+                        _cp_names = ", ".join(p.name for p in _aligned)
+                        # Append to chart_pattern_names (may already have legacy pattern names)
+                        if sig.chart_pattern_names:
+                            sig.chart_pattern_names = sig.chart_pattern_names + ", " + _cp_names
+                        else:
+                            sig.chart_pattern_names = _cp_names
+                        log.debug(
+                            "Candlestick pattern bonus {} {}: {:+.2f} ({})",
+                            symbol, chan_name, _cp_bonus, _cp_names,
+                        )
+            except Exception as _exc:
+                log.debug("Candlestick pattern detection error for {}: {}", symbol, _exc)
+
         # This augments the hard MTF gate above with a continuous confidence signal.
         try:
             _mtf_conf_data: Dict[str, Dict[str, float]] = {}

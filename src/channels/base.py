@@ -141,6 +141,9 @@ class Signal:
     # ---- Chart pattern names that confirmed the signal direction ----
     chart_pattern_names: str = ""
 
+    # ---- Serialised regime context (ATR%ile, volume profile, ADX slope) ----
+    regime_context: str = ""   # Serialised regime context for logging
+
     # ---- Latency tracking ----
     # detected_at: time.time() when channel.evaluate() first returned a non-None signal.
     # posted_at: time.time() when the signal was successfully delivered to Telegram.

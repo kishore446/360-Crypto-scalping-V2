@@ -95,8 +95,9 @@ class ScalpChannel(BaseChannel):
         # Return the candidate with the best regime-adjusted risk-reward
         best, _ = max(scored, key=lambda t: t[1])
         # Apply kill zone check and mark reduced-conviction signals
-        self._apply_kill_zone_note(best)
-        return best
+        profile = smc_data.get("pair_profile") if smc_data else None
+        result = self._apply_kill_zone_note(best, profile=profile)
+        return result
 
     # ------------------------------------------------------------------
     # Standard scalp path (TREND_PULLBACK / BREAKOUT / LIQUIDITY_SWEEP)
@@ -141,16 +142,20 @@ class ScalpChannel(BaseChannel):
         # ATR-adaptive momentum threshold: scales with each pair's volatility
         # BTC (ATR ~0.3%) → threshold ~0.15%, DOGE (ATR ~0.8%) → threshold ~0.30%
         atr_pct = (atr_val / close) * 100.0 if close > 0 else 0.15
-        momentum_threshold = max(0.10, min(0.30, atr_pct * 0.5))
+        profile = smc_data.get("pair_profile")
+        base_momentum = max(0.10, min(0.30, atr_pct * 0.5))
+        if profile is not None:
+            base_momentum *= profile.momentum_threshold_mult
+        momentum_threshold = base_momentum
         if abs(mom) < momentum_threshold:
             return None
 
-        # Momentum persistence: require momentum above threshold for >= 2 consecutive
+        # Momentum persistence: require momentum above threshold for consecutive
         # candles to avoid whipsaws where a single candle briefly spikes momentum.
         mom_arr = ind.get("momentum_array")
-        if mom_arr is not None and len(mom_arr) >= 2:
-            prev_mom = float(mom_arr[-2])
-            if abs(prev_mom) < momentum_threshold:
+        persist = profile.momentum_persist_candles if profile else 2
+        if mom_arr is not None and len(mom_arr) >= persist:
+            if not all(abs(float(mom_arr[-i])) >= momentum_threshold for i in range(1, persist + 1)):
                 return None  # Momentum not persistent — likely whipsaw
 
         direction = sweep.direction
@@ -244,10 +249,12 @@ class ScalpChannel(BaseChannel):
         close = float(m5["close"][-1])
         rsi_val = ind.get("rsi_last")
 
+        profile = smc_data.get("pair_profile")
+        bb_touch = profile.bb_touch_pct if profile else 0.002
         direction: Optional[Direction] = None
-        if close <= bb_lower * 1.002:
+        if close <= bb_lower * (1 + bb_touch):
             direction = Direction.LONG
-        elif close >= bb_upper * 0.998:
+        elif close >= bb_upper * (1 - bb_touch):
             direction = Direction.SHORT
         else:
             return None
@@ -258,8 +265,8 @@ class ScalpChannel(BaseChannel):
         # Thresholds adapt to regime: QUIET regime uses wider window (60/40)
         # since RSI ranges are tighter and moves are more significant.
         if rsi_val is not None:
-            rsi_long_max = 60.0 if regime == "QUIET" else 55.0
-            rsi_short_min = 40.0 if regime == "QUIET" else 45.0
+            rsi_long_max = profile.rsi_ob_level if profile else (60.0 if regime == "QUIET" else 55.0)
+            rsi_short_min = profile.rsi_os_level if profile else (40.0 if regime == "QUIET" else 45.0)
             if direction == Direction.LONG and rsi_val > rsi_long_max:
                 return None  # Not oversold enough for mean-reversion LONG
             if direction == Direction.SHORT and rsi_val < rsi_short_min:
@@ -411,14 +418,17 @@ class ScalpChannel(BaseChannel):
         hour = now.hour
         return (7 <= hour < 10) or (12 <= hour < 16)
 
-    def _apply_kill_zone_note(self, sig: Signal, now: Optional[datetime] = None) -> None:
+    def _apply_kill_zone_note(self, sig: Signal, profile=None, now: Optional[datetime] = None) -> Optional[Signal]:
         """Annotate the signal with a reduced-conviction note when outside kill zones.
 
-        Does not hard-reject; the signal is still emitted but the execution_note
-        field is set so that downstream consumers can apply their own rules.
+        For ALTCOIN tier (kill_zone_hard_gate=True), hard-rejects signals outside
+        kill zones.  For other tiers, sets execution_note but still emits the signal.
         """
         if not self._is_kill_zone_active(now):
+            if profile is not None and profile.kill_zone_hard_gate:
+                return None  # Hard reject — ALTCOIN tier outside kill zone
             if sig.execution_note:
                 sig.execution_note += "; Outside kill zone — reduced conviction"
             else:
                 sig.execution_note = "Outside kill zone — reduced conviction"
+        return sig

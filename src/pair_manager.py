@@ -26,7 +26,10 @@ from config import (
     GEM_MIN_VOLUME_USD,
     GEM_PAIRS_COUNT,
     PAIR_FETCH_INTERVAL_HOURS,
+    PAIR_PROFILES,
     PAIR_PRUNE_ENABLED,
+    PAIR_TIER_MAP,
+    PairProfile,
     TIER1_PAIR_COUNT,
     TIER2_PAIR_COUNT,
     TIER3_VOLUME_SURGE_MULTIPLIER,
@@ -47,6 +50,25 @@ _STABLECOIN_BLACKLIST: frozenset = frozenset({
     "RLUSDUSDT", "PYUSDUSDT", "USDDUSDT", "GUSDUSDT",
     "FRAXUSDT", "LUSDUSDT", "SUSDUSDT", "CUSDUSDT",
 })
+
+
+def classify_pair_tier(symbol: str, volume_24h_usd: float = 0.0) -> PairProfile:
+    """Return the PairProfile for a given symbol.
+
+    Falls back to volume-based heuristic for unlisted pairs:
+    - volume >= $500M/day → MAJOR
+    - volume >= $50M/day  → MIDCAP
+    - otherwise           → ALTCOIN
+    """
+    tier = PAIR_TIER_MAP.get(symbol.upper())
+    if tier is None:
+        if volume_24h_usd >= 500_000_000:
+            tier = "MAJOR"
+        elif volume_24h_usd >= 50_000_000:
+            tier = "MIDCAP"
+        else:
+            tier = "ALTCOIN"
+    return PAIR_PROFILES[tier]
 
 
 class PairTier(str, Enum):

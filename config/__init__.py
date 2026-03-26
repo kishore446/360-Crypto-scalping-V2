@@ -218,6 +218,86 @@ class ChannelConfig:
     dca_min_momentum: float = 0.2              # Minimum |momentum| for DCA validation
 
 
+# ---------------------------------------------------------------------------
+# Per-Pair Config Profiles
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class PairProfile:
+    """Per-pair threshold profile applied on top of global channel config."""
+    tier: str                         # "MAJOR", "MIDCAP", "ALTCOIN"
+    # Multipliers applied to global config values (1.0 = no change)
+    atr_mult: float = 1.0             # Multiplier for ATR-based SL distance
+    momentum_threshold_mult: float = 1.0   # Multiplier for momentum threshold
+    spread_max_mult: float = 1.0      # Multiplier for max spread tolerance
+    volume_min_mult: float = 1.0      # Multiplier for minimum volume
+    rsi_ob_level: float = 70.0        # RSI overbought level
+    rsi_os_level: float = 30.0        # RSI oversold level
+    adx_min_mult: float = 1.0         # Multiplier for minimum ADX
+    bb_touch_pct: float = 0.002       # BB-touch proximity (0.2% default)
+    momentum_persist_candles: int = 2  # Required consecutive momentum candles
+    kill_zone_hard_gate: bool = False  # Hard-reject signals outside kill zones
+
+
+# Tier profiles
+PAIR_PROFILES: Dict[str, PairProfile] = {
+    "MAJOR": PairProfile(
+        tier="MAJOR",
+        atr_mult=1.0,
+        momentum_threshold_mult=0.8,   # BTC/ETH: lower threshold (tighter moves)
+        spread_max_mult=0.5,           # Tighter spread requirement
+        volume_min_mult=5.0,           # Higher absolute volume floor
+        rsi_ob_level=75.0,
+        rsi_os_level=25.0,
+        adx_min_mult=0.9,
+        bb_touch_pct=0.003,            # Slightly wider tolerance for majors
+        momentum_persist_candles=2,
+        kill_zone_hard_gate=False,
+    ),
+    "MIDCAP": PairProfile(
+        tier="MIDCAP",
+        atr_mult=1.1,
+        momentum_threshold_mult=1.0,
+        spread_max_mult=1.0,
+        volume_min_mult=1.0,
+        rsi_ob_level=70.0,
+        rsi_os_level=30.0,
+        adx_min_mult=1.0,
+        bb_touch_pct=0.002,
+        momentum_persist_candles=2,
+        kill_zone_hard_gate=False,
+    ),
+    "ALTCOIN": PairProfile(
+        tier="ALTCOIN",
+        atr_mult=1.3,
+        momentum_threshold_mult=2.0,   # High-vol pairs need larger momentum moves
+        spread_max_mult=2.0,           # Wider spreads acceptable
+        volume_min_mult=0.3,           # Lower volume floor (smaller markets)
+        rsi_ob_level=65.0,
+        rsi_os_level=35.0,
+        adx_min_mult=1.1,
+        bb_touch_pct=0.001,            # Tighter touch requirement
+        momentum_persist_candles=3,    # Extra confirmation candles
+        kill_zone_hard_gate=True,      # Hard-gate: only trade in kill zones
+    ),
+}
+
+# Static symbol → tier mapping (auto-classified for unlisted pairs)
+PAIR_TIER_MAP: Dict[str, str] = {
+    "BTCUSDT": "MAJOR",
+    "ETHUSDT": "MAJOR",
+    "BNBUSDT": "MIDCAP",
+    "SOLUSDT": "MIDCAP",
+    "LINKUSDT": "MIDCAP",
+    "MATICUSDT": "MIDCAP",
+    "AVAXUSDT": "MIDCAP",
+    "DOTUSDT": "MIDCAP",
+    "DOGEUSDT": "ALTCOIN",
+    "SHIBUSDT": "ALTCOIN",
+    "PEPEUSDT": "ALTCOIN",
+}
+
+
 CHANNEL_SCALP = ChannelConfig(
     name="360_SCALP",
     emoji="⚡",

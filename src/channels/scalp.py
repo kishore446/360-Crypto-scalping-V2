@@ -17,8 +17,6 @@ from config import CHANNEL_SCALP
 from src.channels.base import BaseChannel, Signal, build_channel_signal
 from src.filters import (
     check_adx,
-    check_ema_alignment,
-    check_rsi,
     check_rsi_regime,
     check_ema_alignment_regime,
 )

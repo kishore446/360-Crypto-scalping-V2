@@ -52,6 +52,7 @@ class ScalpCVDChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         m5 = candles.get("5m")
         if m5 is None or len(m5.get("close", [])) < 21:
@@ -166,4 +167,5 @@ class ScalpCVDChannel(BaseChannel):
             id_prefix="SCVD",
             atr_val=atr_for_sl,
             setup_class="CVD_DIVERGENCE",
+            regime=regime,
         )

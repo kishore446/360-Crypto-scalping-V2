@@ -40,6 +40,7 @@ class SwingChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         h4 = candles.get("4h")
         h1 = candles.get("1h")
@@ -159,6 +160,7 @@ class SwingChannel(BaseChannel):
             sl_dist=sl_dist,
             id_prefix="SWING",
             atr_val=atr_val,
+            regime=regime,
         )
         if sig is None:
             return None

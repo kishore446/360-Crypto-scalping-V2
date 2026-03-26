@@ -34,7 +34,9 @@ class SpotChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
+        self._current_regime = regime
         h4 = candles.get("4h")
         if h4 is None or len(h4.get("close", [])) < 50:
             return None

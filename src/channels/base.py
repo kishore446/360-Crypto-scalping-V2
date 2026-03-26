@@ -178,6 +178,7 @@ class BaseChannel:
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",  # MarketRegime value string, e.g. "TRENDING_UP"
     ) -> Optional[Signal]:
         """Evaluate whether to emit a signal. Override in subclasses."""
         raise NotImplementedError

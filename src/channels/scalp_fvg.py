@@ -45,11 +45,12 @@ class ScalpFVGChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         # Try 5m first, fall back to 15m
         for tf in ("5m", "15m"):
             sig = self._evaluate_tf(
-                symbol, tf, candles, indicators, smc_data, spread_pct, volume_24h_usd
+                symbol, tf, candles, indicators, smc_data, spread_pct, volume_24h_usd, regime
             )
             if sig is not None:
                 return sig
@@ -64,6 +65,7 @@ class ScalpFVGChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
         cd = candles.get(tf)
         if cd is None or len(cd.get("close", [])) < 20:
@@ -192,6 +194,7 @@ class ScalpFVGChannel(BaseChannel):
             id_prefix="SFVG",
             atr_val=atr_val,
             setup_class="FVG_RETEST",
+            regime=regime,
         )
 
         if sig is not None:

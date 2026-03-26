@@ -84,6 +84,7 @@ class ScalpOBIChannel(BaseChannel):
         smc_data: dict,
         spread_pct: float,
         volume_24h_usd: float,
+        regime: str = "",
     ) -> Optional[Signal]:
 
         if not self._pass_basic_filters(spread_pct, volume_24h_usd):
@@ -220,6 +221,7 @@ class ScalpOBIChannel(BaseChannel):
             id_prefix="SOBI",
             atr_val=atr_for_sl,
             setup_class="OBI_ABSORPTION",
+            regime=regime,
         )
         if sig is not None:
             sig.analyst_reason = f"OBI={obi:.3f} (threshold ±{_OBI_LONG_THRESHOLD})"

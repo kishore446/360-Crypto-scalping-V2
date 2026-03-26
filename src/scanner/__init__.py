@@ -21,6 +21,10 @@ from config import (
     CHANNEL_GEM,
     MAX_CORRELATED_SCALP_SIGNALS,
     MTF_HARD_BLOCK,
+    SCAN_LATENCY_ALERT_CONSECUTIVE,
+    SCAN_LATENCY_ALERT_MS,
+    SCAN_LATENCY_REDUCE_MS,
+    SCAN_LATENCY_WARN_MS,
     SCAN_MIN_VOLUME_USD,
     SEED_TIMEFRAMES,
     SIGNAL_SCAN_COOLDOWN_SECONDS,
@@ -29,6 +33,7 @@ from config import (
     SMC_SCALP_TOLERANCE_PCT,
     TIER2_SCAN_EVERY_N_CYCLES,
     TIER3_SCAN_INTERVAL_MINUTES,
+    WS_DEGRADED_CYCLES_ALERT,
 )
 from src.binance import BinanceClient
 from src.channels.base import Signal as _Signal
@@ -385,6 +390,14 @@ class Scanner:
         self._scan_cycle_count: int = 0
         self._last_tier3_scan_time: float = 0.0
 
+        # WS health-aware scan gating: counts consecutive cycles where both
+        # WS managers are unhealthy, used to trigger an admin alert.
+        self._consecutive_ws_degraded_cycles: int = 0
+
+        # Scan-latency circuit breaker: counts consecutive cycles where
+        # elapsed_ms exceeded SCAN_LATENCY_ALERT_MS.
+        self._consecutive_high_latency_cycles: int = 0
+
         # Data fetcher — delegates kline and order-book retrieval
         self._data_fetcher = DataFetcher(
             data_store=data_store,
@@ -415,6 +428,43 @@ class Scanner:
                 await asyncio.sleep(5)
                 continue
 
+            # WS health-aware scan gating: when both WS managers are unhealthy
+            # (or not set) there is no live kline data, so a full scan over
+            # 796 pairs burns API weight on stale candles and produces no
+            # signals.  Skip the full scan and track degraded-cycle count.
+            ws_spot_ok = self.ws_spot.is_healthy if self.ws_spot else True
+            ws_futures_ok = self.ws_futures.is_healthy if self.ws_futures else True
+            ws_both_unhealthy = not ws_spot_ok and not ws_futures_ok
+            if ws_both_unhealthy:
+                self._consecutive_ws_degraded_cycles += 1
+                log.warning(
+                    "WS health degraded (spot={}, futures={}) — skipping full scan "
+                    "(degraded cycle #{})",
+                    ws_spot_ok, ws_futures_ok, self._consecutive_ws_degraded_cycles,
+                )
+                if self._consecutive_ws_degraded_cycles == WS_DEGRADED_CYCLES_ALERT:
+                    try:
+                        _alert_fn = getattr(self.telemetry, "_admin_alert", None)
+                        if _alert_fn is not None:
+                            await _alert_fn(
+                                f"⚠️ WebSocket unhealthy for "
+                                f"{self._consecutive_ws_degraded_cycles} consecutive scan cycles. "
+                                "Scan is paused until WS recovers. Consider /restart."
+                            )
+                    except Exception:
+                        pass
+                elapsed_ms = (time.monotonic() - t0) * 1000
+                self.telemetry.set_scan_latency(elapsed_ms)
+                await asyncio.sleep(5)
+                continue
+            else:
+                if self._consecutive_ws_degraded_cycles > 0:
+                    log.info(
+                        "WS health restored after {} degraded cycles",
+                        self._consecutive_ws_degraded_cycles,
+                    )
+                self._consecutive_ws_degraded_cycles = 0
+
             try:
                 # Prioritise high-volume pairs for order book fetches
                 sorted_pairs = sorted(
@@ -428,10 +478,21 @@ class Scanner:
                 #   Tier 2 → every TIER2_SCAN_EVERY_N_CYCLES cycles (SWING+SPOT only)
                 #   Tier 3 → lightweight volume scan on a time-based interval
                 scan_tier2 = (self._scan_cycle_count % TIER2_SCAN_EVERY_N_CYCLES == 0)
+                # If scan latency has been extremely high, temporarily skip
+                # Tier 2 pairs to reduce cycle time.
+                skip_tier2_for_latency = (
+                    self._consecutive_high_latency_cycles > 0
+                    and self.telemetry._scan_latency_ms > SCAN_LATENCY_REDUCE_MS
+                )
+                if skip_tier2_for_latency:
+                    log.warning(
+                        "Scan latency circuit breaker: skipping Tier 2 pairs "
+                        "(last latency={:.0f}ms)", self.telemetry._scan_latency_ms
+                    )
                 pairs_this_cycle = [
                     (sym, info) for sym, info in sorted_pairs
                     if info.tier == PairTier.TIER1
-                    or (info.tier == PairTier.TIER2 and scan_tier2)
+                    or (info.tier == PairTier.TIER2 and scan_tier2 and not skip_tier2_for_latency)
                 ]
 
                 # Apply cheap in-memory pre-filters to reduce the number of
@@ -478,6 +539,26 @@ class Scanner:
 
             elapsed_ms = (time.monotonic() - t0) * 1000
             self.telemetry.set_scan_latency(elapsed_ms)
+
+            # Scan-latency circuit breaker checks
+            if elapsed_ms > SCAN_LATENCY_WARN_MS:
+                log.warning("Scan latency high: {:.0f}ms (threshold {:.0f}ms)", elapsed_ms, SCAN_LATENCY_WARN_MS)
+            if elapsed_ms > SCAN_LATENCY_ALERT_MS:
+                self._consecutive_high_latency_cycles += 1
+                if self._consecutive_high_latency_cycles >= SCAN_LATENCY_ALERT_CONSECUTIVE:
+                    try:
+                        _alert_fn = getattr(self.telemetry, "_admin_alert", None)
+                        if _alert_fn is not None:
+                            await _alert_fn(
+                                f"⚠️ Scan latency critical: {elapsed_ms:.0f}ms for "
+                                f"{self._consecutive_high_latency_cycles} consecutive cycles. "
+                                "WS or depth API may be degraded."
+                            )
+                    except Exception:
+                        pass
+            else:
+                self._consecutive_high_latency_cycles = 0
+
             self.telemetry.set_pairs_monitored(len(self.pair_mgr.pairs))
             self.telemetry.set_active_signals(len(self.router.active_signals))
             try:

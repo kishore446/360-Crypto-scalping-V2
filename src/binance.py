@@ -13,7 +13,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
 
-from config import BINANCE_FUTURES_REST_BASE, BINANCE_REST_BASE
+from config import (
+    BINANCE_FUTURES_REST_BASE,
+    BINANCE_REST_BASE,
+    DEPTH_CIRCUIT_BREAKER_COOLDOWN,
+    DEPTH_CIRCUIT_BREAKER_THRESHOLD,
+    DEPTH_MAX_RETRIES,
+)
 from src.rate_limiter import futures_rate_limiter, spot_rate_limiter
 from src.utils import get_logger
 
@@ -28,6 +34,15 @@ _DEFAULT_FUTURES_WEIGHT_LIMIT: int = 2_400
 # Retry parameters
 _MAX_RETRIES: int = 5
 _BACKOFF_BASE: float = 1.5  # exponential-backoff base (seconds)
+
+# Default request timeout (seconds).  Depth snapshots use a shorter timeout
+# (see _DEPTH_TIMEOUT_S) since they are small payloads and frequent timeouts
+# inflate scan latency severely.
+_DEFAULT_TIMEOUT_S: float = 8.0
+_DEPTH_TIMEOUT_S: float = 5.0
+
+# Depth endpoint paths — used by the per-endpoint circuit breaker.
+_DEPTH_PATHS: frozenset = frozenset({"/fapi/v1/depth", "/api/v3/depth"})
 
 
 class BinanceClient:
@@ -61,6 +76,11 @@ class BinanceClient:
         self._rate_limiter = (
             futures_rate_limiter if market == "futures" else spot_rate_limiter
         )
+        # Per-endpoint depth circuit breaker: tracks consecutive timeouts so
+        # that a sustained Binance depth API outage doesn't block scan cycles
+        # for 75 s per symbol (5 retries × 15 s timeout each).
+        self._depth_consecutive_timeouts: int = 0
+        self._depth_circuit_open_until: float = 0.0
 
     # ------------------------------------------------------------------
     # Weight tracking
@@ -104,12 +124,39 @@ class BinanceClient:
         path: str,
         params: Optional[Dict[str, Any]] = None,
         weight: int = 1,
+        timeout: Optional[float] = None,
     ) -> Any:
         """Execute a GET request with retry logic.
 
         Handles 429 (rate limit) and 418 (IP ban) by waiting and retrying
         with exponential back-off up to ``_MAX_RETRIES`` attempts.
+
+        Parameters
+        ----------
+        timeout:
+            Per-request timeout in seconds.  When ``None``, depth paths use
+            ``_DEPTH_TIMEOUT_S`` (5 s) and all other paths use
+            ``_DEFAULT_TIMEOUT_S`` (8 s).
         """
+        is_depth = path in _DEPTH_PATHS
+
+        # Depth circuit breaker: skip the request entirely if the circuit is
+        # open, preventing cumulative timeout delays of 75 s per symbol.
+        if is_depth:
+            now = time.monotonic()
+            if now < self._depth_circuit_open_until:
+                remaining = self._depth_circuit_open_until - now
+                log.debug(
+                    "Depth endpoint circuit breaker open — skipping {} for {:.0f}s",
+                    path, remaining,
+                )
+                return None
+
+        if timeout is None:
+            timeout = _DEPTH_TIMEOUT_S if is_depth else _DEFAULT_TIMEOUT_S
+
+        max_retries = DEPTH_MAX_RETRIES if is_depth else _MAX_RETRIES
+
         session = await self._ensure_session()
         url = self._base_url + path
 
@@ -120,10 +167,10 @@ class BinanceClient:
         await self._rate_limiter.acquire(weight)
         self._consume_weight(weight)
 
-        for attempt in range(_MAX_RETRIES):
+        for attempt in range(max_retries):
             try:
                 async with session.get(
-                    url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                    url, params=params, timeout=aiohttp.ClientTimeout(total=timeout)
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -143,13 +190,16 @@ class BinanceClient:
                                 pass
                         if BinanceClient.on_api_call is not None:
                             BinanceClient.on_api_call()
+                        # Reset depth circuit breaker on first successful call.
+                        if is_depth and self._depth_consecutive_timeouts > 0:
+                            self._depth_consecutive_timeouts = 0
                         return data
                     if resp.status in (429, 418):
                         retry_after = int(resp.headers.get("Retry-After", 5))
                         wait = max(retry_after, _BACKOFF_BASE ** attempt)
                         log.warning(
                             "Binance %s – rate limited (%s). Waiting %.1fs (attempt %d/%d)",
-                            path, resp.status, wait, attempt + 1, _MAX_RETRIES,
+                            path, resp.status, wait, attempt + 1, max_retries,
                         )
                         await asyncio.sleep(wait)
                         continue
@@ -158,12 +208,25 @@ class BinanceClient:
             except asyncio.TimeoutError:
                 wait = _BACKOFF_BASE ** attempt
                 log.warning("Binance %s timeout – retrying in %.1fs", path, wait)
+                if is_depth:
+                    self._depth_consecutive_timeouts += 1
+                    if self._depth_consecutive_timeouts >= DEPTH_CIRCUIT_BREAKER_THRESHOLD:
+                        self._depth_circuit_open_until = (
+                            time.monotonic() + DEPTH_CIRCUIT_BREAKER_COOLDOWN
+                        )
+                        log.warning(
+                            "Depth endpoint circuit breaker open — skipping {} for {:.0f}s "
+                            "({} consecutive timeouts)",
+                            path, DEPTH_CIRCUIT_BREAKER_COOLDOWN,
+                            self._depth_consecutive_timeouts,
+                        )
+                        return None
                 await asyncio.sleep(wait)
             except Exception as exc:
                 log.error("Binance %s error: %s", path, exc)
                 return None
 
-        log.error("Binance %s – max retries (%d) exceeded", path, _MAX_RETRIES)
+        log.error("Binance %s – max retries (%d) exceeded", path, max_retries)
         return None
 
     # ------------------------------------------------------------------
@@ -227,7 +290,10 @@ class BinanceClient:
         else:
             path = "/api/v3/depth"
         return await self._get(
-            path, params={"symbol": symbol, "limit": limit}, weight=1
+            path,
+            params={"symbol": symbol, "limit": limit},
+            weight=1,
+            timeout=_DEPTH_TIMEOUT_S,
         )
 
     async def fetch_exchange_info(self) -> Optional[Dict[str, Any]]:

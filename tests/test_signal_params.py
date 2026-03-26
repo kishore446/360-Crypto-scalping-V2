@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from src.channels.signal_params import SignalParams, _DEFAULT, lookup_signal_params
+from src.channels.signal_params import _DEFAULT, lookup_signal_params
 from src.channels.base import build_channel_signal
 from src.smc import Direction
 from config import CHANNEL_SCALP

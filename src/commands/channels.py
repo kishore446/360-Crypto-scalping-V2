@@ -218,3 +218,17 @@ async def handle_digest(args: List[str], ctx: CommandContext) -> None:
         await ctx.reply(message)
     except Exception as exc:
         await ctx.reply(f"❌ Digest generation failed: {exc}")
+
+
+@registry.command(
+    "/statstats",
+    admin=True,
+    group="channels",
+    help_text="Win-rate stats per (channel, pair, regime): /statstats",
+)
+async def handle_statstats(args: List[str], ctx: CommandContext) -> None:
+    """Show rolling win-rate statistics for all tracked signal combinations."""
+    if ctx.stat_filter is None:
+        await ctx.reply("ℹ️ Statistical filter is not enabled.")
+        return
+    await ctx.reply(ctx.stat_filter.format_statstats())

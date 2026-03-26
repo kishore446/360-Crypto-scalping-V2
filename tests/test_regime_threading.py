@@ -97,8 +97,8 @@ class TestSwingChannelRegimeParam:
         smc_data = {"sweeps": [], "mss": None}
         # Should not raise TypeError
         try:
-            sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000,
-                              regime="TRENDING_UP")
+            ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000,
+                        regime="TRENDING_UP")
         except TypeError:
             pytest.fail("SwingChannel.evaluate() does not accept regime parameter")
         except Exception:
@@ -132,8 +132,8 @@ class TestSpotChannelRegimeParam:
         indicators = {"4h": _make_indicators(adx_val=30, ema200=95)}
         smc_data = {}
         try:
-            sig = ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000,
-                              regime="RANGING")
+            ch.evaluate("BTCUSDT", candles, indicators, smc_data, 0.01, 10_000_000,
+                        regime="RANGING")
         except TypeError:
             pytest.fail("SpotChannel.evaluate() does not accept regime parameter")
         except Exception:

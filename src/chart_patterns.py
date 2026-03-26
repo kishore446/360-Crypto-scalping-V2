@@ -7,6 +7,14 @@ Detects the following patterns from raw OHLCV numpy arrays:
 * **Bollinger Band Squeeze Breakout** — contraction then expansion of BB width
 * **Ascending / Descending Triangle** — converging high/low trendlines
 
+Candlestick reversal/continuation patterns (PR_05):
+
+* **Bullish / Bearish Engulfing** — 2-bar reversal (LONG / SHORT, +8 pts)
+* **Hammer / Shooting Star** — pin bar reversal (LONG / SHORT, +6 pts)
+* **Doji** — indecision candle (NEUTRAL, −5 pts)
+* **Morning Star / Evening Star** — 3-bar reversal (LONG / SHORT, +10 pts)
+* **Three White Soldiers / Three Black Crows** — continuation (LONG / SHORT, +7 pts)
+
 All functions return ``None`` when the pattern is not detected, or a ``dict``
 describing the pattern when it is.  No I/O, pure-compute.
 
@@ -16,6 +24,7 @@ action matches the idealised pattern.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -400,6 +409,270 @@ def detect_patterns(candles: Dict) -> List[Dict]:
                 log.debug("Pattern detector error: {}", exc)
     except Exception as exc:
         log.debug("detect_patterns failed: {}", exc)
+    return results
+
+
+# ---------------------------------------------------------------------------
+# PR_05 — Candlestick Pattern Engine
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PatternResult:
+    """Result of a single candlestick pattern detection.
+
+    Attributes
+    ----------
+    name:
+        Pattern identifier, e.g. ``"BULLISH_ENGULFING"``, ``"HAMMER"``.
+    direction:
+        ``"LONG"``, ``"SHORT"``, or ``"NEUTRAL"``.
+    confidence_bonus:
+        Points added (positive) or subtracted (negative) from the signal score.
+    """
+
+    name: str
+    direction: str
+    confidence_bonus: float
+
+
+# -- Private helpers --------------------------------------------------------
+
+def _cp_body(open_: float, close: float) -> float:
+    return abs(close - open_)
+
+
+def _cp_range(high: float, low: float) -> float:
+    return high - low if high > low else 1e-9
+
+
+def _cp_upper_wick(open_: float, high: float, close: float) -> float:
+    return high - max(open_, close)
+
+
+def _cp_lower_wick(open_: float, low: float, close: float) -> float:
+    return min(open_, close) - low
+
+
+# -- Candlestick detectors --------------------------------------------------
+
+def detect_engulfing(
+    opens: NDArray,
+    highs: NDArray,
+    lows: NDArray,
+    closes: NDArray,
+) -> List[PatternResult]:
+    """Detect bullish/bearish engulfing on the last two candles.
+
+    Parameters
+    ----------
+    opens, highs, lows, closes:
+        OHLC arrays (numpy or list).  Must contain at least 2 elements.
+
+    Returns
+    -------
+    list of PatternResult
+        Zero, one, or two results (bullish and/or bearish may both fire on
+        pathological data, though in practice at most one fires).
+    """
+    o = np.asarray(opens, dtype=np.float64).ravel()
+    c = np.asarray(closes, dtype=np.float64).ravel()
+    if len(c) < 2:
+        return []
+    o1, c1 = float(o[-2]), float(c[-2])
+    o2, c2 = float(o[-1]), float(c[-1])
+    results: List[PatternResult] = []
+    # Bullish engulfing: prior candle bearish, current candle bullish and body fully engulfs
+    if c1 < o1 and c2 > o2 and c2 > o1 and o2 < c1:
+        results.append(PatternResult("BULLISH_ENGULFING", "LONG", 8.0))
+    # Bearish engulfing: prior candle bullish, current candle bearish and body fully engulfs
+    if c1 > o1 and c2 < o2 and c2 < o1 and o2 > c1:
+        results.append(PatternResult("BEARISH_ENGULFING", "SHORT", 8.0))
+    return results
+
+
+def detect_pin_bar(
+    opens: NDArray,
+    highs: NDArray,
+    lows: NDArray,
+    closes: NDArray,
+) -> List[PatternResult]:
+    """Detect hammer (bullish pin bar) and shooting star (bearish pin bar).
+
+    Parameters
+    ----------
+    opens, highs, lows, closes:
+        OHLC arrays.  Only the last candle is inspected.
+
+    Returns
+    -------
+    list of PatternResult
+    """
+    o_arr = np.asarray(opens, dtype=np.float64).ravel()
+    h_arr = np.asarray(highs, dtype=np.float64).ravel()
+    lo_arr = np.asarray(lows, dtype=np.float64).ravel()
+    c_arr = np.asarray(closes, dtype=np.float64).ravel()
+    if len(c_arr) < 1:
+        return []
+    o, h, lo, c = float(o_arr[-1]), float(h_arr[-1]), float(lo_arr[-1]), float(c_arr[-1])
+    body = _cp_body(o, c)
+    candle_range = _cp_range(h, lo)
+    lower_wick = _cp_lower_wick(o, lo, c)
+    upper_wick = _cp_upper_wick(o, h, c)
+    results: List[PatternResult] = []
+    if candle_range > 0:
+        # Hammer: long lower wick (≥2× body), short upper wick (<body)
+        if lower_wick >= body * 2.0 and upper_wick < body:
+            results.append(PatternResult("HAMMER", "LONG", 6.0))
+        # Shooting star: long upper wick (≥2× body), short lower wick (<body)
+        if upper_wick >= body * 2.0 and lower_wick < body:
+            results.append(PatternResult("SHOOTING_STAR", "SHORT", 6.0))
+    return results
+
+
+def detect_doji(
+    opens: NDArray,
+    highs: NDArray,
+    lows: NDArray,
+    closes: NDArray,
+    body_threshold_pct: float = 0.1,
+) -> List[PatternResult]:
+    """Detect a doji candle (body < *body_threshold_pct* of total range).
+
+    A doji signals indecision and applies a confidence *penalty* (negative bonus).
+
+    Parameters
+    ----------
+    opens, highs, lows, closes:
+        OHLC arrays.  Only the last candle is inspected.
+    body_threshold_pct:
+        Maximum body-to-range ratio that qualifies as a doji (default 0.10).
+
+    Returns
+    -------
+    list of PatternResult
+        Empty list when no doji; single ``PatternResult("DOJI", "NEUTRAL", -5.0)``
+        when detected.
+    """
+    o_arr = np.asarray(opens, dtype=np.float64).ravel()
+    h_arr = np.asarray(highs, dtype=np.float64).ravel()
+    lo_arr = np.asarray(lows, dtype=np.float64).ravel()
+    c_arr = np.asarray(closes, dtype=np.float64).ravel()
+    if len(c_arr) < 1:
+        return []
+    o, h, lo, c = float(o_arr[-1]), float(h_arr[-1]), float(lo_arr[-1]), float(c_arr[-1])
+    body = _cp_body(o, c)
+    candle_range = _cp_range(h, lo)
+    if candle_range > 0 and body / candle_range < body_threshold_pct:
+        return [PatternResult("DOJI", "NEUTRAL", -5.0)]
+    return []
+
+
+def detect_morning_evening_star(
+    opens: NDArray,
+    highs: NDArray,
+    lows: NDArray,
+    closes: NDArray,
+) -> List[PatternResult]:
+    """Detect 3-bar morning star (LONG) and evening star (SHORT).
+
+    Parameters
+    ----------
+    opens, highs, lows, closes:
+        OHLC arrays.  Must contain at least 3 elements.
+
+    Returns
+    -------
+    list of PatternResult
+    """
+    o_arr = np.asarray(opens, dtype=np.float64).ravel()
+    h_arr = np.asarray(highs, dtype=np.float64).ravel()
+    lo_arr = np.asarray(lows, dtype=np.float64).ravel()
+    c_arr = np.asarray(closes, dtype=np.float64).ravel()
+    if len(c_arr) < 3:
+        return []
+    o1, c1 = float(o_arr[-3]), float(c_arr[-3])
+    o2, c2 = float(o_arr[-2]), float(c_arr[-2])
+    o3, c3 = float(o_arr[-1]), float(c_arr[-1])
+    results: List[PatternResult] = []
+    body1 = _cp_body(o1, c1)
+    body2 = _cp_body(o2, c2)
+    # Morning star: large bearish → small indecision → large bullish, closes above midpoint
+    if (c1 < o1 and body2 < body1 * 0.5 and c3 > o3 and c3 > (o1 + c1) / 2):
+        results.append(PatternResult("MORNING_STAR", "LONG", 10.0))
+    # Evening star: large bullish → small indecision → large bearish, closes below midpoint
+    if (c1 > o1 and body2 < body1 * 0.5 and c3 < o3 and c3 < (o1 + c1) / 2):
+        results.append(PatternResult("EVENING_STAR", "SHORT", 10.0))
+    return results
+
+
+def detect_three_soldiers_crows(
+    opens: NDArray,
+    closes: NDArray,
+) -> List[PatternResult]:
+    """Detect three white soldiers (LONG) and three black crows (SHORT).
+
+    Parameters
+    ----------
+    opens, closes:
+        Open and close arrays.  Must contain at least 3 elements.
+
+    Returns
+    -------
+    list of PatternResult
+    """
+    o_arr = np.asarray(opens, dtype=np.float64).ravel()
+    c_arr = np.asarray(closes, dtype=np.float64).ravel()
+    if len(c_arr) < 3:
+        return []
+    c1, c2, c3 = float(c_arr[-3]), float(c_arr[-2]), float(c_arr[-1])
+    o1, o2, o3 = float(o_arr[-3]), float(o_arr[-2]), float(o_arr[-1])
+    results: List[PatternResult] = []
+    # Three white soldiers: 3 consecutive bullish candles, each closes higher
+    if c3 > c2 > c1 and o3 > o2 > o1 and c1 > o1 and c2 > o2 and c3 > o3:
+        results.append(PatternResult("THREE_WHITE_SOLDIERS", "LONG", 7.0))
+    # Three black crows: 3 consecutive bearish candles, each closes lower
+    if c3 < c2 < c1 and o3 < o2 < o1 and c1 < o1 and c2 < o2 and c3 < o3:
+        results.append(PatternResult("THREE_BLACK_CROWS", "SHORT", 7.0))
+    return results
+
+
+def detect_all_patterns(
+    opens: NDArray,
+    highs: NDArray,
+    lows: NDArray,
+    closes: NDArray,
+    volume_arr: Optional[NDArray] = None,
+) -> List[PatternResult]:
+    """Run all candlestick pattern detectors and return combined results.
+
+    Parameters
+    ----------
+    opens, highs, lows, closes:
+        OHLC arrays (numpy or list).
+    volume_arr:
+        Optional volume array (currently unused; reserved for future volume-
+        confirmation filters).
+
+    Returns
+    -------
+    list of PatternResult
+        All detected patterns, potentially empty.  Each element has ``name``,
+        ``direction`` (``"LONG"``, ``"SHORT"``, or ``"NEUTRAL"``), and
+        ``confidence_bonus`` attributes.
+    """
+    results: List[PatternResult] = []
+    try:
+        for fn in (detect_engulfing, detect_pin_bar, detect_doji, detect_morning_evening_star):
+            try:
+                results.extend(fn(opens, highs, lows, closes))
+            except Exception as exc:
+                log.debug("Candlestick detector {} error: {}", fn.__name__, exc)
+        try:
+            results.extend(detect_three_soldiers_crows(opens, closes))
+        except Exception as exc:
+            log.debug("Candlestick detector detect_three_soldiers_crows error: {}", exc)
+    except Exception as exc:
+        log.debug("detect_all_patterns failed: {}", exc)
     return results
 
 

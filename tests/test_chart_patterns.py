@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from src.chart_patterns import (
+    PatternResult,
+    detect_all_patterns,
     detect_bollinger_squeeze,
+    detect_doji,
     detect_double_bottom,
     detect_double_top,
+    detect_engulfing,
+    detect_morning_evening_star,
     detect_patterns,
+    detect_pin_bar,
+    detect_three_soldiers_crows,
     detect_triangle,
     pattern_confidence_bonus,
 )
@@ -252,3 +260,364 @@ class TestPatternConfidenceBonus:
         patterns = [{"pattern": "BB_SQUEEZE", "confidence": 0.9, "expansion_direction": "DOWN"}]
         bonus = pattern_confidence_bonus(patterns, "SHORT")
         assert bonus > 0
+
+
+# ---------------------------------------------------------------------------
+# PR_05 — PatternResult dataclass
+# ---------------------------------------------------------------------------
+
+class TestPatternResultDataclass:
+    def test_fields_accessible(self):
+        pr = PatternResult("HAMMER", "LONG", 6.0)
+        assert pr.name == "HAMMER"
+        assert pr.direction == "LONG"
+        assert pr.confidence_bonus == 6.0
+
+    def test_negative_confidence_bonus_for_doji(self):
+        pr = PatternResult("DOJI", "NEUTRAL", -5.0)
+        assert pr.confidence_bonus < 0
+
+
+# ---------------------------------------------------------------------------
+# detect_engulfing
+# ---------------------------------------------------------------------------
+
+class TestDetectEngulfing:
+    def _make_bullish_engulfing(self):
+        # Prior candle: bearish (open=105, close=100)
+        # Current candle: bullish (open=99, close=107) — body engulfs prior body
+        opens  = np.array([105.0, 99.0])
+        highs  = np.array([106.0, 108.0])
+        lows   = np.array([99.0,  98.0])
+        closes = np.array([100.0, 107.0])
+        return opens, highs, lows, closes
+
+    def _make_bearish_engulfing(self):
+        # Prior candle: bullish (open=100, close=105)
+        # Current candle: bearish (open=106, close=99) — body engulfs prior body
+        opens  = np.array([100.0, 106.0])
+        highs  = np.array([106.0, 107.0])
+        lows   = np.array([99.0,  98.0])
+        closes = np.array([105.0, 99.0])
+        return opens, highs, lows, closes
+
+    def test_detects_bullish_engulfing(self):
+        o, h, lo, c = self._make_bullish_engulfing()
+        results = detect_engulfing(o, h, lo, c)
+        assert any(r.name == "BULLISH_ENGULFING" for r in results)
+
+    def test_bullish_engulfing_direction_and_bonus(self):
+        o, h, lo, c = self._make_bullish_engulfing()
+        results = detect_engulfing(o, h, lo, c)
+        bull = next(r for r in results if r.name == "BULLISH_ENGULFING")
+        assert bull.direction == "LONG"
+        assert bull.confidence_bonus == 8.0
+
+    def test_detects_bearish_engulfing(self):
+        o, h, lo, c = self._make_bearish_engulfing()
+        results = detect_engulfing(o, h, lo, c)
+        assert any(r.name == "BEARISH_ENGULFING" for r in results)
+
+    def test_bearish_engulfing_direction_and_bonus(self):
+        o, h, lo, c = self._make_bearish_engulfing()
+        results = detect_engulfing(o, h, lo, c)
+        bear = next(r for r in results if r.name == "BEARISH_ENGULFING")
+        assert bear.direction == "SHORT"
+        assert bear.confidence_bonus == 8.0
+
+    def test_no_pattern_when_no_engulfing(self):
+        # Same-size candles — no engulfing
+        opens  = np.array([100.0, 100.0])
+        highs  = np.array([102.0, 102.0])
+        lows   = np.array([98.0,  98.0])
+        closes = np.array([101.0, 101.0])
+        results = detect_engulfing(opens, highs, lows, closes)
+        assert results == []
+
+    def test_returns_empty_on_insufficient_data(self):
+        o = h = lo = c = np.array([100.0])
+        assert detect_engulfing(o, h, lo, c) == []
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        assert detect_engulfing(empty, empty, empty, empty) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_pin_bar
+# ---------------------------------------------------------------------------
+
+class TestDetectPinBar:
+    def test_detects_hammer(self):
+        # body = 0.5, lower_wick = 10.0 (>=2×body), upper_wick = 0.4 (<body)
+        opens  = np.array([100.5])
+        highs  = np.array([100.9])
+        lows   = np.array([90.0])
+        closes = np.array([100.0])
+        results = detect_pin_bar(opens, highs, lows, closes)
+        assert any(r.name == "HAMMER" for r in results)
+
+    def test_hammer_direction_and_bonus(self):
+        opens  = np.array([100.5])
+        highs  = np.array([100.9])
+        lows   = np.array([90.0])
+        closes = np.array([100.0])
+        results = detect_pin_bar(opens, highs, lows, closes)
+        hammer = next(r for r in results if r.name == "HAMMER")
+        assert hammer.direction == "LONG"
+        assert hammer.confidence_bonus == 6.0
+
+    def test_detects_shooting_star(self):
+        # body = 0.5, upper_wick = 9.5 (>=2×body), lower_wick = 0.2 (<body)
+        opens  = np.array([100.0])
+        highs  = np.array([110.0])
+        lows   = np.array([99.8])
+        closes = np.array([100.5])
+        results = detect_pin_bar(opens, highs, lows, closes)
+        assert any(r.name == "SHOOTING_STAR" for r in results)
+
+    def test_shooting_star_direction_and_bonus(self):
+        opens  = np.array([100.0])
+        highs  = np.array([110.0])
+        lows   = np.array([99.8])
+        closes = np.array([100.5])
+        results = detect_pin_bar(opens, highs, lows, closes)
+        star = next(r for r in results if r.name == "SHOOTING_STAR")
+        assert star.direction == "SHORT"
+        assert star.confidence_bonus == 6.0
+
+    def test_no_pin_bar_on_marubozu(self):
+        # Large body, no wicks
+        opens  = np.array([100.0])
+        highs  = np.array([110.0])
+        lows   = np.array([100.0])
+        closes = np.array([110.0])
+        results = detect_pin_bar(opens, highs, lows, closes)
+        assert results == []
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        assert detect_pin_bar(empty, empty, empty, empty) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_doji
+# ---------------------------------------------------------------------------
+
+class TestDetectDoji:
+    def test_detects_doji(self):
+        # Body = 0.05, range = 10 → body/range = 0.005 < 0.10
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_doji(opens, highs, lows, closes)
+        assert len(results) == 1
+        assert results[0].name == "DOJI"
+
+    def test_doji_returns_negative_confidence_bonus(self):
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_doji(opens, highs, lows, closes)
+        assert results[0].confidence_bonus < 0
+
+    def test_doji_direction_is_neutral(self):
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_doji(opens, highs, lows, closes)
+        assert results[0].direction == "NEUTRAL"
+
+    def test_doji_confidence_bonus_is_minus_five(self):
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_doji(opens, highs, lows, closes)
+        assert results[0].confidence_bonus == -5.0
+
+    def test_no_doji_on_large_body_candle(self):
+        # Body = 9, range = 10 → not a doji
+        opens  = np.array([100.0])
+        highs  = np.array([110.0])
+        lows   = np.array([100.0])
+        closes = np.array([109.0])
+        results = detect_doji(opens, highs, lows, closes)
+        assert results == []
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        assert detect_doji(empty, empty, empty, empty) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_morning_evening_star
+# ---------------------------------------------------------------------------
+
+class TestDetectMorningEveningStar:
+    def test_detects_morning_star(self):
+        # candle[-3]: large bearish (open=110, close=100)
+        # candle[-2]: tiny body (open=101, close=100.5) — indecision
+        # candle[-1]: large bullish (open=101, close=107) — closes above midpoint (105)
+        opens  = np.array([110.0, 101.0, 101.0])
+        highs  = np.array([111.0, 102.0, 108.0])
+        lows   = np.array([99.0,  99.0,  100.5])
+        closes = np.array([100.0, 100.5, 107.0])
+        results = detect_morning_evening_star(opens, highs, lows, closes)
+        assert any(r.name == "MORNING_STAR" for r in results)
+
+    def test_morning_star_direction_and_bonus(self):
+        opens  = np.array([110.0, 101.0, 101.0])
+        highs  = np.array([111.0, 102.0, 108.0])
+        lows   = np.array([99.0,  99.0,  100.5])
+        closes = np.array([100.0, 100.5, 107.0])
+        results = detect_morning_evening_star(opens, highs, lows, closes)
+        star = next(r for r in results if r.name == "MORNING_STAR")
+        assert star.direction == "LONG"
+        assert star.confidence_bonus == 10.0
+
+    def test_detects_evening_star(self):
+        # candle[-3]: large bullish (open=100, close=110)
+        # candle[-2]: tiny body — indecision
+        # candle[-1]: large bearish — closes below midpoint (105)
+        opens  = np.array([100.0, 109.0, 109.0])
+        highs  = np.array([111.0, 111.0, 110.0])
+        lows   = np.array([99.0,  108.0, 100.5])
+        closes = np.array([110.0, 109.5, 103.0])
+        results = detect_morning_evening_star(opens, highs, lows, closes)
+        assert any(r.name == "EVENING_STAR" for r in results)
+
+    def test_returns_empty_on_insufficient_data(self):
+        o = h = lo = c = np.array([100.0, 101.0])
+        assert detect_morning_evening_star(o, h, lo, c) == []
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        assert detect_morning_evening_star(empty, empty, empty, empty) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_three_soldiers_crows
+# ---------------------------------------------------------------------------
+
+class TestDetectThreeSoldiersCrows:
+    def test_detects_three_white_soldiers(self):
+        # 3 consecutive bullish candles, each opening higher than previous
+        opens  = np.array([100.0, 103.0, 106.0])
+        closes = np.array([103.0, 106.0, 109.0])
+        results = detect_three_soldiers_crows(opens, closes)
+        assert any(r.name == "THREE_WHITE_SOLDIERS" for r in results)
+
+    def test_three_white_soldiers_direction_and_bonus(self):
+        opens  = np.array([100.0, 103.0, 106.0])
+        closes = np.array([103.0, 106.0, 109.0])
+        results = detect_three_soldiers_crows(opens, closes)
+        soldiers = next(r for r in results if r.name == "THREE_WHITE_SOLDIERS")
+        assert soldiers.direction == "LONG"
+        assert soldiers.confidence_bonus == 7.0
+
+    def test_detects_three_black_crows(self):
+        # 3 consecutive bearish candles, each opening lower
+        opens  = np.array([110.0, 107.0, 104.0])
+        closes = np.array([107.0, 104.0, 101.0])
+        results = detect_three_soldiers_crows(opens, closes)
+        assert any(r.name == "THREE_BLACK_CROWS" for r in results)
+
+    def test_three_black_crows_direction_and_bonus(self):
+        opens  = np.array([110.0, 107.0, 104.0])
+        closes = np.array([107.0, 104.0, 101.0])
+        results = detect_three_soldiers_crows(opens, closes)
+        crows = next(r for r in results if r.name == "THREE_BLACK_CROWS")
+        assert crows.direction == "SHORT"
+        assert crows.confidence_bonus == 7.0
+
+    def test_returns_empty_on_insufficient_data(self):
+        o = c = np.array([100.0, 101.0])
+        assert detect_three_soldiers_crows(o, c) == []
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        assert detect_three_soldiers_crows(empty, empty) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_all_patterns
+# ---------------------------------------------------------------------------
+
+class TestDetectAllPatterns:
+    def test_returns_list(self):
+        opens  = np.linspace(100, 110, 10)
+        highs  = opens + 1.0
+        lows   = opens - 1.0
+        closes = opens + 0.3
+        results = detect_all_patterns(opens, highs, lows, closes)
+        assert isinstance(results, list)
+
+    def test_all_elements_are_pattern_results(self):
+        opens  = np.array([105.0, 99.0])
+        highs  = np.array([106.0, 108.0])
+        lows   = np.array([99.0,  98.0])
+        closes = np.array([100.0, 107.0])
+        results = detect_all_patterns(opens, highs, lows, closes)
+        for r in results:
+            assert isinstance(r, PatternResult)
+            assert r.direction in ("LONG", "SHORT", "NEUTRAL")
+
+    def test_detects_bullish_engulfing_via_all_patterns(self):
+        opens  = np.array([105.0, 99.0])
+        highs  = np.array([106.0, 108.0])
+        lows   = np.array([99.0,  98.0])
+        closes = np.array([100.0, 107.0])
+        results = detect_all_patterns(opens, highs, lows, closes)
+        names = [r.name for r in results]
+        assert "BULLISH_ENGULFING" in names
+
+    def test_detects_doji_via_all_patterns(self):
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_all_patterns(opens, highs, lows, closes)
+        names = [r.name for r in results]
+        assert "DOJI" in names
+
+    def test_doji_has_negative_bonus_in_detect_all(self):
+        opens  = np.array([100.0])
+        highs  = np.array([105.0])
+        lows   = np.array([95.0])
+        closes = np.array([100.05])
+        results = detect_all_patterns(opens, highs, lows, closes)
+        doji_results = [r for r in results if r.name == "DOJI"]
+        assert doji_results and doji_results[0].confidence_bonus < 0
+
+    def test_returns_empty_on_empty_arrays(self):
+        empty = np.array([])
+        results = detect_all_patterns(empty, empty, empty, empty)
+        assert isinstance(results, list)
+
+    def test_insufficient_data_returns_empty_or_subset(self):
+        # With only 1 candle, engulfing and morning star should not fire
+        opens  = np.array([100.0])
+        highs  = np.array([101.0])
+        lows   = np.array([99.0])
+        closes = np.array([100.5])
+        results = detect_all_patterns(opens, highs, lows, closes)
+        names = [r.name for r in results]
+        assert "BULLISH_ENGULFING" not in names
+        assert "MORNING_STAR" not in names
+
+    def test_volume_arr_optional(self):
+        opens  = np.array([105.0, 99.0])
+        highs  = np.array([106.0, 108.0])
+        lows   = np.array([99.0,  98.0])
+        closes = np.array([100.0, 107.0])
+        # Should not raise when volume_arr is None
+        results = detect_all_patterns(opens, highs, lows, closes, volume_arr=None)
+        assert isinstance(results, list)
+        # Should not raise when volume_arr is provided
+        vol = np.array([1000.0, 1200.0])
+        results2 = detect_all_patterns(opens, highs, lows, closes, volume_arr=vol)
+        assert isinstance(results2, list)
